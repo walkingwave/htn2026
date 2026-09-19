@@ -519,12 +519,13 @@ function detectAndRender() {
   const height = video.videoHeight;
   frameContext.drawImage(video, 0, 0, width, height);
   const imageData = frameContext.getImageData(0, 0, width, height);
-  const colourPaddleCandidate = findPaddleByColour(imageData, activePaddleFace);
   const markers = refineMarkerCorners(detector.detect(imageData), detector.grey);
-  const detectedPaddleAssist = colourPaddleCandidate?.colour === 'black'
-    ? validateBlackPaddleCandidate(colourPaddleCandidate, imageData, detector.candidates)
-    : colourPaddleCandidate;
   const decodedPaddleMarkers = markers.filter((marker) => FRONT_IDS.has(marker.id) || BACK_IDS.has(marker.id));
+  const faceMarkers = decodedPaddleMarkers.filter((marker) => activePaddleFace === 'black' ? BACK_IDS.has(marker.id) : FRONT_IDS.has(marker.id));
+  const colourPaddleCandidate = findPaddleByColour(imageData, activePaddleFace, faceMarkers);
+  const detectedPaddleAssist = colourPaddleCandidate?.colour === 'black'
+    ? validateBlackPaddleCandidate(colourPaddleCandidate, imageData, detector.candidates, faceMarkers)
+    : colourPaddleCandidate;
   collectCameraCalibrationSample(decodedPaddleMarkers, width, height);
   const paddleMarkers = recoverMarkersWithOpticalFlow(decodedPaddleMarkers, detector.grey);
   rememberTrackingFrame(detector.grey, paddleMarkers);
@@ -539,7 +540,7 @@ function detectAndRender() {
     // a black candidate has already been required to contain the target's
     // white square surrounds and at least one ArUco-like square candidate.
     const recentlyConfirmed = performance.now() - lastPoseAt < 750;
-    const fallbackAssist = recentlyConfirmed ? detectedPaddleAssist : null;
+    const fallbackAssist = recentlyConfirmed && detectedPaddleAssist ? detectedPaddleAssist : null;
     if (fallbackAssist) {
       updateTrackingMode('colour');
       lastPaddleBounds = { ...fallbackAssist };
@@ -811,7 +812,7 @@ function drawPaddleAssist(bounds) {
 
 // A deliberately lightweight colour segmentation pass. The latest decoded ID
 // selects red (IDs 1–4) or black (IDs 5–8); marker IDs still provide 3D pose.
-function findPaddleByColour(imageData, colour) {
+function findPaddleByColour(imageData, colour, markerHints = []) {
   const sample = 4;
   const width = Math.floor(imageData.width / sample);
   const height = Math.floor(imageData.height / sample);
@@ -876,6 +877,15 @@ function findPaddleByColour(imageData, colour) {
     const centerX = ((minX + maxX + 1) * sample) / 2;
     const centerY = ((minY + maxY + 1) * sample) / 2;
     let score = count;
+    if (markerHints.length) {
+      const hintCorners = markerHints.flatMap((marker) => marker.corners);
+      const hintX = hintCorners.reduce((sum, corner) => sum + corner.x, 0) / hintCorners.length;
+      const hintY = hintCorners.reduce((sum, corner) => sum + corner.y, 0) / hintCorners.length;
+      const containsHint = hintX >= minX * sample && hintX <= (maxX + 1) * sample
+        && hintY >= minY * sample && hintY <= (maxY + 1) * sample;
+      if (containsHint) score *= 12;
+      else score /= 1 + Math.hypot(centerX - hintX, centerY - hintY) / Math.max(1, imageData.width * 0.1);
+    }
     if (lastPaddleBounds && performance.now() - lastPoseAt < 1200) {
       const distanceSquared = (centerX - lastPaddleBounds.centerX) ** 2 + (centerY - lastPaddleBounds.centerY) ** 2;
       const trackingRadiusSquared = Math.max(lastPaddleBounds.width, lastPaddleBounds.height) ** 2;
@@ -892,6 +902,11 @@ function findPaddleByColour(imageData, colour) {
   const bottom = Math.min(imageData.height, (largest.maxY + 1) * sample + padding);
   const boxWidth = right - left;
   const boxHeight = bottom - top;
+  if (colour === 'black') {
+    const aspect = boxWidth / boxHeight;
+    const frameFraction = (boxWidth * boxHeight) / (imageData.width * imageData.height);
+    if (!markerHints.length && (aspect < 0.3 || aspect > 2.5 || frameFraction > 0.45)) return null;
+  }
   return {
     left,
     top,
@@ -906,7 +921,7 @@ function findPaddleByColour(imageData, colour) {
   };
 }
 
-function validateBlackPaddleCandidate(bounds, imageData, squareCandidates) {
+function validateBlackPaddleCandidate(bounds, imageData, squareCandidates, decodedMarkers = []) {
   const whiteSquareCount = countWhiteSquaresInside(bounds, imageData);
   const arucoCandidateCount = squareCandidates.filter((corners) => {
     const centerX = corners.reduce((sum, corner) => sum + corner.x, 0) / corners.length;
@@ -915,8 +930,15 @@ function validateBlackPaddleCandidate(bounds, imageData, squareCandidates) {
       && centerY >= bounds.top && centerY <= bounds.top + bounds.height;
   }).length;
 
-  if (whiteSquareCount < 2 || arucoCandidateCount < 1) return null;
-  return { ...bounds, whiteSquareCount, arucoCandidateCount };
+  const decodedMarkerInside = decodedMarkers.some((marker) => {
+    const centerX = marker.corners.reduce((sum, corner) => sum + corner.x, 0) / marker.corners.length;
+    const centerY = marker.corners.reduce((sum, corner) => sum + corner.y, 0) / marker.corners.length;
+    return centerX >= bounds.left && centerX <= bounds.left + bounds.width
+      && centerY >= bounds.top && centerY <= bounds.top + bounds.height;
+  });
+  const structureConfirmed = whiteSquareCount >= 2 && arucoCandidateCount >= 1;
+  if (!decodedMarkerInside && !structureConfirmed) return null;
+  return { ...bounds, whiteSquareCount, arucoCandidateCount, markerPatternConfirmed: structureConfirmed || decodedMarkerInside };
 }
 
 function countWhiteSquaresInside(bounds, imageData) {
@@ -936,7 +958,7 @@ function countWhiteSquaresInside(bounds, imageData) {
       const blue = data[source + 2];
       const brightest = Math.max(red, green, blue);
       const darkest = Math.min(red, green, blue);
-      if (darkest > 155 && brightest - darkest < 55) mask[y * width + x] = 1;
+      if (darkest > 135 && brightest - darkest < 70) mask[y * width + x] = 1;
     }
   }
 
@@ -1328,11 +1350,21 @@ function rejectPoseOutliers(markerPoses) {
 function markersFitPaddleAssist(markers, bounds) {
   const marginX = bounds.width * 0.12;
   const marginY = bounds.height * 0.12;
-  return markers.every((marker) => {
+  const fitsInside = markers.every((marker) => {
     const centerX = marker.corners.reduce((sum, corner) => sum + corner.x, 0) / marker.corners.length;
     const centerY = marker.corners.reduce((sum, corner) => sum + corner.y, 0) / marker.corners.length;
     return centerX >= bounds.left - marginX && centerX <= bounds.left + bounds.width + marginX && centerY >= bounds.top - marginY && centerY <= bounds.top + bounds.height + marginY;
   });
+  if (!fitsInside) return false;
+
+  // A large piece of furniture can contain the marker centres by accident.
+  // Ensure the dark silhouette is on the same scale as the marker target.
+  const corners = markers.flatMap((marker) => marker.corners);
+  const markerWidth = Math.max(...corners.map((corner) => corner.x)) - Math.min(...corners.map((corner) => corner.x));
+  const markerHeight = Math.max(...corners.map((corner) => corner.y)) - Math.min(...corners.map((corner) => corner.y));
+  const maximumScale = markers.length >= 2 ? 4 : 7;
+  return bounds.width <= Math.max(1, markerWidth) * maximumScale
+    && bounds.height <= Math.max(1, markerHeight) * maximumScale;
 }
 
 function applyBoardPose(boardPose, paddleAssist, frameWidth, frameHeight) {
