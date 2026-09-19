@@ -160,8 +160,8 @@ let collectingCameraCalibration = false;
 let cameraCalibrationFrame = 0;
 const cameraCalibrationSamples = [];
 const positionSmoother = new VectorOneEuroFilter(
-  { minCutoff: 1.65, beta: 0.3 },
-  { minCutoff: 1.9, beta: 0.34 }
+  { minCutoff: 0.9, beta: 0.8 },
+  { minCutoff: 1.1, beta: 0.9 }
 );
 const predictivePositionFilter = new PredictivePositionFilter();
 const { paddle } = makeVirtualPaddleView();
@@ -1395,7 +1395,14 @@ function applySmoothedPose(position, quaternion) {
     const values = positionHistory.map((sample) => sample[axis]).sort((a, b) => a - b);
     return values[Math.floor(values.length / 2)];
   };
-  const stablePosition = new THREE.Vector3(median('x'), median('y'), median('z'));
+  const medianPosition = new THREE.Vector3(median('x'), median('y'), median('z'));
+  // A rolling median is excellent at removing one-frame pose failures but
+  // delays every real movement. Use the live sample normally and substitute
+  // the median only when the newest measurement is an implausible jump.
+  const spikeThreshold = stableTrackingMode === 'flow' || stableTrackingMode === 'colour' ? 0.12 : 0.2;
+  const stablePosition = position.distanceTo(medianPosition) > spikeThreshold
+    ? medianPosition
+    : position;
   const predictedPosition = predictivePositionFilter.filter(stablePosition, now);
   paddle.position.copy(positionSmoother.filter(predictedPosition, now));
   if (!smoothedQuaternion) {
