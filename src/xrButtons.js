@@ -80,7 +80,7 @@ export function createXRButtons(renderer, { onModeChange } = {}) {
       btn.disabled = true;
       btn.textContent = 'WebXR N/A';
       btn.style.opacity = '0.4';
-      return;
+      return false;
     }
     const supported = await navigator.xr
       .isSessionSupported(mode)
@@ -89,13 +89,15 @@ export function createXRButtons(renderer, { onModeChange } = {}) {
       btn.disabled = true;
       btn.style.opacity = '0.4';
       btn.textContent = mode === 'immersive-ar' ? 'AR N/A' : 'VR N/A';
-      return;
+      return false;
     }
     btn.onclick = () => toggleSession(mode).catch(console.error);
+    return true;
   };
 
-  setupButton('immersive-ar');
-  setupButton('immersive-vr');
+  Promise.all([setupButton('immersive-ar'), setupButton('immersive-vr')]).then((supported) => {
+    if (!supported.some(Boolean)) container.style.display = 'none';
+  });
 
   document.body.appendChild(container);
   return container;
