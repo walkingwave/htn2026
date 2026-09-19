@@ -5,6 +5,9 @@ export const DIFFICULTIES = {
 };
 
 export const TARGET_REPETITIONS = 5;
+// Ranked runs are survival-style: players get a fixed number of dropped balls
+// (player-side floor misses) before the run ends.
+export const RANKED_LIVES = 3;
 export const TARGET_MOVES = [
   { id: 'forehand-cross', label: 'Forehand cross-court', shortLabel: 'FH cross', cue: 'Turn your shoulders and finish toward the far right corner.', x: 0.42, z: -0.82, radius: 0.23 },
   { id: 'backhand-line', label: 'Backhand down the line', shortLabel: 'BH line', cue: 'Keep the face quiet and send it straight down the left line.', x: -0.47, z: -1.05, radius: 0.22 },
@@ -26,6 +29,8 @@ export class TrainerSession {
   reset(difficulty = 'standard', drill = 'rally') {
     this.difficulty = difficulty;
     this.drill = drill;
+    // Preserve the session mode (casual/ranked) across drill switches/resets.
+    this.mode = this.mode ?? 'casual';
     this.startedAt = 0;
     this.lastHitAt = 0;
     this.elapsedMs = 0;
@@ -106,7 +111,7 @@ export class TrainerSession {
       else { this.netErrors += 1; this.endRally(); }
     } else if (event === 'floor') {
       if (details.owner === 'fly' || details.position?.z < 0) this.flyMisses += 1;
-      else { this.misses += 1; this.endRally(); }
+      else { this.misses += 1; this.endRally(); result.playerMiss = true; result.misses = this.misses; }
     }
     return result;
   }
@@ -123,7 +128,7 @@ export class TrainerSession {
     const survivalSeconds = Math.round(this.elapsedMs / 100) / 10;
     const currentMove = this.getCurrentTargetMove();
     return {
-      difficulty: this.difficulty, drill: this.drill, score: this.score, rally: this.rally,
+      difficulty: this.difficulty, drill: this.drill, mode: this.mode, score: this.score, rally: this.rally,
       longestRally: this.longestRally, returns: this.returns, flyReturns: this.flyReturns,
       serves: this.serves, tableBounces: this.tableBounces, netErrors: this.netErrors,
       misses: this.misses, flyMisses: this.flyMisses, accuracy, reactionMs, survivalSeconds,

@@ -9,7 +9,7 @@ import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
 import { BallMachine } from './ballMachine.js';
 import { PLAY_AREA, TABLE } from './constants.js';
-import { DIFFICULTIES, TrainerSession } from './session.js';
+import { DIFFICULTIES, RANKED_LIVES, TrainerSession } from './session.js';
 import { createTrainerUI } from './ui.js';
 import { startHandTracking } from './handTracking.js';
 
@@ -116,7 +116,7 @@ window.addEventListener('pointerrawupdate', (event) => setPointerPose(event.clie
 window.addEventListener('pointerdown', (event) => setPointerPose(event.clientX, event.clientY), { passive: true });
 
 const ui = createTrainerUI({
-  onStart(difficulty, drill, mode, landscape) { const profile = DIFFICULTIES[difficulty]; applyLandscape(landscape); session.reset(difficulty, drill); session.mode = mode; session.landscape = landscape; session.start(); training = true; paused = false; document.body.classList.add('paddle-pointer-mode'); table.rotation.y = 0; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
+  onStart(difficulty, drill, mode, landscape) { const profile = DIFFICULTIES[difficulty]; applyLandscape(landscape); session.reset(difficulty, drill); session.mode = mode ?? session.mode ?? 'casual'; session.landscape = landscape; session.start(); training = true; paused = false; document.body.classList.add('paddle-pointer-mode'); table.rotation.y = 0; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
   onLandscapeChange(name) { applyLandscape(name); },
   onDrillChange(nextDrill) { const difficulty = ui.getDifficulty(); const profile = DIFFICULTIES[difficulty]; balls.forEach((ball) => ball.deactivate()); session.reset(difficulty, nextDrill); if (training) { session.start(); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; } flyPaddle.enabled = training && nextDrill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); ui.update(session.summary(), training ? 'TRAINING' : 'READY'); },
   onPause() { paused = !paused; machine.enabled = training && !paused; ui.feedback(paused ? 'Training paused.' : 'Rally live.', paused ? '' : 'success'); },
@@ -153,7 +153,24 @@ physics.onBounce = (ball, event, details = {}) => {
   if (event === 'net') ui.feedback('Net error — close the racket angle.', 'error');
   if (event === 'floor') {
     const flyMiss = session.drill === 'fly' && ball.mesh.position.z < 0;
-    ui.feedback(flyMiss ? 'The fly missed — keep the pressure on.' : 'Rally ended — reset your feet. Next ball coming.', flyMiss ? 'success' : 'error');
+    const rankedRunOver = session.mode === 'ranked' && result.playerMiss && session.misses >= RANKED_LIVES;
+    if (rankedRunOver) {
+      training = false;
+      paused = false;
+      machine.enabled = false;
+      flyPaddle.enabled = false;
+      updateTargetMarker(null);
+      ui.feedback('Final ball down — ranked run over.', 'error');
+      ui.showSummary(session.finish());
+      setTimeout(() => ball.deactivate(), 700);
+      return;
+    }
+    if (session.mode === 'ranked' && result.playerMiss) {
+      const livesLeft = Math.max(0, RANKED_LIVES - session.misses);
+      ui.feedback(`Ball down — ${livesLeft} ${livesLeft === 1 ? 'ball' : 'balls'} left.`, 'error');
+    } else {
+      ui.feedback(flyMiss ? 'The fly missed — keep the pressure on.' : 'Rally ended — reset your feet. Next ball coming.', flyMiss ? 'success' : 'error');
+    }
     setTimeout(() => ball.deactivate(), 700);
   }
   ui.update(session.summary(), 'TRAINING');

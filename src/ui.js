@@ -21,7 +21,7 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
   <div class="feedback" id="feedback">Choose a drill to begin.</div>
   <aside class="control-panel"><div><span class="eyebrow">COACHING PLAN</span><h1 id="panel-title">Build your fundamentals.</h1><p id="panel-copy">Pick a drill, then use your paddle to return the simulated ball.</p></div><div class="target-stage" id="target-stage"><div><span class="eyebrow">CURRENT MOVE</span><strong id="target-move">Ready to train</strong></div><span class="target-count" id="target-count">0 / 5</span><p id="target-cue">Every target move requires five clean repetitions before the next one unlocks.</p></div><div class="drill-list">${Object.entries(DRILLS).map(([key, value]) => `<button class="drill-option ${key === 'rally' ? 'selected' : ''}" data-drill="${key}"><span class="difficulty-icon">${key === 'fly' ? '✦' : key === 'target' ? '◎' : '↗'}</span><span><b>${value.label}</b><small>${value.detail}</small></span></button>`).join('')}</div><div class="difficulty-list">${Object.entries(DIFFICULTIES).map(([key, value]) => `<button class="difficulty-option ${key === 'standard' ? 'selected' : ''}" data-difficulty="${key}"><span><b>${value.label}</b><small>${value.detail}</small></span></button>`).join('')}</div><div class="control-actions"><button class="primary-button" id="start-button">Start drill →</button><button class="secondary-button" id="pause-button">Pause</button><button class="secondary-button" id="reset-button">Reset</button></div><div class="control-actions secondary-actions"><button class="secondary-button" id="machine-button">Pause ball machine</button><button class="secondary-button" id="cv-button">Use camera paddle</button></div><p class="control-hint">No VR required: move the on-screen paddle with your pointer, or enable camera CV. XR remains available when you have it.</p></aside>
   <div class="leaderboard-panel hidden" id="leaderboard-panel"><div class="panel-heading"><div><span class="eyebrow">THE ARENA / LIVE RANKINGS</span><h2>Fundamentals under pressure.</h2></div><button class="text-button" id="close-leaderboard">Close</button></div><div class="leader-tabs"><button class="leader-tab selected" data-category="fundamentals">Fundamentals</button><button class="leader-tab" data-category="boss">Boss survival</button></div><div id="leaderboard-list"></div></div>
-  <div class="summary-panel hidden" id="summary-panel"><span class="eyebrow">SESSION COMPLETE</span><h2 id="summary-title">Good work.</h2><p id="summary-coach" class="summary-coach"></p><div class="summary-grid" id="summary-grid"></div><div class="save-row"><input id="player-name" maxlength="32" placeholder="your name" aria-label="Player name"/><button class="primary-button" id="save-score">Save score</button></div><p class="save-status" id="save-status"></p><button class="secondary-button" id="summary-close">Back to drills</button></div>`;
+  <div class="summary-panel hidden" id="summary-panel"><span class="eyebrow">SESSION COMPLETE</span><h2 id="summary-title">Good work.</h2><p id="summary-coach" class="summary-coach"></p><div class="summary-verdict hidden" id="summary-verdict"></div><div class="summary-grid" id="summary-grid"></div><div class="save-row"><input id="player-name" maxlength="32" placeholder="your name" aria-label="Player name"/><button class="primary-button" id="save-score">Save score</button></div><p class="save-status" id="save-status"></p><button class="secondary-button" id="summary-close">Back to drills</button></div>`;
   document.body.appendChild(root);
 
   let difficulty = 'standard';
@@ -70,12 +70,43 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
     const node = $('feedback'); node.textContent = message; node.className = `feedback ${kind}`; window.clearTimeout(feedback.timer); feedback.timer = window.setTimeout(() => node.className = 'feedback', 1800);
   };
 
-  const showSummary = (summary) => {
+  const showSummary = async (summary) => {
     lastSummary = summary; update(summary, 'COMPLETE');
-    $('summary-title').textContent = summary.drill === 'fly' ? 'You read the fly.' : summary.drill === 'target' ? (summary.targetComplete ? 'Target sequence complete.' : `${summary.completedMoves} moves completed.`) : 'You found your rhythm.';
-    $('summary-coach').textContent = summary.drill === 'target' ? `${summary.completedMoves}/${summary.totalMoves} moves complete. ${summary.targetComplete ? 'Excellent control—repeat the sequence at the next speed.' : DRILLS.target.coach}` : summary.drill === 'fly' ? `${summary.flyReturns} fly returns and ${summary.flyMisses} fly misses. ${DRILLS.fly.coach}` : summary.accuracy >= 70 ? 'Good consistency. Next, reduce swing size and challenge the next speed.' : DRILLS[summary.drill].coach;
+    const verdict = $('summary-verdict');
+    verdict.className = 'summary-verdict hidden';
+    verdict.textContent = '';
+    const ranked = summary.mode === 'ranked';
+    if (ranked) {
+      $('summary-title').textContent = 'Ranked run over.';
+      $('summary-coach').textContent = `Three balls down. Final score ${summary.score}. Here's where you'd land:`;
+    } else {
+      $('summary-title').textContent = summary.drill === 'fly' ? 'You read the fly.' : summary.drill === 'target' ? (summary.targetComplete ? 'Target sequence complete.' : `${summary.completedMoves} moves completed.`) : 'You found your rhythm.';
+      $('summary-coach').textContent = summary.drill === 'target' ? `${summary.completedMoves}/${summary.totalMoves} moves complete. ${summary.targetComplete ? 'Excellent control—repeat the sequence at the next speed.' : DRILLS.target.coach}` : summary.drill === 'fly' ? `${summary.flyReturns} fly returns and ${summary.flyMisses} fly misses. ${DRILLS.fly.coach}` : summary.accuracy >= 70 ? 'Good consistency. Next, reduce swing size and challenge the next speed.' : DRILLS[summary.drill].coach;
+    }
     $('summary-grid').innerHTML = [['Score', summary.score], ['Moves complete', `${summary.completedMoves}/${summary.totalMoves}`], ['Longest rally', `${summary.longestRally} hits`], ['Accuracy', `${summary.accuracy}%`], ['Target hits', `${summary.targetHits}`], ['Fly returns', `${summary.flyReturns ?? 0}`], ['Fly misses', `${summary.flyMisses ?? 0}`], ['Survival', `${summary.survivalSeconds}s`], ['Reaction', summary.reactionMs ? `${summary.reactionMs}ms` : '—']].map(([label, value]) => `<div><small>${label}</small><strong>${value}</strong></div>`).join('');
     $('summary-panel').classList.remove('hidden');
+    if (ranked) {
+      const rankedCategory = summary.difficulty === 'boss' ? 'boss' : 'fundamentals';
+      const points = scoreFor(summary, rankedCategory);
+      verdict.classList.remove('hidden');
+      verdict.textContent = 'Checking the leaderboard…';
+      try {
+        const rows = await getLeaderboard(rankedCategory);
+        const higher = rows.filter((row) => row.score > points).length;
+        const rank = higher + 1;
+        const beyondTop = rows.length >= 25 && rank > rows.length;
+        if (rank === 1) {
+          verdict.className = 'summary-verdict goat';
+          verdict.innerHTML = `<strong>🐐 GOAT STATUS</strong><span>#1 on the ${rankedCategory} board with ${points.toLocaleString()} pts. Save it and defend your throne.</span>`;
+        } else {
+          verdict.className = 'summary-verdict chase';
+          verdict.innerHTML = `<strong>#${rank}${beyondTop ? '+' : ''} · ${points.toLocaleString()} pts</strong><span>Can you reach the top? Save your score, then run it back.</span>`;
+        }
+      } catch {
+        verdict.className = 'summary-verdict chase';
+        verdict.innerHTML = `<strong>${points.toLocaleString()} pts</strong><span>Couldn't reach the leaderboard — save your score to lock in your rank.</span>`;
+      }
+    }
   };
 
   const loadLeaderboard = async () => {
@@ -92,7 +123,7 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
   root.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => startMode(button.dataset.mode)));
   $('mode-back').addEventListener('click', enterLanding);
   root.querySelectorAll('[data-landscape]').forEach((button) => button.addEventListener('click', () => { landscape = button.dataset.landscape; root.querySelectorAll('[data-landscape]').forEach((item) => item.classList.toggle('selected', item === button)); onLandscapeChange?.(landscape); }));
-  $('landscape-start').addEventListener('click', () => { chooseDrill(pendingDrill); enterTrainer(); onStart(difficulty, drill, mode, landscape); feedback(mode === 'ranked' ? 'Ranked drill live — make every return count.' : 'Casual drill live — build your rhythm.', 'success'); });
+  $('landscape-start').addEventListener('click', () => { chooseDrill(pendingDrill); enterTrainer(); onStart(difficulty, drill, mode, landscape); feedback(mode === 'ranked' ? 'Ranked run live — 3 balls to drop. Make every return count.' : 'Casual drill live — build your rhythm.', 'success'); });
   $('sidebar-toggle').addEventListener('click', () => root.classList.toggle('sidebar-closed'));
   const switchDrill = (direction) => { const keys = Object.keys(DRILLS); const next = (keys.indexOf(drill) + direction + keys.length) % keys.length; chooseDrill(keys[next]); onDrillChange?.(drill, mode); feedback(`Switched to ${DRILLS[drill].label}.`, 'success'); };
   $('previous-drill').addEventListener('click', () => switchDrill(-1));
@@ -100,7 +131,7 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
   $('landing-return').addEventListener('click', enterLanding);
   $('topbar-brand').addEventListener('click', enterLanding);
   $('landing-leaderboard').addEventListener('click', () => { enterTrainer(); $('leaderboard-panel').classList.remove('hidden'); loadLeaderboard(); });
-  $('start-button').addEventListener('click', () => { $('summary-panel').classList.add('hidden'); onStart(difficulty, drill); feedback(drill === 'target' ? 'Move 1 live — land five clean shots.' : 'Rally live — watch the serve.', 'success'); });
+  $('start-button').addEventListener('click', () => { $('summary-panel').classList.add('hidden'); onStart(difficulty, drill, mode, landscape); feedback(drill === 'target' ? 'Move 1 live — land five clean shots.' : mode === 'ranked' ? 'Ranked run live — you have 3 balls to drop.' : 'Rally live — watch the serve.', 'success'); });
   $('pause-button').addEventListener('click', () => onPause());
   $('reset-button').addEventListener('click', () => onReset());
   $('machine-button').addEventListener('click', () => { const enabled = onMachineToggle(); $('machine-button').textContent = enabled ? 'Pause ball machine' : 'Resume ball machine'; });
@@ -113,7 +144,8 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
     const name = $('player-name').value.trim();
     if (!name || !lastSummary) { $('save-status').textContent = 'Add your name first.'; return; }
     $('save-status').textContent = 'Saving…';
-    try { const result = await submitScore(name, lastSummary, category); $('save-status').textContent = result.storage === 'local' ? `Saved on this device. Configure Supabase to publish globally. (${scoreFor(lastSummary, category)} pts)` : 'Score saved to the arena.'; } catch { $('save-status').textContent = 'Could not reach the leaderboard. Your session is still safe.'; }
+    const saveCategory = lastSummary.mode === 'ranked' ? (lastSummary.difficulty === 'boss' ? 'boss' : 'fundamentals') : category;
+    try { const result = await submitScore(name, lastSummary, saveCategory); $('save-status').textContent = result.storage === 'local' ? `Saved on this device. Configure Supabase to publish globally. (${scoreFor(lastSummary, saveCategory)} pts)` : 'Score saved to the arena.'; } catch { $('save-status').textContent = 'Could not reach the leaderboard. Your session is still safe.'; }
   });
 
   return { update, feedback, showSummary, getDifficulty: () => difficulty, getDrill: () => drill, isModeSelecting: () => root.classList.contains('mode-select-active') };
