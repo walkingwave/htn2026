@@ -9,10 +9,10 @@
       "source_file": "package.json",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "package",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "package.json"
+      "norm_label": "package.json",
+      "id": "package",
+      "community_name": "package.json"
     },
     {
       "label": "name",
@@ -20,10 +20,10 @@
       "source_file": "package.json",
       "source_location": "L2",
       "_origin": "ast",
-      "id": "package_name",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "name"
+      "norm_label": "name",
+      "id": "package_name",
+      "community_name": "package.json"
     },
     {
       "label": "version",
@@ -31,10 +31,10 @@
       "source_file": "package.json",
       "source_location": "L3",
       "_origin": "ast",
-      "id": "package_version",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "version"
+      "norm_label": "version",
+      "id": "package_version",
+      "community_name": "package.json"
     },
     {
       "label": "private",
@@ -42,10 +42,10 @@
       "source_file": "package.json",
       "source_location": "L4",
       "_origin": "ast",
-      "id": "package_private",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "private"
+      "norm_label": "private",
+      "id": "package_private",
+      "community_name": "package.json"
     },
     {
       "label": "type",
@@ -53,10 +53,10 @@
       "source_file": "package.json",
       "source_location": "L5",
       "_origin": "ast",
-      "id": "package_type",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "type"
+      "norm_label": "type",
+      "id": "package_type",
+      "community_name": "package.json"
     },
     {
       "label": "scripts",
@@ -64,10 +64,10 @@
       "source_file": "package.json",
       "source_location": "L6",
       "_origin": "ast",
-      "id": "package_scripts",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "scripts"
+      "norm_label": "scripts",
+      "id": "package_scripts",
+      "community_name": "package.json"
     },
     {
       "label": "dev",
@@ -75,175 +75,164 @@
       "source_file": "package.json",
       "source_location": "L7",
       "_origin": "ast",
+      "community": 1,
+      "norm_label": "dev",
       "id": "package_scripts_dev",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "dev"
-    },
-    {
-      "label": "dev:https",
-      "file_type": "code",
-      "source_file": "package.json",
-      "source_location": "L8",
-      "_origin": "ast",
-      "id": "package_scripts_dev_https",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "dev:https"
+      "community_name": "package.json"
     },
     {
       "label": "build",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L9",
+      "source_location": "L8",
       "_origin": "ast",
-      "id": "package_scripts_build",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "build"
+      "norm_label": "build",
+      "id": "package_scripts_build",
+      "community_name": "package.json"
     },
     {
       "label": "preview",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L10",
+      "source_location": "L9",
       "_origin": "ast",
-      "id": "package_scripts_preview",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "preview"
+      "norm_label": "preview",
+      "id": "package_scripts_preview",
+      "community_name": "package.json"
     },
     {
       "label": "dependencies",
       "file_type": "code",
       "source_file": "package.json",
+      "source_location": "L11",
+      "_origin": "ast",
+      "community": 5,
+      "norm_label": "dependencies",
+      "id": "package_dependencies",
+      "community_name": "dependencies"
+    },
+    {
+      "label": "@mediapipe/tasks-vision",
+      "file_type": "code",
+      "source_file": "package.json",
       "source_location": "L12",
       "_origin": "ast",
-      "id": "package_dependencies",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "dependencies"
-    },
-    {
-      "label": "@mediapipe/tasks-vision",
-      "file_type": "code",
-      "source_file": "package.json",
-      "source_location": "L13",
-      "_origin": "ast",
+      "community": 5,
+      "norm_label": "@mediapipe/tasks-vision",
       "id": "package_dependencies_mediapipe_tasks_vision",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "@mediapipe/tasks-vision"
+      "community_name": "dependencies"
     },
     {
       "label": "@mediapipe/tasks-vision",
       "file_type": "concept",
       "source_file": "package.json",
+      "source_location": "L12",
+      "_origin": "ast",
+      "community": 5,
+      "norm_label": "@mediapipe/tasks-vision",
+      "id": "mediapipe_tasks_vision",
+      "community_name": "dependencies"
+    },
+    {
+      "label": "@supabase/supabase-js",
+      "file_type": "code",
+      "source_file": "package.json",
       "source_location": "L13",
       "_origin": "ast",
-      "id": "mediapipe_tasks_vision",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "@mediapipe/tasks-vision"
-    },
-    {
-      "label": "@supabase/supabase-js",
-      "file_type": "code",
-      "source_file": "package.json",
-      "source_location": "L14",
-      "_origin": "ast",
+      "community": 5,
+      "norm_label": "@supabase/supabase-js",
       "id": "package_dependencies_supabase_supabase_js",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "@supabase/supabase-js"
+      "community_name": "dependencies"
     },
     {
       "label": "@supabase/supabase-js",
       "file_type": "concept",
       "source_file": "package.json",
-      "source_location": "L14",
+      "source_location": "L13",
       "_origin": "ast",
+      "community": 5,
+      "norm_label": "@supabase/supabase-js",
       "id": "supabase_supabase_js",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "@supabase/supabase-js"
+      "community_name": "dependencies"
     },
     {
       "label": "three",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L15",
+      "source_location": "L14",
       "_origin": "ast",
+      "community": 5,
+      "norm_label": "three",
       "id": "package_dependencies_three",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "three"
+      "community_name": "dependencies"
     },
     {
       "label": "three",
       "file_type": "concept",
       "source_file": "package.json",
-      "source_location": "L15",
+      "source_location": "L14",
       "_origin": "ast",
+      "community": 5,
+      "norm_label": "three",
       "id": "three",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "three"
+      "community_name": "dependencies"
     },
     {
       "label": "devDependencies",
       "file_type": "code",
       "source_file": "package.json",
+      "source_location": "L16",
+      "_origin": "ast",
+      "community": 1,
+      "norm_label": "devdependencies",
+      "id": "package_devdependencies",
+      "community_name": "package.json"
+    },
+    {
+      "label": "@vitejs/plugin-basic-ssl",
+      "file_type": "code",
+      "source_file": "package.json",
       "source_location": "L17",
       "_origin": "ast",
-      "id": "package_devdependencies",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "devdependencies"
-    },
-    {
-      "label": "@vitejs/plugin-basic-ssl",
-      "file_type": "code",
-      "source_file": "package.json",
-      "source_location": "L18",
-      "_origin": "ast",
+      "norm_label": "@vitejs/plugin-basic-ssl",
       "id": "package_devdependencies_vitejs_plugin_basic_ssl",
-      "community": 1,
-      "community_name": "package.json",
-      "norm_label": "@vitejs/plugin-basic-ssl"
+      "community_name": "package.json"
     },
     {
       "label": "@vitejs/plugin-basic-ssl",
       "file_type": "concept",
       "source_file": "package.json",
-      "source_location": "L18",
+      "source_location": "L17",
       "_origin": "ast",
-      "id": "vitejs_plugin_basic_ssl",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "@vitejs/plugin-basic-ssl"
+      "norm_label": "@vitejs/plugin-basic-ssl",
+      "id": "vitejs_plugin_basic_ssl",
+      "community_name": "package.json"
     },
     {
       "label": "vite",
       "file_type": "code",
       "source_file": "package.json",
-      "source_location": "L19",
+      "source_location": "L18",
       "_origin": "ast",
-      "id": "package_devdependencies_vite",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "vite"
+      "norm_label": "vite",
+      "id": "package_devdependencies_vite",
+      "community_name": "package.json"
     },
     {
       "label": "vite",
       "file_type": "concept",
       "source_file": "package.json",
-      "source_location": "L19",
+      "source_location": "L18",
       "_origin": "ast",
-      "id": "vite",
       "community": 1,
-      "community_name": "package.json",
-      "norm_label": "vite"
+      "norm_label": "vite",
+      "id": "vite",
+      "community_name": "package.json"
     },
     {
       "label": "ball.js",
@@ -251,10 +240,10 @@
       "source_file": "src/ball.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_ball",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "ball.js"
+      "norm_label": "ball.js",
+      "id": "src_ball",
+      "community_name": "constants.js"
     },
     {
       "label": "Ball",
@@ -264,10 +253,10 @@
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "id": "src_ball_ball",
       "community": 9,
-      "community_name": "Ball",
-      "norm_label": "ball"
+      "norm_label": "ball",
+      "id": "src_ball_ball",
+      "community_name": "Ball"
     },
     {
       "label": ".constructor()",
@@ -276,10 +265,10 @@
       "source_location": "L5",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_ball_ball_constructor",
       "community": 9,
-      "community_name": "Ball",
-      "norm_label": ".constructor()"
+      "norm_label": ".constructor()",
+      "id": "src_ball_ball_constructor",
+      "community_name": "Ball"
     },
     {
       "label": ".serve()",
@@ -288,10 +277,10 @@
       "source_location": "L16",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_ball_ball_serve",
       "community": 9,
-      "community_name": "Ball",
-      "norm_label": ".serve()"
+      "norm_label": ".serve()",
+      "id": "src_ball_ball_serve",
+      "community_name": "Ball"
     },
     {
       "label": ".deactivate()",
@@ -300,10 +289,10 @@
       "source_location": "L23",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_ball_ball_deactivate",
       "community": 9,
-      "community_name": "Ball",
-      "norm_label": ".deactivate()"
+      "norm_label": ".deactivate()",
+      "id": "src_ball_ball_deactivate",
+      "community_name": "Ball"
     },
     {
       "label": "ballMachine.js",
@@ -311,10 +300,10 @@
       "source_file": "src/ballMachine.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_ballmachine",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "ballmachine.js"
+      "norm_label": "ballmachine.js",
+      "id": "src_ballmachine",
+      "community_name": "constants.js"
     },
     {
       "label": "BallMachine",
@@ -324,10 +313,10 @@
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "id": "src_ballmachine_ballmachine",
       "community": 10,
-      "community_name": "BallMachine",
-      "norm_label": "ballmachine"
+      "norm_label": "ballmachine",
+      "id": "src_ballmachine_ballmachine",
+      "community_name": "BallMachine"
     },
     {
       "label": ".constructor()",
@@ -336,10 +325,10 @@
       "source_location": "L7",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_ballmachine_ballmachine_constructor",
       "community": 10,
-      "community_name": "BallMachine",
-      "norm_label": ".constructor()"
+      "norm_label": ".constructor()",
+      "id": "src_ballmachine_ballmachine_constructor",
+      "community_name": "BallMachine"
     },
     {
       "label": ".update()",
@@ -348,10 +337,10 @@
       "source_location": "L23",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_ballmachine_ballmachine_update",
       "community": 10,
-      "community_name": "BallMachine",
-      "norm_label": ".update()"
+      "norm_label": ".update()",
+      "id": "src_ballmachine_ballmachine_update",
+      "community_name": "BallMachine"
     },
     {
       "label": ".serve()",
@@ -360,10 +349,10 @@
       "source_location": "L32",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_ballmachine_ballmachine_serve",
       "community": 10,
-      "community_name": "BallMachine",
-      "norm_label": ".serve()"
+      "norm_label": ".serve()",
+      "id": "src_ballmachine_ballmachine_serve",
+      "community_name": "BallMachine"
     },
     {
       "label": "constants.js",
@@ -371,10 +360,10 @@
       "source_file": "src/constants.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_constants",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "constants.js"
+      "norm_label": "constants.js",
+      "id": "src_constants",
+      "community_name": "constants.js"
     },
     {
       "label": "TABLE",
@@ -382,10 +371,10 @@
       "source_file": "src/constants.js",
       "source_location": "L3",
       "_origin": "ast",
-      "id": "src_constants_table",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "table"
+      "norm_label": "table",
+      "id": "src_constants_table",
+      "community_name": "constants.js"
     },
     {
       "label": "NET",
@@ -393,10 +382,10 @@
       "source_file": "src/constants.js",
       "source_location": "L10",
       "_origin": "ast",
-      "id": "src_constants_net",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "net"
+      "norm_label": "net",
+      "id": "src_constants_net",
+      "community_name": "constants.js"
     },
     {
       "label": "BALL",
@@ -404,10 +393,10 @@
       "source_file": "src/constants.js",
       "source_location": "L15",
       "_origin": "ast",
-      "id": "src_constants_ball",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "ball"
+      "norm_label": "ball",
+      "id": "src_constants_ball",
+      "community_name": "constants.js"
     },
     {
       "label": "PADDLE",
@@ -415,10 +404,10 @@
       "source_file": "src/constants.js",
       "source_location": "L22",
       "_origin": "ast",
+      "community": 6,
+      "norm_label": "paddle",
       "id": "src_constants_paddle",
-      "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "paddle"
+      "community_name": "paddle.js"
     },
     {
       "label": "PHYSICS",
@@ -426,10 +415,10 @@
       "source_file": "src/constants.js",
       "source_location": "L29",
       "_origin": "ast",
-      "id": "src_constants_physics",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "physics"
+      "norm_label": "physics",
+      "id": "src_constants_physics",
+      "community_name": "constants.js"
     },
     {
       "label": "PLAY_AREA",
@@ -437,125 +426,10 @@
       "source_file": "src/constants.js",
       "source_location": "L38",
       "_origin": "ast",
-      "id": "src_constants_play_area",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "play_area"
-    },
-    {
-      "label": "environment.js",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "src_environment",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "environment.js"
-    },
-    {
-      "label": "_camera",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L3",
-      "_origin": "ast",
-      "id": "src_environment_camera",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "_camera"
-    },
-    {
-      "label": "_projector",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L4",
-      "_origin": "ast",
-      "id": "src_environment_projector",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "_projector"
-    },
-    {
-      "label": "groundGeo",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L7",
-      "_origin": "ast",
-      "id": "src_environment_groundgeo",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "groundgeo"
-    },
-    {
-      "label": "gridGeo",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L8",
-      "_origin": "ast",
-      "id": "src_environment_gridgeo",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "gridgeo"
-    },
-    {
-      "label": "makeGridMesh()",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L10",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_environment_makegridmesh",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "makegridmesh()"
-    },
-    {
-      "label": "buildEnvironment()",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L17",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_environment_buildenvironment",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "buildenvironment()"
-    },
-    {
-      "label": "updatePalette()",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L57",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_environment_updatepalette",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "updatepalette()"
-    },
-    {
-      "label": "syncEnvironmentWithSceneColor()",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L72",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_environment_syncenvironmentwithscenecolor",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "syncenvironmentwithscenecolor()"
-    },
-    {
-      "label": "buildDiscoGear()",
-      "file_type": "code",
-      "source_file": "src/environment.js",
-      "source_location": "L126",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_environment_builddiscogear",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "builddiscogear()"
+      "norm_label": "play_area",
+      "id": "src_constants_play_area",
+      "community_name": "constants.js"
     },
     {
       "label": "handTracking.js",
@@ -563,10 +437,10 @@
       "source_file": "src/handTracking.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_handtracking",
       "community": 12,
-      "community_name": "handTracking.js",
-      "norm_label": "handtracking.js"
+      "norm_label": "handtracking.js",
+      "id": "src_handtracking",
+      "community_name": "handTracking.js"
     },
     {
       "label": "startHandTracking()",
@@ -575,10 +449,10 @@
       "source_location": "L6",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_handtracking_starthandtracking",
       "community": 12,
-      "community_name": "handTracking.js",
-      "norm_label": "starthandtracking()"
+      "norm_label": "starthandtracking()",
+      "id": "src_handtracking_starthandtracking",
+      "community_name": "handTracking.js"
     },
     {
       "label": "leaderboard.js",
@@ -586,10 +460,10 @@
       "source_file": "src/leaderboard.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_leaderboard",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "leaderboard.js"
+      "norm_label": "leaderboard.js",
+      "id": "src_leaderboard",
+      "community_name": "ui.js"
     },
     {
       "label": "supabase",
@@ -597,81 +471,57 @@
       "source_file": "src/leaderboard.js",
       "source_location": "L5",
       "_origin": "ast",
-      "id": "src_leaderboard_supabase",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "supabase"
+      "norm_label": "supabase",
+      "id": "src_leaderboard_supabase",
+      "community_name": "ui.js"
     },
     {
       "label": "demo",
       "file_type": "code",
       "source_file": "src/leaderboard.js",
-      "source_location": "L8",
+      "source_location": "L7",
       "_origin": "ast",
+      "community": 3,
+      "norm_label": "demo",
       "id": "src_leaderboard_demo",
-      "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "demo"
-    },
-    {
-      "label": "readLocalScores()",
-      "file_type": "code",
-      "source_file": "src/leaderboard.js",
-      "source_location": "L14",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_leaderboard_readlocalscores",
-      "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "readlocalscores()"
-    },
-    {
-      "label": "writeLocalScore()",
-      "file_type": "code",
-      "source_file": "src/leaderboard.js",
-      "source_location": "L23",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_leaderboard_writelocalscore",
-      "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "writelocalscore()"
+      "community_name": "ui.js"
     },
     {
       "label": "scoreFor()",
       "file_type": "code",
       "source_file": "src/leaderboard.js",
-      "source_location": "L32",
+      "source_location": "L13",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_leaderboard_scorefor",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "scorefor()"
+      "norm_label": "scorefor()",
+      "id": "src_leaderboard_scorefor",
+      "community_name": "ui.js"
     },
     {
       "label": "submitScore()",
       "file_type": "code",
       "source_file": "src/leaderboard.js",
-      "source_location": "L39",
+      "source_location": "L18",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_leaderboard_submitscore",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "submitscore()"
+      "norm_label": "submitscore()",
+      "id": "src_leaderboard_submitscore",
+      "community_name": "ui.js"
     },
     {
       "label": "getLeaderboard()",
       "file_type": "code",
       "source_file": "src/leaderboard.js",
-      "source_location": "L51",
+      "source_location": "L27",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_leaderboard_getleaderboard",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "getleaderboard()"
+      "norm_label": "getleaderboard()",
+      "id": "src_leaderboard_getleaderboard",
+      "community_name": "ui.js"
     },
     {
       "label": "main.js",
@@ -679,391 +529,311 @@
       "source_file": "src/main.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_main",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "main.js"
+      "norm_label": "main.js",
+      "id": "src_main",
+      "community_name": "main.js"
     },
     {
       "label": "renderer",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L26",
+      "source_location": "L17",
       "_origin": "ast",
-      "id": "src_main_renderer",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "renderer"
+      "norm_label": "renderer",
+      "id": "src_main_renderer",
+      "community_name": "main.js"
     },
     {
       "label": "scene",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L31",
+      "source_location": "L20",
       "_origin": "ast",
-      "id": "src_main_scene",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "scene"
+      "norm_label": "scene",
+      "id": "src_main_scene",
+      "community_name": "main.js"
     },
     {
       "label": "VR_BACKGROUND",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L32",
+      "source_location": "L20",
       "_origin": "ast",
+      "community": 0,
+      "norm_label": "vr_background",
       "id": "src_main_vr_background",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "vr_background"
-    },
-    {
-      "label": "LANDSCAPES",
-      "file_type": "code",
-      "source_file": "src/main.js",
-      "source_location": "L33",
-      "_origin": "ast",
-      "id": "src_main_landscapes",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "landscapes"
+      "community_name": "main.js"
     },
     {
       "label": "camera",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L36",
+      "source_location": "L21",
       "_origin": "ast",
-      "id": "src_main_camera",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "camera"
+      "norm_label": "camera",
+      "id": "src_main_camera",
+      "community_name": "main.js"
     },
     {
       "label": "playerRig",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L37",
+      "source_location": "L22",
       "_origin": "ast",
-      "id": "src_main_playerrig",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "playerrig"
+      "norm_label": "playerrig",
+      "id": "src_main_playerrig",
+      "community_name": "main.js"
     },
     {
       "label": "keyLight",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L38",
+      "source_location": "L23",
       "_origin": "ast",
-      "id": "src_main_keylight",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "keylight"
+      "norm_label": "keylight",
+      "id": "src_main_keylight",
+      "community_name": "main.js"
     },
     {
       "label": "table",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L39",
+      "source_location": "L24",
       "_origin": "ast",
+      "community": 0,
+      "norm_label": "table",
       "id": "src_main_table",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "table"
-    },
-    {
-      "label": "landscapeEnvironment",
-      "file_type": "code",
-      "source_file": "src/main.js",
-      "source_location": "L40",
-      "_origin": "ast",
-      "id": "src_main_landscapeenvironment",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "landscapeenvironment"
+      "community_name": "main.js"
     },
     {
       "label": "vrEnvironment",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L43",
+      "source_location": "L24",
       "_origin": "ast",
-      "id": "src_main_vrenvironment",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "vrenvironment"
-    },
-    {
-      "label": "applyLandscape()",
-      "file_type": "code",
-      "source_file": "src/main.js",
-      "source_location": "L44",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_main_applylandscape",
-      "community": 5,
-      "community_name": "environment.js",
-      "norm_label": "applylandscape()"
+      "norm_label": "vrenvironment",
+      "id": "src_main_vrenvironment",
+      "community_name": "main.js"
     },
     {
       "label": "applyMode()",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L50",
+      "source_location": "L25",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_main_applymode",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "applymode()"
+      "norm_label": "applymode()",
+      "id": "src_main_applymode",
+      "community_name": "main.js"
     },
     {
       "label": "targetMarker",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L53",
+      "source_location": "L28",
       "_origin": "ast",
-      "id": "src_main_targetmarker",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "targetmarker"
+      "norm_label": "targetmarker",
+      "id": "src_main_targetmarker",
+      "community_name": "main.js"
     },
     {
       "label": "targetRing",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L55",
+      "source_location": "L30",
       "_origin": "ast",
+      "community": 0,
+      "norm_label": "targetring",
       "id": "src_main_targetring",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "targetring"
-    },
-    {
-      "label": "updateTargetMarker()",
-      "file_type": "code",
-      "source_file": "src/main.js",
-      "source_location": "L58",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_main_updatetargetmarker",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "updatetargetmarker()"
+      "community_name": "main.js"
     },
     {
       "label": "buildHands()",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L69",
+      "source_location": "L33",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_main_buildhands",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "buildhands()"
+      "norm_label": "buildhands()",
+      "id": "src_main_buildhands",
+      "community_name": "main.js"
     },
     {
       "label": "buildFlyOpponent()",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L85",
+      "source_location": "L41",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_main_buildflyopponent",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "buildflyopponent()"
+      "norm_label": "buildflyopponent()",
+      "id": "src_main_buildflyopponent",
+      "community_name": "main.js"
     },
     {
       "label": "flyOpponent",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L91",
+      "source_location": "L47",
       "_origin": "ast",
+      "community": 0,
+      "norm_label": "flyopponent",
       "id": "src_main_flyopponent",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "flyopponent"
-    },
-    {
-      "label": "flyAnchor",
-      "file_type": "code",
-      "source_file": "src/main.js",
-      "source_location": "L92",
-      "_origin": "ast",
-      "id": "src_main_flyanchor",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "flyanchor"
+      "community_name": "main.js"
     },
     {
       "label": "flyPaddle",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L95",
+      "source_location": "L48",
       "_origin": "ast",
-      "id": "src_main_flypaddle",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "flypaddle"
+      "norm_label": "flypaddle",
+      "id": "src_main_flypaddle",
+      "community_name": "main.js"
     },
     {
       "label": "balls",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L98",
+      "source_location": "L50",
       "_origin": "ast",
-      "id": "src_main_balls",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "balls"
+      "norm_label": "balls",
+      "id": "src_main_balls",
+      "community_name": "main.js"
     },
     {
       "label": "machine",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L99",
+      "source_location": "L51",
       "_origin": "ast",
-      "id": "src_main_machine",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "machine"
+      "norm_label": "machine",
+      "id": "src_main_machine",
+      "community_name": "main.js"
     },
     {
       "label": "session",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L99",
+      "source_location": "L51",
       "_origin": "ast",
-      "id": "src_main_session",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "session"
+      "norm_label": "session",
+      "id": "src_main_session",
+      "community_name": "main.js"
     },
     {
       "label": "physics",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L99",
+      "source_location": "L51",
       "_origin": "ast",
-      "id": "src_main_physics",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "physics"
+      "norm_label": "physics",
+      "id": "src_main_physics",
+      "community_name": "main.js"
     },
     {
       "label": "paddles",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L101",
+      "source_location": "L53",
       "_origin": "ast",
-      "id": "src_main_paddles",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "paddles"
+      "norm_label": "paddles",
+      "id": "src_main_paddles",
+      "community_name": "main.js"
     },
     {
       "label": "controllerModelFactory",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L101",
+      "source_location": "L53",
       "_origin": "ast",
-      "id": "src_main_controllermodelfactory",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "controllermodelfactory"
+      "norm_label": "controllermodelfactory",
+      "id": "src_main_controllermodelfactory",
+      "community_name": "main.js"
     },
     {
       "label": "cvRig",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L103",
+      "source_location": "L55",
       "_origin": "ast",
+      "community": 0,
+      "norm_label": "cvrig",
       "id": "src_main_cvrig",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "cvrig"
-    },
-    {
-      "label": "cvHands",
-      "file_type": "code",
-      "source_file": "src/main.js",
-      "source_location": "L105",
-      "_origin": "ast",
-      "id": "src_main_cvhands",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "cvhands"
+      "community_name": "main.js"
     },
     {
       "label": "cvPaddle",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L109",
+      "source_location": "L55",
       "_origin": "ast",
-      "id": "src_main_cvpaddle",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "cvpaddle"
+      "norm_label": "cvpaddle",
+      "id": "src_main_cvpaddle",
+      "community_name": "main.js"
     },
     {
       "label": "setPointerPose()",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L115",
+      "source_location": "L57",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_main_setpointerpose",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "setpointerpose()"
+      "norm_label": "setpointerpose()",
+      "id": "src_main_setpointerpose",
+      "community_name": "main.js"
     },
     {
       "label": "ui",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L128",
+      "source_location": "L61",
       "_origin": "ast",
-      "id": "src_main_ui",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "ui"
+      "norm_label": "ui",
+      "id": "src_main_ui",
+      "community_name": "main.js"
     },
     {
       "label": "orbit",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L191",
+      "source_location": "L81",
       "_origin": "ast",
-      "id": "src_main_orbit",
       "community": 0,
-      "community_name": "main.js",
-      "norm_label": "orbit"
+      "norm_label": "orbit",
+      "id": "src_main_orbit",
+      "community_name": "main.js"
     },
     {
       "label": "clock",
       "file_type": "code",
       "source_file": "src/main.js",
-      "source_location": "L201",
+      "source_location": "L83",
       "_origin": "ast",
+      "community": 0,
+      "norm_label": "clock",
       "id": "src_main_clock",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "clock"
-    },
-    {
-      "label": "updateFlyAI()",
-      "file_type": "code",
-      "source_file": "src/main.js",
-      "source_location": "L202",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_main_updateflyai",
-      "community": 0,
-      "community_name": "main.js",
-      "norm_label": "updateflyai()"
+      "community_name": "main.js"
     },
     {
       "label": "paddle.js",
@@ -1071,35 +841,35 @@
       "source_file": "src/paddle.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_paddle",
       "community": 6,
-      "community_name": "paddle.js",
-      "norm_label": "paddle.js"
+      "norm_label": "paddle.js",
+      "id": "src_paddle",
+      "community_name": "paddle.js"
     },
     {
       "label": "Paddle",
       "file_type": "code",
       "source_file": "src/paddle.js",
-      "source_location": "L7",
+      "source_location": "L6",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "id": "src_paddle_paddle",
       "community": 6,
-      "community_name": "paddle.js",
-      "norm_label": "paddle"
+      "norm_label": "paddle",
+      "id": "src_paddle_paddle",
+      "community_name": "paddle.js"
     },
     {
       "label": ".constructor()",
       "file_type": "code",
       "source_file": "src/paddle.js",
-      "source_location": "L8",
+      "source_location": "L7",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_paddle_paddle_constructor",
       "community": 6,
-      "community_name": "paddle.js",
-      "norm_label": ".constructor()"
+      "norm_label": ".constructor()",
+      "id": "src_paddle_paddle_constructor",
+      "community_name": "paddle.js"
     },
     {
       "label": ".attachTo()",
@@ -1108,58 +878,34 @@
       "source_location": "L22",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_paddle_paddle_attachto",
       "community": 6,
-      "community_name": "paddle.js",
-      "norm_label": ".attachto()"
+      "norm_label": ".attachto()",
+      "id": "src_paddle_paddle_attachto",
+      "community_name": "paddle.js"
     },
     {
       "label": ".update()",
       "file_type": "code",
       "source_file": "src/paddle.js",
-      "source_location": "L26",
+      "source_location": "L27",
       "_callable": true,
       "_origin": "ast",
+      "community": 6,
+      "norm_label": ".update()",
       "id": "src_paddle_paddle_update",
-      "community": 6,
-      "community_name": "paddle.js",
-      "norm_label": ".update()"
-    },
-    {
-      "label": "createBladeShape()",
-      "file_type": "code",
-      "source_file": "src/paddle.js",
-      "source_location": "L39",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_paddle_createbladeshape",
-      "community": 6,
-      "community_name": "paddle.js",
-      "norm_label": "createbladeshape()"
-    },
-    {
-      "label": "createFaceMesh()",
-      "file_type": "code",
-      "source_file": "src/paddle.js",
-      "source_location": "L55",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_paddle_createfacemesh",
-      "community": 6,
-      "community_name": "paddle.js",
-      "norm_label": "createfacemesh()"
+      "community_name": "paddle.js"
     },
     {
       "label": "buildPaddleMesh()",
       "file_type": "code",
       "source_file": "src/paddle.js",
-      "source_location": "L61",
+      "source_location": "L47",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_paddle_buildpaddlemesh",
       "community": 6,
-      "community_name": "paddle.js",
-      "norm_label": "buildpaddlemesh()"
+      "norm_label": "buildpaddlemesh()",
+      "id": "src_paddle_buildpaddlemesh",
+      "community_name": "paddle.js"
     },
     {
       "label": "physics.js",
@@ -1167,10 +913,10 @@
       "source_file": "src/physics.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_physics",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "physics.js"
+      "norm_label": "physics.js",
+      "id": "src_physics",
+      "community_name": "constants.js"
     },
     {
       "label": "_rel",
@@ -1178,10 +924,10 @@
       "source_file": "src/physics.js",
       "source_location": "L8",
       "_origin": "ast",
-      "id": "src_physics_rel",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "_rel"
+      "norm_label": "_rel",
+      "id": "src_physics_rel",
+      "community_name": "constants.js"
     },
     {
       "label": "_n",
@@ -1189,10 +935,10 @@
       "source_file": "src/physics.js",
       "source_location": "L9",
       "_origin": "ast",
-      "id": "src_physics_n",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "_n"
+      "norm_label": "_n",
+      "id": "src_physics_n",
+      "community_name": "constants.js"
     },
     {
       "label": "_tmp",
@@ -1200,10 +946,10 @@
       "source_file": "src/physics.js",
       "source_location": "L10",
       "_origin": "ast",
-      "id": "src_physics_tmp",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "_tmp"
+      "norm_label": "_tmp",
+      "id": "src_physics_tmp",
+      "community_name": "constants.js"
     },
     {
       "label": "PhysicsWorld",
@@ -1213,10 +959,10 @@
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "id": "src_physics_physicsworld",
       "community": 7,
-      "community_name": "PhysicsWorld",
-      "norm_label": "physicsworld"
+      "norm_label": "physicsworld",
+      "id": "src_physics_physicsworld",
+      "community_name": "PhysicsWorld"
     },
     {
       "label": ".constructor()",
@@ -1225,10 +971,10 @@
       "source_location": "L13",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_physics_physicsworld_constructor",
       "community": 7,
-      "community_name": "PhysicsWorld",
-      "norm_label": ".constructor()"
+      "norm_label": ".constructor()",
+      "id": "src_physics_physicsworld_constructor",
+      "community_name": "PhysicsWorld"
     },
     {
       "label": ".step()",
@@ -1237,10 +983,10 @@
       "source_location": "L20",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_physics_physicsworld_step",
       "community": 7,
-      "community_name": "PhysicsWorld",
-      "norm_label": ".step()"
+      "norm_label": ".step()",
+      "id": "src_physics_physicsworld_step",
+      "community_name": "PhysicsWorld"
     },
     {
       "label": "._integrate()",
@@ -1249,10 +995,10 @@
       "source_location": "L30",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_physics_physicsworld_integrate",
       "community": 7,
-      "community_name": "PhysicsWorld",
-      "norm_label": "._integrate()"
+      "norm_label": "._integrate()",
+      "id": "src_physics_physicsworld_integrate",
+      "community_name": "PhysicsWorld"
     },
     {
       "label": "._collidePaddle()",
@@ -1261,10 +1007,10 @@
       "source_location": "L79",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_physics_physicsworld_collidepaddle",
       "community": 7,
-      "community_name": "PhysicsWorld",
-      "norm_label": "._collidepaddle()"
+      "norm_label": "._collidepaddle()",
+      "id": "src_physics_physicsworld_collidepaddle",
+      "community_name": "PhysicsWorld"
     },
     {
       "label": "session.js",
@@ -1272,10 +1018,10 @@
       "source_file": "src/session.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_session",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "session.js"
+      "norm_label": "session.js",
+      "id": "src_session",
+      "community_name": "ui.js"
     },
     {
       "label": "DIFFICULTIES",
@@ -1283,199 +1029,142 @@
       "source_file": "src/session.js",
       "source_location": "L1",
       "_origin": "ast",
+      "community": 3,
+      "norm_label": "difficulties",
       "id": "src_session_difficulties",
-      "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "difficulties"
-    },
-    {
-      "label": "TARGET_REPETITIONS",
-      "file_type": "code",
-      "source_file": "src/session.js",
-      "source_location": "L7",
-      "_origin": "ast",
-      "id": "src_session_target_repetitions",
-      "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "target_repetitions"
-    },
-    {
-      "label": "RANKED_LIVES",
-      "file_type": "code",
-      "source_file": "src/session.js",
-      "source_location": "L10",
-      "_origin": "ast",
-      "id": "src_session_ranked_lives",
-      "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "ranked_lives"
-    },
-    {
-      "label": "TARGET_MOVES",
-      "file_type": "code",
-      "source_file": "src/session.js",
-      "source_location": "L11",
-      "_origin": "ast",
-      "id": "src_session_target_moves",
-      "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "target_moves"
+      "community_name": "ui.js"
     },
     {
       "label": "DRILLS",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L20",
+      "source_location": "L7",
       "_origin": "ast",
-      "id": "src_session_drills",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "drills"
+      "norm_label": "drills",
+      "id": "src_session_drills",
+      "community_name": "ui.js"
     },
     {
       "label": "TrainerSession",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L26",
+      "source_location": "L13",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "id": "src_session_trainersession",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": "trainersession"
+      "norm_label": "trainersession",
+      "id": "src_session_trainersession",
+      "community_name": "TrainerSession"
     },
     {
       "label": ".constructor()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L27",
+      "source_location": "L14",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_session_trainersession_constructor",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".constructor()"
+      "norm_label": ".constructor()",
+      "id": "src_session_trainersession_constructor",
+      "community_name": "TrainerSession"
     },
     {
       "label": ".reset()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L29",
+      "source_location": "L15",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_session_trainersession_reset",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".reset()"
+      "norm_label": ".reset()",
+      "id": "src_session_trainersession_reset",
+      "community_name": "TrainerSession"
     },
     {
       "label": ".start()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L58",
+      "source_location": "L21",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_session_trainersession_start",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".start()"
+      "norm_label": ".start()",
+      "id": "src_session_trainersession_start",
+      "community_name": "TrainerSession"
     },
     {
       "label": ".update()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L59",
+      "source_location": "L22",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_session_trainersession_update",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".update()"
+      "norm_label": ".update()",
+      "id": "src_session_trainersession_update",
+      "community_name": "TrainerSession"
     },
     {
       "label": ".serve()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L60",
+      "source_location": "L23",
       "_callable": true,
       "_origin": "ast",
+      "community": 4,
+      "norm_label": ".serve()",
       "id": "src_session_trainersession_serve",
-      "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".serve()"
-    },
-    {
-      "label": ".getCurrentTargetMove()",
-      "file_type": "code",
-      "source_file": "src/session.js",
-      "source_location": "L61",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_session_trainersession_getcurrenttargetmove",
-      "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".getcurrenttargetmove()"
-    },
-    {
-      "label": ".isTargetHit()",
-      "file_type": "code",
-      "source_file": "src/session.js",
-      "source_location": "L62",
-      "_callable": true,
-      "_origin": "ast",
-      "id": "src_session_trainersession_istargethit",
-      "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".istargethit()"
+      "community_name": "TrainerSession"
     },
     {
       "label": ".record()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L67",
+      "source_location": "L24",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_session_trainersession_record",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".record()"
+      "norm_label": ".record()",
+      "id": "src_session_trainersession_record",
+      "community_name": "TrainerSession"
     },
     {
       "label": ".endRally()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L119",
+      "source_location": "L40",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_session_trainersession_endrally",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".endrally()"
+      "norm_label": ".endrally()",
+      "id": "src_session_trainersession_endrally",
+      "community_name": "TrainerSession"
     },
     {
       "label": ".finish()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L120",
+      "source_location": "L41",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_session_trainersession_finish",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".finish()"
+      "norm_label": ".finish()",
+      "id": "src_session_trainersession_finish",
+      "community_name": "TrainerSession"
     },
     {
       "label": ".summary()",
       "file_type": "code",
       "source_file": "src/session.js",
-      "source_location": "L122",
+      "source_location": "L42",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_session_trainersession_summary",
       "community": 4,
-      "community_name": "TrainerSession",
-      "norm_label": ".summary()"
+      "norm_label": ".summary()",
+      "id": "src_session_trainersession_summary",
+      "community_name": "TrainerSession"
     },
     {
       "label": "table.js",
@@ -1483,10 +1172,10 @@
       "source_file": "src/table.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_table",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "table.js"
+      "norm_label": "table.js",
+      "id": "src_table",
+      "community_name": "constants.js"
     },
     {
       "label": "createTable()",
@@ -1495,10 +1184,10 @@
       "source_location": "L6",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_table_createtable",
       "community": 2,
-      "community_name": "constants.js",
-      "norm_label": "createtable()"
+      "norm_label": "createtable()",
+      "id": "src_table_createtable",
+      "community_name": "constants.js"
     },
     {
       "label": "ui.js",
@@ -1506,10 +1195,10 @@
       "source_file": "src/ui.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_ui",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "ui.js"
+      "norm_label": "ui.js",
+      "id": "src_ui",
+      "community_name": "ui.js"
     },
     {
       "label": "escapeHtml()",
@@ -1518,10 +1207,10 @@
       "source_location": "L4",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_ui_escapehtml",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "escapehtml()"
+      "norm_label": "escapehtml()",
+      "id": "src_ui_escapehtml",
+      "community_name": "ui.js"
     },
     {
       "label": "createTrainerUI()",
@@ -1530,10 +1219,10 @@
       "source_location": "L6",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_ui_createtrainerui",
       "community": 3,
-      "community_name": "ui.js",
-      "norm_label": "createtrainerui()"
+      "norm_label": "createtrainerui()",
+      "id": "src_ui_createtrainerui",
+      "community_name": "ui.js"
     },
     {
       "label": "xrButtons.js",
@@ -1541,10 +1230,10 @@
       "source_file": "src/xrButtons.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_xrbuttons",
       "community": 11,
-      "community_name": "xrButtons.js",
-      "norm_label": "xrbuttons.js"
+      "norm_label": "xrbuttons.js",
+      "id": "src_xrbuttons",
+      "community_name": "xrButtons.js"
     },
     {
       "label": "SESSION_INIT",
@@ -1552,10 +1241,10 @@
       "source_file": "src/xrButtons.js",
       "source_location": "L5",
       "_origin": "ast",
-      "id": "src_xrbuttons_session_init",
       "community": 11,
-      "community_name": "xrButtons.js",
-      "norm_label": "session_init"
+      "norm_label": "session_init",
+      "id": "src_xrbuttons_session_init",
+      "community_name": "xrButtons.js"
     },
     {
       "label": "createXRButtons()",
@@ -1564,10 +1253,10 @@
       "source_location": "L16",
       "_callable": true,
       "_origin": "ast",
-      "id": "src_xrbuttons_createxrbuttons",
       "community": 11,
-      "community_name": "xrButtons.js",
-      "norm_label": "createxrbuttons()"
+      "norm_label": "createxrbuttons()",
+      "id": "src_xrbuttons_createxrbuttons",
+      "community_name": "xrButtons.js"
     },
     {
       "label": "schema.sql",
@@ -1575,10 +1264,10 @@
       "source_file": "supabase/schema.sql",
       "source_location": null,
       "_origin": "ast",
-      "id": "supabase_schema",
       "community": 8,
-      "community_name": "public.leaderboard_entries",
-      "norm_label": "schema.sql"
+      "norm_label": "schema.sql",
+      "id": "supabase_schema",
+      "community_name": "public.leaderboard_entries"
     },
     {
       "label": "public.leaderboard_entries",
@@ -1586,10 +1275,10 @@
       "source_file": "supabase/schema.sql",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "supabase_schema_public_leaderboard_entries",
       "community": 8,
-      "community_name": "public.leaderboard_entries",
-      "norm_label": "public.leaderboard_entries"
+      "norm_label": "public.leaderboard_entries",
+      "id": "supabase_schema_public_leaderboard_entries",
+      "community_name": "public.leaderboard_entries"
     },
     {
       "label": "auth.users",
@@ -1597,10 +1286,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "auth_users",
       "community": 8,
-      "community_name": "public.leaderboard_entries",
-      "norm_label": "auth.users"
+      "norm_label": "auth.users",
+      "id": "auth_users",
+      "community_name": "public.leaderboard_entries"
     },
     {
       "label": "auth",
@@ -1608,10 +1297,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "auth",
       "community": 8,
-      "community_name": "public.leaderboard_entries",
-      "norm_label": "auth"
+      "norm_label": "auth",
+      "id": "auth",
+      "community_name": "public.leaderboard_entries"
     },
     {
       "label": "vite.config.js",
@@ -1619,98 +1308,10 @@
       "source_file": "vite.config.js",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "vite_config",
       "community": 13,
-      "community_name": "vite.config.js",
-      "norm_label": "vite.config.js"
-    },
-    {
-      "label": "README.md",
-      "file_type": "document",
-      "source_file": "README.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "readme",
-      "community": 14,
-      "community_name": "flyball. Ping Pong Trainer",
-      "norm_label": "readme.md"
-    },
-    {
-      "label": "flyball. Ping Pong Trainer",
-      "file_type": "document",
-      "source_file": "README.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "readme_flyball_ping_pong_trainer",
-      "community": 14,
-      "community_name": "flyball. Ping Pong Trainer",
-      "norm_label": "flyball. ping pong trainer"
-    },
-    {
-      "label": "Run it",
-      "file_type": "document",
-      "source_file": "README.md",
-      "source_location": "L5",
-      "_origin": "ast",
-      "id": "readme_run_it",
-      "community": 14,
-      "community_name": "flyball. Ping Pong Trainer",
-      "norm_label": "run it"
-    },
-    {
-      "label": "Product flow",
-      "file_type": "document",
-      "source_file": "README.md",
-      "source_location": "L14",
-      "_origin": "ast",
-      "id": "readme_product_flow",
-      "community": 14,
-      "community_name": "flyball. Ping Pong Trainer",
-      "norm_label": "product flow"
-    },
-    {
-      "label": "Training modes",
-      "file_type": "document",
-      "source_file": "README.md",
-      "source_location": "L24",
-      "_origin": "ast",
-      "id": "readme_training_modes",
-      "community": 14,
-      "community_name": "flyball. Ping Pong Trainer",
-      "norm_label": "training modes"
-    },
-    {
-      "label": "Input modes",
-      "file_type": "document",
-      "source_file": "README.md",
-      "source_location": "L35",
-      "_origin": "ast",
-      "id": "readme_input_modes",
-      "community": 14,
-      "community_name": "flyball. Ping Pong Trainer",
-      "norm_label": "input modes"
-    },
-    {
-      "label": "Shared Supabase leaderboard",
-      "file_type": "document",
-      "source_file": "README.md",
-      "source_location": "L41",
-      "_origin": "ast",
-      "id": "readme_shared_supabase_leaderboard",
-      "community": 14,
-      "community_name": "flyball. Ping Pong Trainer",
-      "norm_label": "shared supabase leaderboard"
-    },
-    {
-      "label": "Project structure",
-      "file_type": "document",
-      "source_file": "README.md",
-      "source_location": "L51",
-      "_origin": "ast",
-      "id": "readme_project_structure",
-      "community": 14,
-      "community_name": "flyball. Ping Pong Trainer",
-      "norm_label": "project structure"
+      "norm_label": "vite.config.js",
+      "id": "vite_config",
+      "community_name": "vite.config.js"
     }
   ],
   "links": [
@@ -1718,23 +1319,23 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "package.json",
-      "source_location": "L12",
+      "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package",
-      "target": "package_dependencies",
-      "confidence_score": 1.0
+      "target": "package_dependencies"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "package.json",
-      "source_location": "L17",
+      "source_location": "L16",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package",
-      "target": "package_devdependencies",
-      "confidence_score": 1.0
+      "target": "package_devdependencies"
     },
     {
       "relation": "contains",
@@ -1743,9 +1344,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package",
-      "target": "package_name",
-      "confidence_score": 1.0
+      "target": "package_name"
     },
     {
       "relation": "contains",
@@ -1754,9 +1355,9 @@
       "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package",
-      "target": "package_private",
-      "confidence_score": 1.0
+      "target": "package_private"
     },
     {
       "relation": "contains",
@@ -1765,9 +1366,9 @@
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package",
-      "target": "package_scripts",
-      "confidence_score": 1.0
+      "target": "package_scripts"
     },
     {
       "relation": "contains",
@@ -1776,9 +1377,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package",
-      "target": "package_type",
-      "confidence_score": 1.0
+      "target": "package_type"
     },
     {
       "relation": "contains",
@@ -1787,31 +1388,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package",
-      "target": "package_version",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "package.json",
-      "source_location": "L9",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "package_scripts",
-      "target": "package_scripts_build",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "package.json",
-      "source_location": "L7",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "package_scripts",
-      "target": "package_scripts_dev",
-      "confidence_score": 1.0
+      "target": "package_version"
     },
     {
       "relation": "contains",
@@ -1820,20 +1399,42 @@
       "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_scripts",
-      "target": "package_scripts_dev_https",
-      "confidence_score": 1.0
+      "target": "package_scripts_build"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "package.json",
-      "source_location": "L10",
+      "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_scripts",
-      "target": "package_scripts_preview",
-      "confidence_score": 1.0
+      "target": "package_scripts_dev"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "package.json",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "package_scripts",
+      "target": "package_scripts_preview"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "package.json",
+      "source_location": "L12",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "package_dependencies",
+      "target": "package_dependencies_mediapipe_tasks_vision"
     },
     {
       "relation": "contains",
@@ -1842,9 +1443,9 @@
       "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_dependencies",
-      "target": "package_dependencies_mediapipe_tasks_vision",
-      "confidence_score": 1.0
+      "target": "package_dependencies_supabase_supabase_js"
     },
     {
       "relation": "contains",
@@ -1853,32 +1454,33 @@
       "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_dependencies",
-      "target": "package_dependencies_supabase_supabase_js",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "package.json",
-      "source_location": "L15",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "package_dependencies",
-      "target": "package_dependencies_three",
-      "confidence_score": 1.0
+      "target": "package_dependencies_three"
     },
     {
       "relation": "imports",
       "confidence": "EXTRACTED",
       "source_file": "package.json",
-      "source_location": "L13",
+      "source_location": "L12",
       "weight": 1.0,
       "context": "import",
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_dependencies_mediapipe_tasks_vision",
-      "target": "mediapipe_tasks_vision",
-      "confidence_score": 1.0
+      "target": "mediapipe_tasks_vision"
+    },
+    {
+      "relation": "imports",
+      "confidence": "EXTRACTED",
+      "source_file": "package.json",
+      "source_location": "L13",
+      "weight": 1.0,
+      "context": "import",
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "package_dependencies_supabase_supabase_js",
+      "target": "supabase_supabase_js"
     },
     {
       "relation": "imports",
@@ -1888,32 +1490,9 @@
       "weight": 1.0,
       "context": "import",
       "_origin": "ast",
-      "source": "package_dependencies_supabase_supabase_js",
-      "target": "supabase_supabase_js",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "confidence": "EXTRACTED",
-      "source_file": "package.json",
-      "source_location": "L15",
-      "weight": 1.0,
-      "context": "import",
-      "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_dependencies_three",
-      "target": "three",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "package.json",
-      "source_location": "L19",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "package_devdependencies",
-      "target": "package_devdependencies_vite",
-      "confidence_score": 1.0
+      "target": "three"
     },
     {
       "relation": "contains",
@@ -1922,33 +1501,44 @@
       "source_location": "L18",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_devdependencies",
-      "target": "package_devdependencies_vitejs_plugin_basic_ssl",
-      "confidence_score": 1.0
+      "target": "package_devdependencies_vite"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "package.json",
+      "source_location": "L17",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "package_devdependencies",
+      "target": "package_devdependencies_vitejs_plugin_basic_ssl"
     },
     {
       "relation": "imports",
       "confidence": "EXTRACTED",
       "source_file": "package.json",
-      "source_location": "L18",
+      "source_location": "L17",
       "weight": 1.0,
       "context": "import",
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_devdependencies_vitejs_plugin_basic_ssl",
-      "target": "vitejs_plugin_basic_ssl",
-      "confidence_score": 1.0
+      "target": "vitejs_plugin_basic_ssl"
     },
     {
       "relation": "imports",
       "confidence": "EXTRACTED",
       "source_file": "package.json",
-      "source_location": "L19",
+      "source_location": "L18",
       "weight": 1.0,
       "context": "import",
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "package_devdependencies_vite",
-      "target": "vite",
-      "confidence_score": 1.0
+      "target": "vite"
     },
     {
       "relation": "contains",
@@ -1957,9 +1547,9 @@
       "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ball",
-      "target": "src_ball_ball",
-      "confidence_score": 1.0
+      "target": "src_ball_ball"
     },
     {
       "relation": "imports_from",
@@ -1969,9 +1559,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ball",
-      "target": "src_constants",
-      "confidence_score": 1.0
+      "target": "src_constants"
     },
     {
       "relation": "imports",
@@ -1981,21 +1571,21 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ball",
-      "target": "src_constants_ball",
-      "confidence_score": 1.0
+      "target": "src_constants_ball"
     },
     {
       "relation": "imports_from",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L9",
+      "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_ball",
-      "confidence_score": 1.0
+      "target": "src_ball"
     },
     {
       "relation": "method",
@@ -2004,9 +1594,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ball_ball",
-      "target": "src_ball_ball_constructor",
-      "confidence_score": 1.0
+      "target": "src_ball_ball_constructor"
     },
     {
       "relation": "method",
@@ -2015,9 +1605,9 @@
       "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ball_ball",
-      "target": "src_ball_ball_deactivate",
-      "confidence_score": 1.0
+      "target": "src_ball_ball_deactivate"
     },
     {
       "relation": "method",
@@ -2026,21 +1616,21 @@
       "source_location": "L16",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ball_ball",
-      "target": "src_ball_ball_serve",
-      "confidence_score": 1.0
+      "target": "src_ball_ball_serve"
     },
     {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L9",
+      "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_ball_ball",
-      "confidence_score": 1.0
+      "target": "src_ball_ball"
     },
     {
       "relation": "contains",
@@ -2049,9 +1639,9 @@
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ballmachine",
-      "target": "src_ballmachine_ballmachine",
-      "confidence_score": 1.0
+      "target": "src_ballmachine_ballmachine"
     },
     {
       "relation": "imports_from",
@@ -2061,9 +1651,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ballmachine",
-      "target": "src_constants",
-      "confidence_score": 1.0
+      "target": "src_constants"
     },
     {
       "relation": "imports",
@@ -2073,9 +1663,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ballmachine",
-      "target": "src_constants_play_area",
-      "confidence_score": 1.0
+      "target": "src_constants_play_area"
     },
     {
       "relation": "imports",
@@ -2085,21 +1675,21 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ballmachine",
-      "target": "src_constants_table",
-      "confidence_score": 1.0
+      "target": "src_constants_table"
     },
     {
       "relation": "imports_from",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L11",
+      "source_location": "L10",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_ballmachine",
-      "confidence_score": 1.0
+      "target": "src_ballmachine"
     },
     {
       "relation": "method",
@@ -2108,9 +1698,9 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ballmachine_ballmachine",
-      "target": "src_ballmachine_ballmachine_constructor",
-      "confidence_score": 1.0
+      "target": "src_ballmachine_ballmachine_constructor"
     },
     {
       "relation": "method",
@@ -2119,9 +1709,9 @@
       "source_location": "L32",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ballmachine_ballmachine",
-      "target": "src_ballmachine_ballmachine_serve",
-      "confidence_score": 1.0
+      "target": "src_ballmachine_ballmachine_serve"
     },
     {
       "relation": "method",
@@ -2130,21 +1720,21 @@
       "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ballmachine_ballmachine",
-      "target": "src_ballmachine_ballmachine_update",
-      "confidence_score": 1.0
+      "target": "src_ballmachine_ballmachine_update"
     },
     {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L11",
+      "source_location": "L10",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_ballmachine_ballmachine",
-      "confidence_score": 1.0
+      "target": "src_ballmachine_ballmachine"
     },
     {
       "relation": "calls",
@@ -2154,9 +1744,9 @@
       "source_location": "L28",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ballmachine_ballmachine_update",
-      "target": "src_ballmachine_ballmachine_serve",
-      "confidence_score": 1.0
+      "target": "src_ballmachine_ballmachine_serve"
     },
     {
       "relation": "contains",
@@ -2165,9 +1755,9 @@
       "source_location": "L15",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_constants",
-      "target": "src_constants_ball",
-      "confidence_score": 1.0
+      "target": "src_constants_ball"
     },
     {
       "relation": "contains",
@@ -2176,9 +1766,9 @@
       "source_location": "L10",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_constants",
-      "target": "src_constants_net",
-      "confidence_score": 1.0
+      "target": "src_constants_net"
     },
     {
       "relation": "contains",
@@ -2187,9 +1777,9 @@
       "source_location": "L22",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_constants",
-      "target": "src_constants_paddle",
-      "confidence_score": 1.0
+      "target": "src_constants_paddle"
     },
     {
       "relation": "contains",
@@ -2198,9 +1788,9 @@
       "source_location": "L29",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_constants",
-      "target": "src_constants_physics",
-      "confidence_score": 1.0
+      "target": "src_constants_physics"
     },
     {
       "relation": "contains",
@@ -2209,9 +1799,9 @@
       "source_location": "L38",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_constants",
-      "target": "src_constants_play_area",
-      "confidence_score": 1.0
+      "target": "src_constants_play_area"
     },
     {
       "relation": "contains",
@@ -2220,21 +1810,21 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_constants",
-      "target": "src_constants_table",
-      "confidence_score": 1.0
+      "target": "src_constants_table"
     },
     {
       "relation": "imports_from",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L12",
+      "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_constants",
-      "confidence_score": 1.0
+      "target": "src_constants"
     },
     {
       "relation": "imports_from",
@@ -2244,9 +1834,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_paddle",
-      "target": "src_constants",
-      "confidence_score": 1.0
+      "target": "src_constants"
     },
     {
       "relation": "imports_from",
@@ -2256,9 +1846,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_constants",
-      "confidence_score": 1.0
+      "target": "src_constants"
     },
     {
       "relation": "imports_from",
@@ -2268,21 +1858,21 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_table",
-      "target": "src_constants",
-      "confidence_score": 1.0
+      "target": "src_constants"
     },
     {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L12",
+      "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_constants_table",
-      "confidence_score": 1.0
+      "target": "src_constants_table"
     },
     {
       "relation": "imports",
@@ -2292,9 +1882,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_constants_table",
-      "confidence_score": 1.0
+      "target": "src_constants_table"
     },
     {
       "relation": "imports",
@@ -2304,9 +1894,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_table",
-      "target": "src_constants_table",
-      "confidence_score": 1.0
+      "target": "src_constants_table"
     },
     {
       "relation": "imports",
@@ -2316,9 +1906,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_constants_net",
-      "confidence_score": 1.0
+      "target": "src_constants_net"
     },
     {
       "relation": "imports",
@@ -2328,9 +1918,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_table",
-      "target": "src_constants_net",
-      "confidence_score": 1.0
+      "target": "src_constants_net"
     },
     {
       "relation": "imports",
@@ -2340,9 +1930,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_constants_ball",
-      "confidence_score": 1.0
+      "target": "src_constants_ball"
     },
     {
       "relation": "imports",
@@ -2352,9 +1942,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_paddle",
-      "target": "src_constants_paddle",
-      "confidence_score": 1.0
+      "target": "src_constants_paddle"
     },
     {
       "relation": "imports",
@@ -2364,9 +1954,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_constants_paddle",
-      "confidence_score": 1.0
+      "target": "src_constants_paddle"
     },
     {
       "relation": "imports",
@@ -2376,192 +1966,21 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_constants_physics",
-      "confidence_score": 1.0
+      "target": "src_constants_physics"
     },
     {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L12",
+      "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_constants_play_area",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L126",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_builddiscogear",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L17",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_buildenvironment",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L3",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_camera",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L8",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_gridgeo",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L7",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_groundgeo",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L10",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_makegridmesh",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L4",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_projector",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L72",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_syncenvironmentwithscenecolor",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L76",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment",
-      "target": "src_environment_updatepalette",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L5",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_environment",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L37",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment_buildenvironment",
-      "target": "src_environment_makegridmesh",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L5",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_environment_buildenvironment",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/environment.js",
-      "source_location": "L92",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_environment_updatepalette",
-      "target": "src_environment_builddiscogear",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L5",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_environment_updatepalette",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L48",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main_applylandscape",
-      "target": "src_environment_updatepalette",
-      "confidence_score": 1.0
+      "target": "src_constants_play_area"
     },
     {
       "relation": "contains",
@@ -2570,88 +1989,77 @@
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_handtracking",
-      "target": "src_handtracking_starthandtracking",
-      "confidence_score": 1.0
+      "target": "src_handtracking_starthandtracking"
     },
     {
       "relation": "imports_from",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L15",
+      "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_handtracking",
-      "confidence_score": 1.0
+      "target": "src_handtracking"
     },
     {
       "relation": "imports",
       "context": "import",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L15",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_handtracking_starthandtracking",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/leaderboard.js",
-      "source_location": "L8",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_leaderboard",
-      "target": "src_leaderboard_demo",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/leaderboard.js",
-      "source_location": "L51",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_leaderboard",
-      "target": "src_leaderboard_getleaderboard",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/leaderboard.js",
       "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "src_leaderboard",
-      "target": "src_leaderboard_readlocalscores",
-      "confidence_score": 1.0
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_handtracking_starthandtracking"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/leaderboard.js",
-      "source_location": "L32",
+      "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_leaderboard",
-      "target": "src_leaderboard_scorefor",
-      "confidence_score": 1.0
+      "target": "src_leaderboard_demo"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/leaderboard.js",
-      "source_location": "L39",
+      "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_leaderboard",
-      "target": "src_leaderboard_submitscore",
-      "confidence_score": 1.0
+      "target": "src_leaderboard_getleaderboard"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/leaderboard.js",
+      "source_location": "L13",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_leaderboard",
+      "target": "src_leaderboard_scorefor"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/leaderboard.js",
+      "source_location": "L18",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_leaderboard",
+      "target": "src_leaderboard_submitscore"
     },
     {
       "relation": "contains",
@@ -2660,20 +2068,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_leaderboard",
-      "target": "src_leaderboard_supabase",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/leaderboard.js",
-      "source_location": "L23",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_leaderboard",
-      "target": "src_leaderboard_writelocalscore",
-      "confidence_score": 1.0
+      "target": "src_leaderboard_supabase"
     },
     {
       "relation": "imports_from",
@@ -2683,57 +2080,21 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_leaderboard",
-      "confidence_score": 1.0
+      "target": "src_leaderboard"
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/leaderboard.js",
-      "source_location": "L53",
+      "source_location": "L19",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "src_leaderboard_getleaderboard",
-      "target": "src_leaderboard_readlocalscores",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/leaderboard.js",
-      "source_location": "L25",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_leaderboard_writelocalscore",
-      "target": "src_leaderboard_readlocalscores",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/leaderboard.js",
-      "source_location": "L42",
-      "weight": 1.0,
-      "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_leaderboard_submitscore",
-      "target": "src_leaderboard_writelocalscore",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/leaderboard.js",
-      "source_location": "L40",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_leaderboard_submitscore",
-      "target": "src_leaderboard_scorefor",
-      "confidence_score": 1.0
+      "target": "src_leaderboard_scorefor"
     },
     {
       "relation": "imports",
@@ -2743,9 +2104,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_leaderboard_scorefor",
-      "confidence_score": 1.0
+      "target": "src_leaderboard_scorefor"
     },
     {
       "relation": "calls",
@@ -2753,7 +2114,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/ui.js",
-      "source_location": "L108",
+      "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_ui_createtrainerui",
@@ -2767,9 +2128,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_leaderboard_submitscore",
-      "confidence_score": 1.0
+      "target": "src_leaderboard_submitscore"
     },
     {
       "relation": "calls",
@@ -2777,7 +2138,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/ui.js",
-      "source_location": "L166",
+      "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_ui_createtrainerui",
@@ -2791,9 +2152,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_leaderboard_getleaderboard",
-      "confidence_score": 1.0
+      "target": "src_leaderboard_getleaderboard"
     },
     {
       "relation": "calls",
@@ -2801,177 +2162,34 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/ui.js",
-      "source_location": "L112",
+      "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_ui_createtrainerui",
       "target": "src_leaderboard_getleaderboard"
     },
     {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L44",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_applylandscape",
-      "confidence_score": 1.0
-    },
-    {
       "relation": "indirect_call",
       "confidence": "INFERRED",
       "source_file": "src/main.js",
-      "source_location": "L51",
+      "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
       "context": "collection",
+      "confidence_score": 0.5,
       "source": "src_main",
-      "target": "src_main_applymode",
-      "confidence_score": 0.5
+      "target": "src_main_applymode"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L98",
+      "source_location": "L50",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_balls",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L85",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_buildflyopponent",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L69",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_buildhands",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L36",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_camera",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L201",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_clock",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L101",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_controllermodelfactory",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L105",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_cvhands",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L109",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_cvpaddle",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L103",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_cvrig",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L92",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_flyanchor",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L91",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_flyopponent",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L95",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_flypaddle",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L38",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_keylight",
-      "confidence_score": 1.0
+      "target": "src_main_balls"
     },
     {
       "relation": "contains",
@@ -2980,9 +2198,9 @@
       "source_location": "L41",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_landscapeenvironment",
-      "confidence_score": 1.0
+      "target": "src_main_buildflyopponent"
     },
     {
       "relation": "contains",
@@ -2991,119 +2209,31 @@
       "source_location": "L33",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_landscapes",
-      "confidence_score": 1.0
+      "target": "src_main_buildhands"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L99",
+      "source_location": "L21",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_machine",
-      "confidence_score": 1.0
+      "target": "src_main_camera"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L191",
+      "source_location": "L83",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_orbit",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L101",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_paddles",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L99",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_physics",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L37",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_playerrig",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L26",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_renderer",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L31",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_scene",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L99",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_session",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L115",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_setpointerpose",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L39",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_main_table",
-      "confidence_score": 1.0
+      "target": "src_main_clock"
     },
     {
       "relation": "contains",
@@ -3112,9 +2242,9 @@
       "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_targetmarker",
-      "confidence_score": 1.0
+      "target": "src_main_controllermodelfactory"
     },
     {
       "relation": "contains",
@@ -3123,276 +2253,396 @@
       "source_location": "L55",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_targetring",
-      "confidence_score": 1.0
+      "target": "src_main_cvpaddle"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L128",
+      "source_location": "L55",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_ui",
-      "confidence_score": 1.0
+      "target": "src_main_cvrig"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L202",
+      "source_location": "L47",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_updateflyai",
-      "confidence_score": 1.0
+      "target": "src_main_flyopponent"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L58",
+      "source_location": "L48",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_updatetargetmarker",
-      "confidence_score": 1.0
+      "target": "src_main_flypaddle"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L32",
+      "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_vr_background",
-      "confidence_score": 1.0
+      "target": "src_main_keylight"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/main.js",
-      "source_location": "L43",
+      "source_location": "L51",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_main",
-      "target": "src_main_vrenvironment",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L8",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_paddle",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L8",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_paddle_paddle",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L10",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_physics",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L10",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_physics_physicsworld",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L13",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_session",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L13",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_session_difficulties",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L13",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_session_ranked_lives",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L13",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_session_trainersession",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L6",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_table",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L6",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_table_createtable",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L14",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_ui",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L14",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_ui_createtrainerui",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L7",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_xrbuttons",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/main.js",
-      "source_location": "L7",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_main",
-      "target": "src_xrbuttons_createxrbuttons",
-      "confidence_score": 1.0
+      "target": "src_main_machine"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/paddle.js",
+      "source_file": "src/main.js",
+      "source_location": "L81",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_orbit"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L53",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_paddles"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L51",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_physics"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L22",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_playerrig"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L17",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_renderer"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L20",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_scene"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L51",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_session"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L57",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_setpointerpose"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L24",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_table"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L28",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_targetmarker"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L30",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_targetring"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
       "source_location": "L61",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "src_paddle",
-      "target": "src_paddle_buildpaddlemesh",
-      "confidence_score": 1.0
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_ui"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/paddle.js",
-      "source_location": "L39",
+      "source_file": "src/main.js",
+      "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "src_paddle",
-      "target": "src_paddle_createbladeshape",
-      "confidence_score": 1.0
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_vr_background"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
-      "source_file": "src/paddle.js",
-      "source_location": "L55",
+      "source_file": "src/main.js",
+      "source_location": "L24",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "src_paddle",
-      "target": "src_paddle_createfacemesh",
-      "confidence_score": 1.0
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_main_vrenvironment"
     },
     {
-      "relation": "contains",
+      "relation": "imports_from",
+      "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "src/paddle.js",
+      "source_file": "src/main.js",
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_paddle"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_paddle_paddle"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_physics"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L9",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_physics_physicsworld"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L12",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_session"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L12",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_session_difficulties"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L12",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_session_trainersession"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_table"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_table_createtable"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L13",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_ui"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L13",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_ui_createtrainerui"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_xrbuttons"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.js",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_main",
+      "target": "src_xrbuttons_createxrbuttons"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/paddle.js",
+      "source_location": "L47",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_paddle",
-      "target": "src_paddle_paddle",
-      "confidence_score": 1.0
+      "target": "src_paddle_buildpaddlemesh"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/paddle.js",
+      "source_location": "L6",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_paddle",
+      "target": "src_paddle_paddle"
     },
     {
       "relation": "method",
@@ -3401,55 +2651,43 @@
       "source_location": "L22",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_paddle_paddle",
-      "target": "src_paddle_paddle_attachto",
-      "confidence_score": 1.0
+      "target": "src_paddle_paddle_attachto"
     },
     {
       "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "src/paddle.js",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_paddle_paddle",
+      "target": "src_paddle_paddle_constructor"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "src/paddle.js",
+      "source_location": "L27",
+      "weight": 1.0,
+      "_origin": "ast",
+      "confidence_score": 1.0,
+      "source": "src_paddle_paddle",
+      "target": "src_paddle_paddle_update"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/paddle.js",
       "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "src_paddle_paddle",
-      "target": "src_paddle_paddle_constructor",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "src/paddle.js",
-      "source_location": "L26",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_paddle_paddle",
-      "target": "src_paddle_paddle_update",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/paddle.js",
-      "source_location": "L11",
-      "weight": 1.0,
-      "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_paddle_paddle_constructor",
-      "target": "src_paddle_buildpaddlemesh",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/paddle.js",
-      "source_location": "L66",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_paddle_buildpaddlemesh",
-      "target": "src_paddle_createbladeshape",
-      "confidence_score": 1.0
+      "target": "src_paddle_buildpaddlemesh"
     },
     {
       "relation": "contains",
@@ -3458,9 +2696,9 @@
       "source_location": "L9",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_physics_n",
-      "confidence_score": 1.0
+      "target": "src_physics_n"
     },
     {
       "relation": "contains",
@@ -3469,9 +2707,9 @@
       "source_location": "L12",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_physics_physicsworld",
-      "confidence_score": 1.0
+      "target": "src_physics_physicsworld"
     },
     {
       "relation": "contains",
@@ -3480,9 +2718,9 @@
       "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_physics_rel",
-      "confidence_score": 1.0
+      "target": "src_physics_rel"
     },
     {
       "relation": "contains",
@@ -3491,9 +2729,9 @@
       "source_location": "L10",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics",
-      "target": "src_physics_tmp",
-      "confidence_score": 1.0
+      "target": "src_physics_tmp"
     },
     {
       "relation": "method",
@@ -3502,9 +2740,9 @@
       "source_location": "L79",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics_physicsworld",
-      "target": "src_physics_physicsworld_collidepaddle",
-      "confidence_score": 1.0
+      "target": "src_physics_physicsworld_collidepaddle"
     },
     {
       "relation": "method",
@@ -3513,9 +2751,9 @@
       "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics_physicsworld",
-      "target": "src_physics_physicsworld_constructor",
-      "confidence_score": 1.0
+      "target": "src_physics_physicsworld_constructor"
     },
     {
       "relation": "method",
@@ -3524,9 +2762,9 @@
       "source_location": "L30",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics_physicsworld",
-      "target": "src_physics_physicsworld_integrate",
-      "confidence_score": 1.0
+      "target": "src_physics_physicsworld_integrate"
     },
     {
       "relation": "method",
@@ -3535,9 +2773,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics_physicsworld",
-      "target": "src_physics_physicsworld_step",
-      "confidence_score": 1.0
+      "target": "src_physics_physicsworld_step"
     },
     {
       "relation": "calls",
@@ -3547,9 +2785,9 @@
       "source_location": "L24",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics_physicsworld_step",
-      "target": "src_physics_physicsworld_integrate",
-      "confidence_score": 1.0
+      "target": "src_physics_physicsworld_integrate"
     },
     {
       "relation": "calls",
@@ -3559,9 +2797,9 @@
       "source_location": "L75",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_physics_physicsworld_integrate",
-      "target": "src_physics_physicsworld_collidepaddle",
-      "confidence_score": 1.0
+      "target": "src_physics_physicsworld_collidepaddle"
     },
     {
       "relation": "contains",
@@ -3570,42 +2808,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session",
-      "target": "src_session_difficulties",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/session.js",
-      "source_location": "L20",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_session",
-      "target": "src_session_drills",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/session.js",
-      "source_location": "L10",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_session",
-      "target": "src_session_ranked_lives",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/session.js",
-      "source_location": "L11",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_session",
-      "target": "src_session_target_moves",
-      "confidence_score": 1.0
+      "target": "src_session_difficulties"
     },
     {
       "relation": "contains",
@@ -3614,20 +2819,20 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session",
-      "target": "src_session_target_repetitions",
-      "confidence_score": 1.0
+      "target": "src_session_drills"
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L26",
+      "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session",
-      "target": "src_session_trainersession",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession"
     },
     {
       "relation": "imports_from",
@@ -3637,9 +2842,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_session",
-      "confidence_score": 1.0
+      "target": "src_session"
     },
     {
       "relation": "imports",
@@ -3649,9 +2854,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_session_difficulties",
-      "confidence_score": 1.0
+      "target": "src_session_difficulties"
     },
     {
       "relation": "imports",
@@ -3661,166 +2866,144 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_session_drills",
-      "confidence_score": 1.0
+      "target": "src_session_drills"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L27",
+      "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_constructor",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_constructor"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L119",
+      "source_location": "L40",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_endrally",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_endrally"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L120",
+      "source_location": "L41",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_finish",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_finish"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L61",
+      "source_location": "L24",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_getcurrenttargetmove",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_record"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L62",
+      "source_location": "L15",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_istargethit",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_reset"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L67",
+      "source_location": "L23",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_record",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_serve"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L29",
+      "source_location": "L21",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_reset",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_start"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L60",
+      "source_location": "L42",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_serve",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_summary"
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L58",
+      "source_location": "L22",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession",
-      "target": "src_session_trainersession_start",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "src/session.js",
-      "source_location": "L122",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_session_trainersession",
-      "target": "src_session_trainersession_summary",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "src/session.js",
-      "source_location": "L59",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_session_trainersession",
-      "target": "src_session_trainersession_update",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_update"
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L27",
+      "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession_constructor",
-      "target": "src_session_trainersession_reset",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_reset"
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L120",
+      "source_location": "L41",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession_finish",
-      "target": "src_session_trainersession_update",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_update"
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L70",
+      "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession_record",
-      "target": "src_session_trainersession_update",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_update"
     },
     {
       "relation": "calls",
@@ -3828,7 +3011,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/ui.js",
-      "source_location": "L92",
+      "source_location": "L19",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_ui_createtrainerui",
@@ -3839,72 +3022,36 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L84",
+      "source_location": "L37",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession_record",
-      "target": "src_session_trainersession_getcurrenttargetmove",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_endrally"
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L129",
+      "source_location": "L41",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "src_session_trainersession_summary",
-      "target": "src_session_trainersession_getcurrenttargetmove",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/session.js",
-      "source_location": "L87",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_session_trainersession_record",
-      "target": "src_session_trainersession_istargethit",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/session.js",
-      "source_location": "L111",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "src_session_trainersession_record",
-      "target": "src_session_trainersession_endrally",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/session.js",
-      "source_location": "L120",
-      "weight": 1.0,
-      "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession_finish",
-      "target": "src_session_trainersession_endrally",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_endrally"
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/session.js",
-      "source_location": "L120",
+      "source_location": "L41",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_session_trainersession_finish",
-      "target": "src_session_trainersession_summary",
-      "confidence_score": 1.0
+      "target": "src_session_trainersession_summary"
     },
     {
       "relation": "contains",
@@ -3913,9 +3060,9 @@
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_table",
-      "target": "src_table_createtable",
-      "confidence_score": 1.0
+      "target": "src_table_createtable"
     },
     {
       "relation": "contains",
@@ -3924,9 +3071,9 @@
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_ui_createtrainerui",
-      "confidence_score": 1.0
+      "target": "src_ui_createtrainerui"
     },
     {
       "relation": "contains",
@@ -3935,21 +3082,21 @@
       "source_location": "L4",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui",
-      "target": "src_ui_escapehtml",
-      "confidence_score": 1.0
+      "target": "src_ui_escapehtml"
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/ui.js",
-      "source_location": "L132",
+      "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_ui_createtrainerui",
-      "target": "src_ui_escapehtml",
-      "confidence_score": 1.0
+      "target": "src_ui_escapehtml"
     },
     {
       "relation": "contains",
@@ -3958,9 +3105,9 @@
       "source_location": "L16",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_xrbuttons",
-      "target": "src_xrbuttons_createxrbuttons",
-      "confidence_score": 1.0
+      "target": "src_xrbuttons_createxrbuttons"
     },
     {
       "relation": "contains",
@@ -3969,9 +3116,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "src_xrbuttons",
-      "target": "src_xrbuttons_session_init",
-      "confidence_score": 1.0
+      "target": "src_xrbuttons_session_init"
     },
     {
       "relation": "contains",
@@ -3980,9 +3127,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "supabase_schema",
-      "target": "supabase_schema_public_leaderboard_entries",
-      "confidence_score": 1.0
+      "target": "supabase_schema_public_leaderboard_entries"
     },
     {
       "relation": "references",
@@ -3991,9 +3138,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "supabase_schema_public_leaderboard_entries",
-      "target": "auth",
-      "confidence_score": 1.0
+      "target": "auth"
     },
     {
       "relation": "references",
@@ -4002,88 +3149,11 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "supabase_schema_public_leaderboard_entries",
-      "target": "auth_users",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "README.md",
-      "source_location": "L1",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "readme",
-      "target": "readme_flyball_ping_pong_trainer",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "README.md",
-      "source_location": "L35",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "readme_flyball_ping_pong_trainer",
-      "target": "readme_input_modes",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "README.md",
-      "source_location": "L14",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "readme_flyball_ping_pong_trainer",
-      "target": "readme_product_flow",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "README.md",
-      "source_location": "L51",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "readme_flyball_ping_pong_trainer",
-      "target": "readme_project_structure",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "README.md",
-      "source_location": "L5",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "readme_flyball_ping_pong_trainer",
-      "target": "readme_run_it",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "README.md",
-      "source_location": "L41",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "readme_flyball_ping_pong_trainer",
-      "target": "readme_shared_supabase_leaderboard",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "README.md",
-      "source_location": "L24",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "readme_flyball_ping_pong_trainer",
-      "target": "readme_training_modes",
-      "confidence_score": 1.0
+      "target": "auth_users"
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "316769fd15e9f8530f4f163ee2ed92742e3a39d4"
+  "built_at_commit": "34ab975603164aabe3ab482ba39a0b9801c8172b"
 }

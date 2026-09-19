@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './styles.css';
+import { buildEnvironment, setEnvironmentPalette } from './environment.js';
 import { createTable } from './table.js';
 import { createXRButtons } from './xrButtons.js';
 import { Paddle } from './paddle.js';
@@ -29,14 +30,22 @@ window.__flyballRenderers ??= [];
 window.__flyballRenderers.push(renderer);
 const scene = new THREE.Scene();
 const VR_BACKGROUND = new THREE.Color(0x101018);
-const LANDSCAPES = { classic: 0x101018, sunset: 0x3b1f2b, neon: 0x071d2c };
+const LANDSCAPES = { classic: 0x101018, sunset: 0x3b1f2b, neon: 0x071d2c, disco: 0x0b0716 };
 let landscapeBackground = VR_BACKGROUND;
 scene.background = landscapeBackground;
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
 const playerRig = new THREE.Group(); playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z); playerRig.add(camera); scene.add(playerRig); camera.position.set(0, 1.6, 0);
 scene.add(new THREE.HemisphereLight(0xbbccff, 0x334422, 0.9)); const keyLight = new THREE.DirectionalLight(0xfff1d0, 1.5); keyLight.position.set(3, 6, 2); scene.add(keyLight);
-const table = createTable(); scene.add(table); const vrEnvironment = table.getObjectByName('vr-environment');
-function applyLandscape(name = 'classic') { landscapeBackground = new THREE.Color(LANDSCAPES[name] ?? LANDSCAPES.classic); if (!renderer.xr.isPresenting) scene.background = landscapeBackground; }
+const table = createTable(); scene.add(table);
+const landscapeEnvironment = buildEnvironment(VR_BACKGROUND.getHex());
+scene.add(landscapeEnvironment.group);
+const vrEnvironment = table.getObjectByName('vr-environment');
+function applyLandscape(name = 'classic') {
+  const palette = LANDSCAPES[name] ?? LANDSCAPES.classic;
+  landscapeBackground = new THREE.Color(palette);
+  if (!renderer.xr.isPresenting) scene.background = landscapeBackground;
+  setEnvironmentPalette(name, landscapeEnvironment);
+}
 function applyMode(mode) { const isAR = mode === 'immersive-ar'; scene.background = isAR ? null : landscapeBackground; if (vrEnvironment) vrEnvironment.visible = !isAR; }
 createXRButtons(renderer, { onModeChange: applyMode }); renderer.xr.addEventListener('sessionend', () => applyMode(null));
 
@@ -88,6 +97,14 @@ flyPaddle.attachTo(flyAnchor);
 const balls = Array.from({ length: BALL_POOL_SIZE }, () => new Ball()); balls.forEach((ball) => scene.add(ball.mesh));
 const machine = new BallMachine(balls); scene.add(machine.mesh); const session = new TrainerSession(); const physics = new PhysicsWorld();
 let training = false; let paused = false; let cvStop = null; let cvActive = false;
+// Serving is gated behind a visible 3-2-1 countdown at the start of a run and
+// after every dropped ball. While serveCountdown > 0 the ball machine holds.
+let serveCountdown = 0;
+const SERVE_COUNTDOWN_SECONDS = 3;
+function beginServeCountdown(seconds = SERVE_COUNTDOWN_SECONDS) {
+  serveCountdown = seconds;
+  ui.showCountdown(Math.ceil(seconds));
+}
 const paddles = []; const controllerModelFactory = new XRControllerModelFactory();
 for (const index of [0, 1]) { const grip = renderer.xr.getControllerGrip(index); grip.add(controllerModelFactory.createControllerModel(grip)); playerRig.add(grip); const paddle = new Paddle(); paddle.attachTo(grip); paddles.push(paddle); const controller = renderer.xr.getController(index); controller.addEventListener('selectstart', () => { machine.enabled = !machine.enabled; }); playerRig.add(controller); }
 const cvRig = new THREE.Group();
@@ -116,11 +133,11 @@ window.addEventListener('pointerrawupdate', (event) => setPointerPose(event.clie
 window.addEventListener('pointerdown', (event) => setPointerPose(event.clientX, event.clientY), { passive: true });
 
 const ui = createTrainerUI({
-  onStart(difficulty, drill, mode, landscape) { const profile = DIFFICULTIES[difficulty]; applyLandscape(landscape); session.reset(difficulty, drill); session.mode = mode ?? session.mode ?? 'casual'; session.landscape = landscape; session.start(); training = true; paused = false; document.body.classList.add('paddle-pointer-mode'); table.rotation.y = 0; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
-  onLandscapeChange(name) { applyLandscape(name); },
-  onDrillChange(nextDrill) { const difficulty = ui.getDifficulty(); const profile = DIFFICULTIES[difficulty]; balls.forEach((ball) => ball.deactivate()); session.reset(difficulty, nextDrill); if (training) { session.start(); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; } flyPaddle.enabled = training && nextDrill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); ui.update(session.summary(), training ? 'TRAINING' : 'READY'); },
+  onStart(difficulty, drill, mode, landscape) { const profile = DIFFICULTIES[difficulty]; applyLandscape(landscape ?? 'classic'); session.reset(difficulty, drill); session.mode = mode ?? session.mode ?? 'casual'; session.landscape = landscape; session.start(); training = true; paused = false; document.body.classList.add('paddle-pointer-mode'); table.rotation.y = 0; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.setLives(session.mode === 'ranked' ? RANKED_LIVES : 0); beginServeCountdown(); ui.update(session.summary(), 'TRAINING'); },
+  onLandscapeChange(name) { applyLandscape(name ?? 'classic'); },
+  onDrillChange(nextDrill) { const difficulty = ui.getDifficulty(); const profile = DIFFICULTIES[difficulty]; balls.forEach((ball) => ball.deactivate()); session.reset(difficulty, nextDrill); if (training) { session.start(); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; beginServeCountdown(); } flyPaddle.enabled = training && nextDrill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); ui.setLives(training && session.mode === 'ranked' ? RANKED_LIVES : 0); ui.update(session.summary(), training ? 'TRAINING' : 'READY'); },
   onPause() { paused = !paused; machine.enabled = training && !paused; ui.feedback(paused ? 'Training paused.' : 'Rally live.', paused ? '' : 'success'); },
-  onReset() { training = false; paused = false; document.body.classList.remove('paddle-pointer-mode'); machine.enabled = false; flyPaddle.enabled = false; updateTargetMarker(null); balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.update(session.summary(), 'READY'); },
+  onReset() { training = false; paused = false; serveCountdown = 0; ui.hideCountdown(); document.body.classList.remove('paddle-pointer-mode'); machine.enabled = false; flyPaddle.enabled = false; updateTargetMarker(null); balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.setLives(0); ui.update(session.summary(), 'READY'); },
   onMachineToggle() { machine.enabled = !machine.enabled; return machine.enabled; },
   onEnableCV() { if (cvStop) { cvStop(); cvStop = null; cvActive = false; cvRig.visible = true; return; } cvActive = true; startHandTracking((pose) => { cvRig.visible = true; cvRig.position.set((pose.x - .5) * 1.25, .95 + (.5 - pose.y) * .7, -.72); cvRig.rotation.set(0, 0, -pose.angle); }, (message) => ui.feedback(message, 'success')).then((stop) => { cvStop = stop; }).catch((error) => { cvActive = false; ui.feedback(error.message, 'error'); }); },
 });
@@ -128,6 +145,9 @@ const ui = createTrainerUI({
 machine.onServe = () => { session.serve(); ui.update(session.summary(), 'SERVE'); };
 physics.onBounce = (ball, event, details = {}) => {
   if (!training || paused) return;
+  // A ball settling on the floor fires many bounce events; only the first
+  // counts as a drop. Ignore the rest until the ball is re-served.
+  if (event === 'floor' && ball.floorCounted) return;
   const result = session.record(event, { ...details, position: ball.mesh.position.clone() });
   if (event === 'paddle') ui.feedback(details.owner === 'fly' ? 'Fly return — move early.' : session.drill === 'fly' ? 'Nice placement — make the fly move.' : 'Nice return', 'success');
   if (event === 'table' && result.targetHit) {
@@ -152,26 +172,38 @@ physics.onBounce = (ball, event, details = {}) => {
   if (event === 'table') ui.update(session.summary(), 'RALLY');
   if (event === 'net') ui.feedback('Net error — close the racket angle.', 'error');
   if (event === 'floor') {
+    ball.floorCounted = true;
     const flyMiss = session.drill === 'fly' && ball.mesh.position.z < 0;
     const rankedRunOver = session.mode === 'ranked' && result.playerMiss && session.misses >= RANKED_LIVES;
+    // The dropped ball vanishes right away so it can't rebound or double-count.
+    ball.deactivate();
     if (rankedRunOver) {
       training = false;
       paused = false;
+      serveCountdown = 0;
+      ui.hideCountdown();
       machine.enabled = false;
       flyPaddle.enabled = false;
       updateTargetMarker(null);
+      ui.loseLife();
       ui.feedback('Final ball down — ranked run over.', 'error');
       ui.showSummary(session.finish());
-      setTimeout(() => ball.deactivate(), 700);
       return;
     }
-    if (session.mode === 'ranked' && result.playerMiss) {
-      const livesLeft = Math.max(0, RANKED_LIVES - session.misses);
-      ui.feedback(`Ball down — ${livesLeft} ${livesLeft === 1 ? 'ball' : 'balls'} left.`, 'error');
-    } else {
-      ui.feedback(flyMiss ? 'The fly missed — keep the pressure on.' : 'Rally ended — reset your feet. Next ball coming.', flyMiss ? 'success' : 'error');
+    if (result.playerMiss) {
+      if (session.mode === 'ranked') {
+        ui.loseLife();
+        const livesLeft = Math.max(0, RANKED_LIVES - session.misses);
+        ui.feedback(`Ball down — ${livesLeft} ${livesLeft === 1 ? 'ball' : 'balls'} left.`, 'error');
+      } else {
+        ui.feedback('Rally ended — reset your feet.', 'error');
+      }
+      // Clear any other balls in play and count down to the next serve.
+      balls.forEach((other) => { if (other !== ball) other.deactivate(); });
+      beginServeCountdown();
+    } else if (flyMiss) {
+      ui.feedback('The fly missed — keep the pressure on.', 'success');
     }
-    setTimeout(() => ball.deactivate(), 700);
   }
   ui.update(session.summary(), 'TRAINING');
 };
@@ -200,5 +232,5 @@ function updateFlyAI() {
   flyAnchor.position.x += (predictedX - flyAnchor.position.x) * .18;
   flyAnchor.position.y += (predictedY - flyAnchor.position.y) * .18;
 }
-renderer.setAnimationLoop(() => { const dt = clock.getDelta(); if (ui.isModeSelecting?.()) table.rotation.y += dt * .22; else if (!renderer.xr.isPresenting) table.rotation.y = THREE.MathUtils.damp(table.rotation.y, 0, 8, dt); if (!paused) { paddles.forEach((paddle) => paddle.update(dt)); if (training) machine.update(dt); updateFlyAI(); physics.step(dt, balls, paddles); session.update(); if (training) ui.update(session.summary(), 'TRAINING'); } balls.forEach((ball) => { if (ball.active && ball.mesh.position.length() > 12) ball.deactivate(); }); const t = clock.elapsedTime; flyOpponent.position.x = flyAnchor.position.x; flyOpponent.position.y = 1.55 + Math.sin(t * 2.1) * .05; renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { const dt = clock.getDelta(); if (ui.isModeSelecting?.()) table.rotation.y += dt * .22; else if (!renderer.xr.isPresenting) table.rotation.y = THREE.MathUtils.damp(table.rotation.y, 0, 8, dt); if (!paused) { paddles.forEach((paddle) => paddle.update(dt)); if (training) { if (serveCountdown > 0) { const prev = Math.ceil(serveCountdown); serveCountdown -= dt; if (serveCountdown <= 0) { serveCountdown = 0; ui.hideCountdown(); machine._timer = Math.min(machine._timer, .15); } else if (Math.ceil(serveCountdown) !== prev) { ui.showCountdown(Math.ceil(serveCountdown)); } } else { machine.update(dt); } } updateFlyAI(); physics.step(dt, balls, paddles); session.update(); if (training) ui.update(session.summary(), 'TRAINING'); } balls.forEach((ball) => { if (ball.active && ball.mesh.position.length() > 12) ball.deactivate(); }); const t = clock.elapsedTime; flyOpponent.position.x = flyAnchor.position.x; flyOpponent.position.y = 1.55 + Math.sin(t * 2.1) * .05; renderer.render(scene, camera); });
 window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });

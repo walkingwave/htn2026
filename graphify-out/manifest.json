@@ -1,8 +1,8 @@
 {
   "package.json": {
-    "mtime": 1789802724.285164,
-    "ast_hash": "6ae6e1c9a7c6287cf29215fcfc3046d3",
-    "semantic_hash": "6ae6e1c9a7c6287cf29215fcfc3046d3"
+    "mtime": 1789827192.7001946,
+    "ast_hash": "0dc879121685d3ecc1c787f91306d018",
+    "semantic_hash": ""
   },
   "src/ball.js": {
     "mtime": 1789794752.595783,
@@ -25,29 +25,29 @@
     "semantic_hash": "c08f50805be90b6179fab072fb4a9d70"
   },
   "src/leaderboard.js": {
-    "mtime": 1789802740.1167734,
-    "ast_hash": "1103f7a15099baf04364ab16421baa58",
-    "semantic_hash": "1103f7a15099baf04364ab16421baa58"
+    "mtime": 1789823114.8884096,
+    "ast_hash": "34febf0864e4c10c129eaa9ce8002770",
+    "semantic_hash": ""
   },
   "src/main.js": {
-    "mtime": 1789803593.0694137,
-    "ast_hash": "37f75bb60267bc52f7f27ec1b7f91c61",
-    "semantic_hash": "37f75bb60267bc52f7f27ec1b7f91c61"
+    "mtime": 1789831702.3160126,
+    "ast_hash": "ff36bb4a3169cb7b0230ce057d913f04",
+    "semantic_hash": ""
   },
   "src/paddle.js": {
-    "mtime": 1789794752.597787,
-    "ast_hash": "182a3ee38b9cba42d8e5aff92f6192d9",
-    "semantic_hash": "182a3ee38b9cba42d8e5aff92f6192d9"
+    "mtime": 1789830444.653919,
+    "ast_hash": "317e48225576ec92ff52a65f90e7da6b",
+    "semantic_hash": ""
   },
   "src/physics.js": {
-    "mtime": 1789794752.597787,
-    "ast_hash": "9fa428ca68b821727481a9d2d4261222",
-    "semantic_hash": "9fa428ca68b821727481a9d2d4261222"
+    "mtime": 1789823254.3730853,
+    "ast_hash": "7c8a551010a879e8ad7343f16711583c",
+    "semantic_hash": ""
   },
   "src/session.js": {
-    "mtime": 1789803556.2808619,
-    "ast_hash": "c09f2bccfea9d1067eecd212585028f1",
-    "semantic_hash": "c09f2bccfea9d1067eecd212585028f1"
+    "mtime": 1789830775.6163769,
+    "ast_hash": "aa127c5bfc712738d753449049c8c0ab",
+    "semantic_hash": ""
   },
   "src/table.js": {
     "mtime": 1789801768.2677765,
@@ -55,14 +55,14 @@
     "semantic_hash": "f514f805125aabbf2b431a4da106c214"
   },
   "src/ui.js": {
-    "mtime": 1789803571.1063735,
-    "ast_hash": "c0efa0fc3b84bc21a77841adda85aeb9",
-    "semantic_hash": "c0efa0fc3b84bc21a77841adda85aeb9"
+    "mtime": 1789831327.2244537,
+    "ast_hash": "01db4ea500a95b33a9c725c5326d045c",
+    "semantic_hash": ""
   },
   "src/xrButtons.js": {
-    "mtime": 1789801768.2677765,
-    "ast_hash": "8b8f1d6e103dbf2f3353ff68c67d72e3",
-    "semantic_hash": "8b8f1d6e103dbf2f3353ff68c67d72e3"
+    "mtime": 1789831051.4176364,
+    "ast_hash": "a2e76a28c7497bec5a8000c3514c4622",
+    "semantic_hash": ""
   },
   "supabase/schema.sql": {
     "mtime": 1789802874.9223974,
@@ -70,8 +70,23 @@
     "semantic_hash": "50fd098c780ea19f4094754999b05af5"
   },
   "vite.config.js": {
-    "mtime": 1789794752.5987878,
-    "ast_hash": "017603d80925174087e456e501097378",
-    "semantic_hash": "017603d80925174087e456e501097378"
+    "mtime": 1789827175.5642643,
+    "ast_hash": "4d50700f0474230a48b1718ee79e686b",
+    "semantic_hash": ""
+  },
+  "src/environment.js": {
+    "mtime": 1789831565.5291965,
+    "ast_hash": "fc92fb98264fb362e60ea2c74f08093d",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1789828593.3868282,
+    "ast_hash": "dd56c13557f362e70ce505bdb7d2eac9",
+    "semantic_hash": ""
+  },
+  "index.html": {
+    "mtime": 1789831069.7197976,
+    "ast_hash": "ceff7b26c7b938b72acda678aa8b2adb",
+    "semantic_hash": ""
   }
 }
