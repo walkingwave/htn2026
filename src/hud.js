@@ -183,7 +183,7 @@ export class Scoreboard {
     ctx.font = `500 30px ${MONO}`;
     const cellW = ctx.measureText('█').width + 3;
     for (let i = 0; i < CELLS; i++) {
-      ctx.fillStyle = i < filled ? red : FAINT;
+      ctx.fillStyle = i < filled ? red : 'rgba(242,239,230,0.13)';
       ctx.fillText('█', L + i * cellW, 382);
     }
 
@@ -230,13 +230,14 @@ export class Scoreboard {
   _brackets() {
     const { ctx } = this;
     const m = 20; // inset from the panel edge
+    const lm = 30; // left corners clear the red register bar
     const len = 46;
     ctx.strokeStyle = FAINT;
     ctx.lineWidth = 3;
     for (const [cx, cy, sx, sy] of [
-      [m, m, 1, 1],
+      [lm, m, 1, 1],
       [W - m, m, -1, 1],
-      [m, H - m, 1, -1],
+      [lm, H - m, 1, -1],
       [W - m, H - m, -1, -1],
     ]) {
       ctx.beginPath();
