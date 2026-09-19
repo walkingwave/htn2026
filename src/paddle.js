@@ -5,7 +5,7 @@ import { PADDLE } from './constants.js';
 // Vertical paddles are used by desktop/CV and the fly; XR keeps its controller
 // grip orientation so existing headset input remains compatible.
 export class Paddle {
-  constructor({ owner = 'player', vertical = false, color = 0xe53935 } = {}) {
+  constructor({ owner = 'player', vertical = false, color = 0xff3030 } = {}) {
     this.owner = owner;
     this.enabled = true;
     this.mesh = buildPaddleMesh(color, vertical);
@@ -62,8 +62,7 @@ function buildPaddleMesh(color, vertical) {
   const group = new THREE.Group();
   const woodMat = new THREE.MeshStandardMaterial({ color: 0xc8945b, roughness: 0.72 });
   const edgeMat = new THREE.MeshStandardMaterial({ color: 0x5b3423, roughness: 0.82 });
-  const rubberFront = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthTest: false, toneMapped: false });
-  const rubberBack = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(0.68), side: THREE.DoubleSide, depthTest: false, toneMapped: false });
+  const rubberFront = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthTest: false, depthWrite: false, toneMapped: false, transparent: false, opacity: 1 });
   const shape = createBladeShape();
 
   const handle = new THREE.Mesh(
@@ -84,28 +83,26 @@ function buildPaddleMesh(color, vertical) {
   blade.position.y = 0.062;
   blade.rotation.x = vertical ? 0 : -Math.PI / 2;
 
-  const core = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {
-    depth: PADDLE.HEAD_THICKNESS,
-    bevelEnabled: true,
-    bevelThickness: 0.003,
-    bevelSize: 0.003,
-    bevelSegments: 2,
-    curveSegments: 8,
-  }), rubberFront);
-  core.position.z = -PADDLE.HEAD_THICKNESS / 2;
-  core.name = 'wood-core';
-  core.renderOrder = 0;
-  blade.add(core);
-
-  const frontFace = createFaceMesh(shape, rubberFront, 0.028);
-  const backFace = createFaceMesh(shape, rubberBack, -0.028);
-  frontFace.renderOrder = 2;
-  backFace.renderOrder = 2;
-  blade.add(frontFace, backFace);
-
-  // A thin contrasting edge tape makes the blade readable from the side.
-  const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(shape.getPoints(32).map((point) => new THREE.Vector3(point.x, point.y, 0.03))), new THREE.LineBasicMaterial({ color: 0xf1c27d }));
+  // Use a solid elliptical cylinder instead of a concave triangulated face.
+  // It stays opaque and readable at every camera angle.
+  const edge = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.082, 0.082, 0.018, 32),
+    edgeMat
+  );
+  edge.rotation.x = Math.PI / 2;
+  edge.scale.y = 1.18;
+  edge.position.z = 0;
   blade.add(edge);
+
+  const face = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.077, 0.077, 0.021, 32),
+    rubberFront
+  );
+  face.rotation.x = Math.PI / 2;
+  face.scale.y = 1.18;
+  face.position.z = 0.035;
+  face.renderOrder = 2;
+  blade.add(face);
   group.add(blade);
   return group;
 }

@@ -15,6 +15,7 @@ const SESSION_INIT = {
 
 export function createXRButtons(renderer, { onModeChange } = {}) {
   const container = document.createElement('div');
+  container.dataset.flyballXr = 'true';
   Object.assign(container.style, {
     position: 'absolute',
     bottom: '20px',

@@ -13,10 +13,20 @@ import { DIFFICULTIES, TrainerSession } from './session.js';
 import { createTrainerUI } from './ui.js';
 import { startHandTracking } from './handTracking.js';
 
+// Vite can re-evaluate this module during HMR. Remove prior app generations
+// so old canvases, HUDs, and paddles cannot remain layered over the new scene.
+if (typeof window !== 'undefined') {
+  window.__flyballRenderers?.forEach((oldRenderer) => oldRenderer.setAnimationLoop(null));
+  window.__flyballRenderers = [];
+  document.querySelectorAll('canvas, .trainer-ui, [data-flyball-xr]').forEach((node) => node.remove());
+}
+
 const BALL_POOL_SIZE = 8;
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local-floor'); document.body.appendChild(renderer.domElement);
+renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local-floor'); renderer.domElement.dataset.flyballRenderer = 'true'; document.body.appendChild(renderer.domElement);
+window.__flyballRenderers ??= [];
+window.__flyballRenderers.push(renderer);
 const scene = new THREE.Scene();
 const VR_BACKGROUND = new THREE.Color(0x101018);
 const LANDSCAPES = { classic: 0x101018, sunset: 0x3b1f2b, neon: 0x071d2c };
@@ -92,16 +102,25 @@ cvPaddle.attachTo(cvRig);
 paddles.push(cvPaddle);
 paddles.push(flyPaddle);
 
-function setPointerPose(clientX, clientY) { if (cvActive || renderer.xr.isPresenting) return; const x = clientX / window.innerWidth; const y = clientY / window.innerHeight; cvRig.position.set((x - .5) * 1.25, .95 + (.5 - y) * .7, -.72); cvRig.rotation.set(0, 0, -(x - .5) * .6); }
-renderer.domElement.addEventListener('pointermove', (event) => setPointerPose(event.clientX, event.clientY));
-renderer.domElement.addEventListener('pointerdown', (event) => setPointerPose(event.clientX, event.clientY));
+function setPointerPose(clientX, clientY) {
+  if (cvActive || renderer.xr.isPresenting) return;
+  const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
+  const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
+  // Update the rig directly from the pointer event: no tween, no render-frame
+  // queue, so the paddle stays under the cursor even while the UI is open.
+  cvRig.position.set((x - .5) * 1.25, .95 + (.5 - y) * .7, -.72);
+  cvRig.rotation.set(0, 0, -(x - .5) * .6);
+}
+window.addEventListener('pointermove', (event) => setPointerPose(event.clientX, event.clientY), { passive: true });
+window.addEventListener('pointerrawupdate', (event) => setPointerPose(event.clientX, event.clientY), { passive: true });
+window.addEventListener('pointerdown', (event) => setPointerPose(event.clientX, event.clientY), { passive: true });
 
 const ui = createTrainerUI({
-  onStart(difficulty, drill, mode, landscape) { const profile = DIFFICULTIES[difficulty]; applyLandscape(landscape); session.reset(difficulty, drill); session.mode = mode; session.landscape = landscape; session.start(); training = true; paused = false; table.rotation.y = 0; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
+  onStart(difficulty, drill, mode, landscape) { const profile = DIFFICULTIES[difficulty]; applyLandscape(landscape); session.reset(difficulty, drill); session.mode = mode; session.landscape = landscape; session.start(); training = true; paused = false; document.body.classList.add('paddle-pointer-mode'); table.rotation.y = 0; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
   onLandscapeChange(name) { applyLandscape(name); },
   onDrillChange(nextDrill) { const difficulty = ui.getDifficulty(); const profile = DIFFICULTIES[difficulty]; balls.forEach((ball) => ball.deactivate()); session.reset(difficulty, nextDrill); if (training) { session.start(); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; } flyPaddle.enabled = training && nextDrill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); ui.update(session.summary(), training ? 'TRAINING' : 'READY'); },
   onPause() { paused = !paused; machine.enabled = training && !paused; ui.feedback(paused ? 'Training paused.' : 'Rally live.', paused ? '' : 'success'); },
-  onReset() { training = false; paused = false; machine.enabled = false; flyPaddle.enabled = false; updateTargetMarker(null); balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.update(session.summary(), 'READY'); },
+  onReset() { training = false; paused = false; document.body.classList.remove('paddle-pointer-mode'); machine.enabled = false; flyPaddle.enabled = false; updateTargetMarker(null); balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.update(session.summary(), 'READY'); },
   onMachineToggle() { machine.enabled = !machine.enabled; return machine.enabled; },
   onEnableCV() { if (cvStop) { cvStop(); cvStop = null; cvActive = false; cvRig.visible = true; return; } cvActive = true; startHandTracking((pose) => { cvRig.visible = true; cvRig.position.set((pose.x - .5) * 1.25, .95 + (.5 - pose.y) * .7, -.72); cvRig.rotation.set(0, 0, -pose.angle); }, (message) => ui.feedback(message, 'success')).then((stop) => { cvStop = stop; }).catch((error) => { cvActive = false; ui.feedback(error.message, 'error'); }); },
 });
@@ -140,8 +159,16 @@ physics.onBounce = (ball, event, details = {}) => {
   ui.update(session.summary(), 'TRAINING');
 };
 
-const orbit = new OrbitControls(camera, renderer.domElement); orbit.target.set(0, TABLE.HEIGHT, 0); orbit.update();
-renderer.xr.addEventListener('sessionstart', () => { orbit.enabled = false; cvRig.visible = false; }); renderer.xr.addEventListener('sessionend', () => { orbit.enabled = true; cvRig.visible = true; });
+const orbit = new OrbitControls(camera, renderer.domElement);
+// Desktop mouse input belongs to the paddle, not the camera. Keeping the
+// camera fixed removes the competing drag/damping path that made the paddle
+// feel delayed. XR still owns the camera during immersive sessions.
+orbit.enabled = false;
+orbit.enableDamping = false;
+orbit.target.set(0, TABLE.HEIGHT, 0);
+orbit.update();
+renderer.xr.addEventListener('sessionstart', () => { orbit.enabled = false; cvRig.visible = false; });
+renderer.xr.addEventListener('sessionend', () => { orbit.enabled = false; cvRig.visible = true; });
 const clock = new THREE.Clock();
 function updateFlyAI() {
   const incoming = balls.find((ball) => ball.active && ball.velocity.z < 0 && ball.mesh.position.z < -.15);
