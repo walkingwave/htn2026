@@ -5,29 +5,63 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ping Pong VR Trainer</title>
     <style>
+      :root {
+        color-scheme: dark;
+        --accent: #35d07f;
+      }
       html,
       body {
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background: #000;
+        background: #0a0d14;
+        font-family: system-ui, -apple-system, sans-serif;
       }
       #overlay {
         position: absolute;
-        top: 12px;
-        left: 12px;
-        color: #fff;
-        font-family: system-ui, sans-serif;
-        font-size: 14px;
-        pointer-events: none;
+        top: 18px;
+        left: 18px;
         z-index: 1;
+        pointer-events: none;
+        color: #fff;
+        max-width: 22rem;
+      }
+      #overlay h1 {
+        margin: 0 0 6px;
+        font-size: 15px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      #status {
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        color: rgba(255, 255, 255, 0.82);
+      }
+      #hints {
+        margin-top: 10px;
+        font-size: 12px;
+        line-height: 1.7;
+        color: rgba(255, 255, 255, 0.42);
+      }
+      #hints kbd {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        padding: 1px 5px;
+        font: inherit;
       }
     </style>
   </head>
   <body>
     <div id="overlay">
-      <strong>Ping Pong VR Trainer</strong><br />
-      Enter AR (passthrough) or VR on Quest, or drag to orbit on desktop.
+      <h1>Ping Pong Trainer</h1>
+      <div id="status">Loading…</div>
+      <div id="hints">
+        Enter AR for passthrough, or VR for the full venue.<br />
+        In headset: <b>trigger</b> pause · <b>grip</b> next drill<br />
+        Desktop: <kbd>Space</kbd> pause · <kbd>D</kbd> drill ·
+        <kbd>S</kbd> serve · <kbd>R</kbd> reset · drag to orbit
+      </div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

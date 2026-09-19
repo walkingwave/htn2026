@@ -29,37 +29,75 @@ Open `https://localhost:5173`, accept the cert warning. You get an orbit-camera 
 4. Accept the self-signed certificate warning (Advanced → Proceed).
 5. Click **Enter AR** for passthrough mixed reality (virtual table in your real room), or **Enter VR** for a fully virtual space.
 
-Controls:
-- Paddles are attached to both controllers.
-- **Trigger** toggles the ball machine on/off.
+### Controls
+
+Paddles are attached to both controllers.
+
+| | In headset | Desktop |
+| --- | --- | --- |
+| Pause / arm the machine | Trigger | <kbd>Space</kbd> |
+| Next mode | Grip | <kbd>D</kbd> |
+| Serve one ball | — | <kbd>S</kbd> |
+| Reset the score | — | <kbd>R</kbd> |
+| Look around | Head tracking | Drag to orbit |
 
 ### AR vs VR
 
 | Mode | Background | Floor |
 | ---- | ---------- | ----- |
 | AR (`immersive-ar`) | Camera passthrough | Your real floor |
-| VR (`immersive-vr`) | Dark room | Virtual floor disc |
+| VR (`immersive-vr`) | Dark hall | Virtual hall floor |
 
-Both modes use the `local-floor` reference space, so the table sits at real floor height.
+Both modes use the `local-floor` reference space, so the table sits at real floor height and its 0.76 m surface lines up with a real one.
+
+## Training modes
+
+Cycle with **grip** (or <kbd>D</kbd>). Stats appear on the in-world scoreboard behind the far end.
+
+| Mode | What it does |
+| --- | --- |
+| Topspin drive | Heavy topspin, dips and kicks forward off the bounce |
+| Backspin push | Floats in, then checks up and loses pace |
+| Flat block | No spin, steady pace — timing practice |
+| Sidespin mix | Alternating side spin, curves and skids sideways |
+| **Infinite** | Machine roams the baseline and randomises pace, spin, axis and interval every ball |
+| **Target practice** | Machine steps aside and lobs the ball up in front of you; drive it into the pad on the far half. Hitting it scores and moves the pad |
+
+Scoring: a **hit** is any paddle contact, a **return** is a hit that lands back on the far half, and the **streak** counts consecutive hits.
+
+## Physics
+
+The simulation is hand-rolled rather than a rigid-body engine — the only interesting contact is ball-against-plane, and doing it directly keeps spin tunable.
+
+- **Quadratic drag**, which a 2.7 g ball feels strongly — it takes several m/s off a hard drive over the table's length.
+- **Magnus force** (`a = C·ω×v`), so topspin dips and backspin floats.
+- **Spin-aware bounces.** Every contact resolves a normal impulse plus a Coulomb-limited tangential impulse capped at the `(2/7)m|u|` that starts a sphere rolling. This coupling is what makes topspin kick forward off the table and brushing the paddle load spin onto the ball. Measured: topspin keeps its pace through the bounce (−4% horizontal) where flat and backspin shed ~29%.
+- **Swept collision** against the paddle and net. A drive covers several centimetres per step and the blade is 15 mm thick, so a position-only test would let fast balls pass straight through the bat.
+- **Resting contacts** are detected and settled instead of bouncing, which otherwise re-triggers every step forever.
+
+The ball machine aims by simulating the shot with those same forces and iterating, rather than using a closed-form ballistic solve — with drag and Magnus in play, an analytic aim puts topspin straight into the net.
 
 ## Project structure
 
 ```
 src/
   main.js         Entry point: renderer, XR session, controllers, game loop
-  constants.js    Regulation table/ball/paddle dimensions, physics tuning
-  table.js        Table, net, lines, floor meshes
-  paddle.js       Controller-attached paddle with velocity tracking
-  ball.js         Pooled ball object
-  ballMachine.js  Trainer: serves balls at the player on an interval
-  physics.js      Fixed-timestep physics: gravity, bounces, paddle hits
+  constants.js    Regulation dimensions, palette, physics tuning
+  table.js        Table, net, and the VR venue
+  textures.js     Procedural canvas textures (no image assets to load)
+  paddle.js       Controller paddle with linear + angular velocity tracking
+  ball.js         Pooled ball with spin state
+  ballMachine.js  Modes, roaming, feeding, and the launch solver
+  physics.js      Fixed-timestep physics: drag, Magnus, spin, swept contacts
+  target.js       Target-practice pad
+  game.js         Scoring and streaks
+  hud.js          In-world scoreboard
+  xrButtons.js    Dual-mode AR/VR entry
 ```
 
 ## Ideas / next steps
 
-- Haptic pulse on paddle hit (`gamepad.hapticActuators[0].pulse(...)`)
 - Hit/bounce audio (positional `THREE.Audio`)
-- Scoring + drill modes (target zones on the table)
-- Spin (Magnus effect) in `physics.js`
 - Hand tracking fallback (Quest Browser supports WebXR hand input)
 - AR table placement via hit-test (anchor the table to a real surface)
+- Per-mode stats history and a session summary

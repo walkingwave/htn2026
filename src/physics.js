@@ -1,24 +1,46 @@
 import * as THREE from 'three';
 import { TABLE, NET, BALL, PADDLE, PHYSICS } from './constants.js';
 
-// Simple custom physics: fixed-timestep integration, table/floor/net bounce,
-// paddle hit as a disc collision with momentum transfer from paddle velocity.
-// Good enough for a trainer; swap for cannon-es/rapier later if needed.
+// Custom fixed-timestep physics for a single spinning sphere against a few
+// analytic surfaces. A full rigid-body engine would be overkill here: the
+// only interesting contact is ball-against-plane, and doing it by hand keeps
+// spin behaviour tunable, which is the whole point of a trainer.
+//
+// Spin model
+// ----------
+// Every contact resolves a normal impulse and a Coulomb-limited tangential
+// impulse. The tangential part is what couples spin and velocity: it's why a
+// topspin ball kicks forward off the bounce, why backspin checks up, and why
+// brushing the paddle up the back of the ball loads topspin onto it.
+//
+// For a solid sphere (I = 2/5 mR²) the tangential impulse needed to bring the
+// contact patch to rest — i.e. to start rolling — is (2/7)m|u|, where u is the
+// contact-point velocity. Friction caps the impulse at μ·jₙ, so a glancing
+// contact slides and a grippy one grabs. Mass cancels throughout, so the code
+// works in impulse-per-unit-mass.
 
 const _rel = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
+const _vt = new THREE.Vector3();
+const _u = new THREE.Vector3();
+const _uHat = new THREE.Vector3();
+const _prev = new THREE.Vector3();
+const _hit = new THREE.Vector3();
+const _surfaceVel = new THREE.Vector3();
+const _accel = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
 
 export class PhysicsWorld {
   constructor() {
     this._accumulator = 0;
     // Callbacks the game layer can hook: (ball, eventName)
-    this.onBounce = null; // 'table' | 'floor' | 'net' | 'paddle'
+    this.onBounce = null; // 'table' | 'floor' | 'net' | 'paddle' | 'edge'
   }
 
   // dt = real frame time; steps physics at FIXED_DT.
   step(dt, balls, paddles) {
-    this._accumulator += Math.min(dt, 0.1); // clamp to avoid spiral after tab pause
+    this._accumulator += Math.min(dt, 0.1); // clamp to avoid spiral after a pause
     while (this._accumulator >= PHYSICS.FIXED_DT) {
       for (const ball of balls) {
         if (ball.active) this._integrate(ball, paddles, PHYSICS.FIXED_DT);
@@ -31,84 +53,234 @@ export class PhysicsWorld {
     const p = ball.mesh.position;
     const v = ball.velocity;
 
-    // Gravity + linear air drag
-    v.y += PHYSICS.GRAVITY * h;
-    v.multiplyScalar(1 - PHYSICS.AIR_DRAG * h);
+    _prev.copy(p);
+
+    // --- Aerodynamics -----------------------------------------------------
+    const speed = v.length();
+    _accel.set(0, PHYSICS.GRAVITY, 0);
+
+    if (speed > 1e-4) {
+      // Quadratic drag: a = -k|v|v. A ping pong ball is extremely light for
+      // its frontal area, so drag is not a rounding error — it takes several
+      // m/s off a hard hit across the length of the table.
+      _accel.addScaledVector(v, -PHYSICS.DRAG * speed);
+
+      // Magnus: a = C(ω × v). Topspin (ω pointing along −X for a ball
+      // travelling +Z) curves the flight downward; backspin floats it.
+      if (ball.spin.lengthSq() > 1e-6) {
+        _tmp.copy(ball.spin).cross(v).multiplyScalar(PHYSICS.MAGNUS);
+        _accel.add(_tmp);
+      }
+    }
+
+    v.addScaledVector(_accel, h);
     p.addScaledVector(v, h);
 
-    // Table bounce (only within table footprint)
-    const onTable =
-      Math.abs(p.x) <= TABLE.WIDTH / 2 && Math.abs(p.z) <= TABLE.LENGTH / 2;
-    const surfaceY = TABLE.HEIGHT + BALL.RADIUS;
-    if (onTable && p.y < surfaceY && v.y < 0) {
-      p.y = surfaceY;
-      v.y = -v.y * BALL.RESTITUTION_TABLE;
-      this.onBounce?.(ball, 'table');
+    // Spin bleeds off slowly in flight
+    if (ball.spin.lengthSq() > 1e-6) {
+      ball.spin.multiplyScalar(Math.pow(BALL.SPIN_DECAY, h));
     }
 
-    // Net collision (thin plane at z=0 above the table)
-    const netHalfWidth = TABLE.WIDTH / 2 + NET.OVERHANG;
-    if (
-      Math.abs(p.x) <= netHalfWidth &&
-      p.y >= TABLE.HEIGHT &&
-      p.y <= TABLE.HEIGHT + NET.HEIGHT + BALL.RADIUS &&
-      Math.abs(p.z) <= BALL.RADIUS
-    ) {
-      // Kill most forward momentum, drop the ball
-      v.z *= -0.15;
-      v.x *= 0.5;
-      p.z = Math.sign(v.z || 1) * BALL.RADIUS * 1.01;
-      this.onBounce?.(ball, 'net');
-    }
+    // --- Contacts ---------------------------------------------------------
+    this._collideNet(ball, _prev);
+    this._collideTable(ball);
+    this._collideFloor(ball);
 
-    // Floor bounce
-    if (p.y < BALL.RADIUS && v.y < 0) {
-      p.y = BALL.RADIUS;
-      v.y = -v.y * 0.5;
-      v.x *= 0.7;
-      v.z *= 0.7;
-      this.onBounce?.(ball, 'floor');
-    }
-
-    // Paddle collisions
     for (const paddle of paddles) {
-      this._collidePaddle(ball, paddle);
+      this._collidePaddle(ball, paddle, _prev);
     }
   }
 
-  _collidePaddle(ball, paddle) {
-    _rel.copy(ball.mesh.position).sub(paddle.bladeCenter);
-    _n.copy(paddle.bladeNormal);
+  _collideTable(ball) {
+    const p = ball.mesh.position;
+    const v = ball.velocity;
+    const surfaceY = TABLE.HEIGHT + BALL.RADIUS;
 
-    const distAlongNormal = _rel.dot(_n);
-    // Distance from blade axis (in-plane)
-    _tmp.copy(_rel).addScaledVector(_n, -distAlongNormal);
-    const radialDist = _tmp.length();
+    const onTable =
+      Math.abs(p.x) <= TABLE.WIDTH / 2 && Math.abs(p.z) <= TABLE.LENGTH / 2;
+    if (!onTable || p.y >= surfaceY || v.y >= 0) return;
 
-    const halfThick = PADDLE.HEAD_THICKNESS / 2 + BALL.RADIUS;
-    if (radialDist > PADDLE.HEAD_RADIUS || Math.abs(distAlongNormal) > halfThick) {
+    p.y = surfaceY;
+    if (this._resolveContact(ball, _up, BALL.RESTITUTION_TABLE, BALL.FRICTION_TABLE, null, 'table')) {
+      this.onBounce?.(ball, 'table');
+    }
+  }
+
+  _collideFloor(ball) {
+    const p = ball.mesh.position;
+    const v = ball.velocity;
+    if (p.y >= BALL.RADIUS || v.y >= 0) return;
+
+    p.y = BALL.RADIUS;
+    if (this._resolveContact(ball, _up, BALL.RESTITUTION_FLOOR, 0.5, null, 'floor')) {
+      this.onBounce?.(ball, 'floor');
+    }
+  }
+
+  // The net is only a couple of millimetres thick, and a hard drive covers
+  // several centimetres per step, so a position test alone would let the ball
+  // teleport straight through it. Test the z = 0 crossing over the step
+  // instead.
+  _collideNet(ball, prev) {
+    const p = ball.mesh.position;
+    const v = ball.velocity;
+
+    const crossed = (prev.z < 0 && p.z >= 0) || (prev.z > 0 && p.z <= 0);
+    if (!crossed) return;
+
+    // Interpolate the crossing point to see whether it actually met the net
+    const t = Math.abs(prev.z) / Math.max(Math.abs(prev.z - p.z), 1e-6);
+    const x = prev.x + (p.x - prev.x) * t;
+    const y = prev.y + (p.y - prev.y) * t;
+
+    const halfSpan = TABLE.WIDTH / 2 + NET.OVERHANG;
+    const top = TABLE.HEIGHT + NET.HEIGHT;
+    if (Math.abs(x) > halfSpan || y > top + BALL.RADIUS || y < TABLE.HEIGHT) {
       return;
     }
 
-    // Relative velocity along blade normal; only hit if approaching
-    _tmp.copy(ball.velocity).sub(paddle.velocity);
-    const approach = _tmp.dot(_n) * Math.sign(distAlongNormal || 1);
-    if (approach >= 0) return;
+    const clipsTape = y > top - BALL.RADIUS;
+    const side = Math.sign(prev.z) || 1;
 
-    // Face the normal toward the ball side
-    if (distAlongNormal < 0) _n.negate();
+    if (clipsTape) {
+      // Caught the tape: most of the pace is gone and the ball topples over
+      // more or less vertically — the classic net cord dribble.
+      v.z *= 0.18;
+      v.x *= 0.4;
+      v.y = Math.min(v.y, 0.6);
+      p.z = -side * BALL.RADIUS * 0.5; // trickles over onto the far side
+    } else {
+      // Into the net proper: it absorbs nearly everything and drops the ball.
+      v.z *= -0.12;
+      v.x *= 0.35;
+      v.y *= 0.3;
+      p.z = side * (BALL.RADIUS + 0.002);
+    }
 
-    // Reflect relative velocity, add paddle velocity back (momentum transfer)
-    const vn = _tmp.dot(_n);
-    _tmp.addScaledVector(_n, -(1 + BALL.RESTITUTION_PADDLE) * vn);
-    ball.velocity.copy(_tmp).add(paddle.velocity);
+    ball.spin.multiplyScalar(0.25);
+    this.onBounce?.(ball, 'net');
+  }
 
-    // Push ball out of the blade to prevent re-collision next step
-    ball.mesh.position
-      .copy(paddle.bladeCenter)
-      .addScaledVector(_n, halfThick * 1.05)
-      .add(_tmp.copy(_rel).addScaledVector(paddle.bladeNormal, -distAlongNormal));
+  // Resolves one contact against a plane with normal `n`.
+  //
+  // `surfaceVel` is the velocity of the surface at the contact point (null
+  // for static geometry). Returns true for a genuine bounce, false when the
+  // ball is merely resting — a naive `v.y = -v.y·e` never reaches zero, so
+  // gravity would push a settled ball back through the surface every step and
+  // fire contacts at the full simulation rate.
+  _resolveContact(ball, n, restitution, friction, surfaceVel, surface) {
+    const v = ball.velocity;
 
+    // Velocity relative to the surface
+    _tmp.copy(v);
+    if (surfaceVel) _tmp.sub(surfaceVel);
+
+    const vn = _tmp.dot(n);
+    if (vn >= 0) return false;
+
+    const impact = -vn;
+    const resting = impact < PHYSICS.REST_SPEED && !surfaceVel;
+
+    // Tangential part of the relative velocity
+    _vt.copy(_tmp).addScaledVector(n, -vn);
+
+    // Contact-point velocity: tangential slip plus the surface speed the
+    // ball's own rotation contributes at the contact patch (r = −R·n).
+    _u.copy(_vt);
+    _tmp.copy(ball.spin).cross(n).multiplyScalar(-BALL.RADIUS);
+    _u.add(_tmp);
+
+    const slip = _u.length();
+    if (slip > 1e-5) {
+      _uHat.copy(_u).divideScalar(slip);
+
+      // Impulse per unit mass. Capped by Coulomb friction, and never more
+      // than what it takes to stop the contact patch sliding (2/7)|u|.
+      const normalImpulse = (1 + restitution) * impact;
+      const jt = Math.min(friction * normalImpulse, (2 / 7) * slip);
+
+      v.addScaledVector(_uHat, -jt);
+
+      // Δω = (5·jt / 2R)(n × û)
+      _tmp.copy(n).cross(_uHat).multiplyScalar((5 * jt) / (2 * BALL.RADIUS));
+      ball.spin.add(_tmp);
+
+      const spinRate = ball.spin.length();
+      if (spinRate > BALL.MAX_SPIN) {
+        ball.spin.multiplyScalar(BALL.MAX_SPIN / spinRate);
+      }
+    }
+
+    // Normal response
+    const vnNow = v.dot(n) - (surfaceVel ? surfaceVel.dot(n) : 0);
+    if (resting) {
+      v.addScaledVector(n, -vnNow); // kill the normal component entirely
+      ball.restingOn = surface;
+      return false;
+    }
+
+    v.addScaledVector(n, -(1 + restitution) * vnNow);
+    ball.restingOn = null;
+    return true;
+  }
+
+  // Swept paddle contact. The blade is ~15 mm thick and a returned ball can
+  // travel 5 cm in a single step, so testing only the end-of-step position
+  // would let fast balls pass straight through the bat — which in a trainer
+  // reads as "my hit didn't register".
+  _collidePaddle(ball, paddle, prev) {
+    if (!paddle.tracking) return;
+
+    const p = ball.mesh.position;
+    _n.copy(paddle.bladeNormal);
+
+    const halfThick = PADDLE.HEAD_THICKNESS / 2 + BALL.RADIUS;
+
+    _rel.copy(prev).sub(paddle.bladeCenter);
+    const d0 = _rel.dot(_n);
+    _rel.copy(p).sub(paddle.bladeCenter);
+    const d1 = _rel.dot(_n);
+
+    // Either the ball ends the step inside the blade slab, or it passed
+    // clean through it during the step.
+    const inside = Math.abs(d1) <= halfThick;
+    const swept = d0 > halfThick !== d1 > halfThick || d0 < -halfThick !== d1 < -halfThick;
+    if (!inside && !swept) return;
+
+    // Contact point: where the path met the blade plane
+    const denom = d0 - d1;
+    const t = Math.abs(denom) < 1e-9 ? 0 : d0 / denom;
+    _hit.copy(prev).lerp(p, THREE.MathUtils.clamp(t, 0, 1));
+
+    // Radial distance from the blade axis at that point
+    _rel.copy(_hit).sub(paddle.bladeCenter);
+    _tmp.copy(_rel).addScaledVector(_n, -_rel.dot(_n));
+    if (_tmp.length() > PADDLE.HEAD_RADIUS) return;
+
+    // Face the normal toward the side the ball came from
+    if (d0 < 0) _n.negate();
+
+    // Surface velocity at the contact point, including the swing's rotation —
+    // brushing across the ball is what actually generates spin.
+    paddle.velocityAt(_hit, _surfaceVel);
+
+    _tmp.copy(ball.velocity).sub(_surfaceVel);
+    if (_tmp.dot(_n) >= 0) return; // moving away; already handled
+
+    // Place the ball on the struck face before resolving
+    p.copy(_hit).addScaledVector(_n, halfThick * 1.02);
+
+    this._resolveContact(
+      ball,
+      _n,
+      BALL.RESTITUTION_PADDLE,
+      BALL.FRICTION_PADDLE,
+      _surfaceVel,
+      null
+    );
+
+    ball.touchedByPaddle = true;
+    ball.retireIn = null;
     this.onBounce?.(ball, 'paddle');
   }
 }
