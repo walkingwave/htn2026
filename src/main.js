@@ -518,13 +518,16 @@ function startVersusServe() {
 function serveVersusBall() {
   const ball = balls.find((b) => !b.active);
   if (!ball) return;
-  // Server alternates ends: host serves toward -Z (the guest), guest toward +Z.
-  const dir = match.server === 'host' ? -1 : 1;
+  // Server alternates ends in real 1v1: host serves toward -Z, guest toward
+  // +Z. In a bot game the bot always serves the ball TO you (+Z) so you play
+  // every rally, then returns your shots from its baseline.
+  const dir = vsBot ? 1 : (match.server === 'host' ? -1 : 1);
   ball.serve(
     new THREE.Vector3((Math.random() * 2 - 1) * 0.3, TABLE.HEIGHT + 0.35, -dir * 0.8),
     new THREE.Vector3((Math.random() * 2 - 1) * 0.6, 1.4, dir * 3.4)
   );
   ball.floorCounted = false; // ad-hoc flag; Ball.serve() doesn't reset it
+  ball.botHandled = false;
   versusBall = ball;
   broadcastHostState();
 }
@@ -697,6 +700,9 @@ function wireTourneyRoom(roomHandle) {
 
 // Reaction plane for the AI paddle — a little in front of the far baseline.
 const BOT_HOME_Z = -(TABLE.LENGTH / 2 - 0.35);
+// How often the bot successfully returns your shot (the rest are misses you
+// score on). Tune for difficulty.
+const BOT_RETURN_CHANCE = 0.82;
 
 function startBotGame() {
   vsBot = true;
@@ -717,7 +723,8 @@ function startBotGame() {
   netMode = 'host';
   room = null;
 
-  remotePaddle.enabled = true;
+  remotePaddle.enabled = false; // bot returns are deterministic; paddle is cosmetic
+  remotePaddle.mesh.visible = true;
   remotePaddle.networked = true;
 
   // You play from the near (+Z) end, unrotated; the bot faces you from -Z with
@@ -735,45 +742,34 @@ function startBotGame() {
 }
 
 function updateBotPaddle(dt) {
-  const ball = versusBall;
-  // Reaction gain <1 so the paddle lags the ideal intercept and misses some.
-  const k = Math.min(1, dt * 7);
-  let targetX = remoteAnchor.position.x;
-  let targetY = remoteAnchor.position.y;
+  const b = versusBall;
+  if (!b || !b.active) return;
+  const pos = b.mesh.position;
 
-  if (ball && ball.active && ball.velocity.z < 0) {
-    const pos = ball.mesh.position;
-    // Linear predict where the ball crosses the paddle plane in x/y.
-    const dz = BOT_HOME_Z - pos.z;
-    const vz = ball.velocity.z;
-    const tHit = Math.abs(vz) > 1e-4 ? dz / vz : 0;
-    targetX = pos.x + ball.velocity.x * tHit;
-    targetY = pos.y + ball.velocity.y * tHit;
-  }
+  // Once the ball is safely back on your side, re-arm the bot for its next
+  // return so it plays the ball again when your shot comes back.
+  if (pos.z > 0.3) b.botHandled = false;
 
-  const minX = -(TABLE.WIDTH / 2 - 0.12);
-  const maxX = TABLE.WIDTH / 2 - 0.12;
-  const minY = TABLE.HEIGHT + 0.05;
-  const maxY = TABLE.HEIGHT + 0.45;
-  targetX = THREE.MathUtils.clamp(targetX, minX, maxX);
-  targetY = THREE.MathUtils.clamp(targetY, minY, maxY);
-
-  remoteAnchor.position.x += (targetX - remoteAnchor.position.x) * k;
-  remoteAnchor.position.y += (targetY - remoteAnchor.position.y) * k;
+  // Move the (cosmetic) paddle to track the ball near the bot's baseline.
+  const k = Math.min(1, dt * 9);
+  const tx = THREE.MathUtils.clamp(pos.x, -(TABLE.WIDTH / 2 - 0.12), TABLE.WIDTH / 2 - 0.12);
+  const ty = THREE.MathUtils.clamp(pos.y, TABLE.HEIGHT + 0.05, TABLE.HEIGHT + 0.5);
+  remoteAnchor.position.x += (tx - remoteAnchor.position.x) * k;
+  remoteAnchor.position.y += (ty - remoteAnchor.position.y) * k;
   remoteAnchor.position.z = BOT_HOME_Z;
   remoteAnchor.rotation.y = Math.PI;
 
-  // The networked flag makes the tick loop skip this paddle, so update it here
-  // to derive bladeCenter/normal/velocity for the physics collision.
-  remotePaddle.update(dt);
-
-  // Return bias: the blade faces +Z (back toward the player); tilting its
-  // normal a little upward makes the reflected ball arc up and over the net
-  // instead of driving flat into it. The collision reflects off bladeNormal,
-  // so nudging it here is enough. Tuned conservatively — increase for a
-  // loopier, safer return, decrease for a flatter, more aggressive one.
-  remotePaddle.bladeNormal.y += 0.32;
-  remotePaddle.bladeNormal.normalize();
+  // When your shot reaches the bot's end, it plays the ball: a controlled arc
+  // back over the net onto your half. Deterministic (not physics reflection)
+  // so the return is reliable; a miss chance lets you win points.
+  if (!b.botHandled && b.velocity.z < 0 && pos.z < BOT_HOME_Z + 0.5) {
+    b.botHandled = true;
+    if (Math.random() < BOT_RETURN_CHANCE) {
+      b.velocity.set((Math.random() * 2 - 1) * 0.7, 1.8, 3.6); // up-and-over toward you
+      b.spin.set(0, 0, 0);
+    }
+    // else: the bot whiffs — the ball floors on its side and you take the point.
+  }
 }
 
 function endBotMatch(winner) {
