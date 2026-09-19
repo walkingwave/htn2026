@@ -44,16 +44,32 @@ const HIT_HEIGHT_MIN = 0.28;
 // rather than by eye.
 const NET_MARGIN = 0.15;
 
-// How long the bat keeps travelling along a planned swing. Long enough to
-// carry it through the ball, short enough that a miss doesn't send it into
-// orbit.
-const SWING_FOLLOW_THROUGH = 0.22; // seconds
+// How long the bat keeps travelling once it has reached the contact point.
+const SWING_FOLLOW_THROUGH = 0.16; // seconds
+
+// How early the stroke begins, measured in time to contact rather than
+// distance — a hard shot crosses a fixed distance far quicker than a soft
+// one, so a distance trigger starts the swing too late exactly when it
+// matters most.
+const SWING_LEAD = 0.14; // seconds
+
+// The flight estimate is refreshed this often while tracking. The one made
+// before the bounce carries real error.
+const REPREDICT_INTERVAL = 1 / 30; // seconds
 const READY = new THREE.Vector3(0, TABLE.HEIGHT + 0.2, HIT_PLANE_Z);
 
+// Difficulty is mostly how often a ball is let through and how hard the
+// return comes back, not how competent the stroke is — a bad stroke reads as
+// a broken opponent rather than an easy one.
+//
+// Rally length is brutally sensitive to this: with a per-exchange return
+// rate p, the average rally runs p/(1−p), so 60% gives about 1.5 exchanges
+// and 85% gives nearly 6. Measured rates against a spread of realistic
+// shots: easy ~60%, normal ~85%, hard ~86% with far more pace.
 export const OPPONENT_SKILL = {
-  easy: { reach: 1.1, maxSpeed: 1.9, error: 0.20, missChance: 0.22, pace: 4.0 },
-  normal: { reach: 1.5, maxSpeed: 2.8, error: 0.11, missChance: 0.10, pace: 4.6 },
-  hard: { reach: 2.0, maxSpeed: 3.8, error: 0.05, missChance: 0.03, pace: 5.3 },
+  easy: { reach: 1.1, maxSpeed: 2.1, error: 0.20, missChance: 0.34, pace: 3.8 },
+  normal: { reach: 1.7, maxSpeed: 3.2, error: 0.10, missChance: 0.07, pace: 4.4 },
+  hard: { reach: 2.1, maxSpeed: 4.0, error: 0.05, missChance: 0.02, pace: 4.9 },
 };
 
 const _p = new THREE.Vector3();
@@ -89,6 +105,11 @@ export class Opponent {
     this._recover = 0;
     this._willMiss = false;
     this._swingElapsed = 0;
+    this._repredictIn = 0;
+    this._interceptVel = new THREE.Vector3();
+    this._interceptSpin = new THREE.Vector3();
+    this._swingDir = new THREE.Vector3(0, 0, 1);
+    this._swingSpeed = 0;
 
     // The blade sits at an offset inside the paddle mesh, so placing the
     // blade somewhere means placing the mesh at that point less the offset.
@@ -174,7 +195,10 @@ export class Opponent {
       this.targetBall = ball;
       this.state = 'tracking';
       this._intercept.copy(plan.point);
+      this._interceptVel.copy(plan.velocity);
+      this._interceptSpin.copy(plan.spin);
       this._timeToHit = plan.time;
+      this._repredictIn = REPREDICT_INTERVAL;
       // Decide up front whether this one gets away, so the paddle can move
       // convincingly short rather than snapping at the last instant.
       this._willMiss = Math.random() < this.skill.missChance;
@@ -218,16 +242,36 @@ export class Opponent {
 
       if (_p.z <= HIT_PLANE_Z) {
         if (_p.y < HIT_HEIGHT_MIN) return null; // too low to dig out
-        return { point: _p.clone(), time: i * h };
+        // The velocity *at contact* matters as much as the position: the
+        // stroke is built from the incoming direction, and by the time the
+        // bat arrives that is not the direction the ball had when the shot
+        // was planned.
+        return { point: _p.clone(), time: i * h, velocity: _v.clone(), spin: _spin.clone() };
       }
     }
     return null;
   }
 
+  // Where the bat needs to be, and when. The prediction is refreshed as the
+  // ball flies rather than taken once on acquisition: the estimate made
+  // before the bounce carries real error, and acting on a stale one is why
+  // the bat used to arrive in roughly the right area and swing through
+  // empty air.
   _chase(dt) {
     const ball = this.targetBall;
-    const timeLeft = Math.max(this._timeToHit - dt, 0);
-    this._timeToHit = timeLeft;
+    this._timeToHit = Math.max(this._timeToHit - dt, 0);
+
+    this._repredictIn -= dt;
+    if (this._repredictIn <= 0) {
+      this._repredictIn = REPREDICT_INTERVAL;
+      const plan = this._predict(ball);
+      if (plan) {
+        this._intercept.copy(plan.point);
+        this._interceptVel.copy(plan.velocity);
+        this._interceptSpin.copy(plan.spin);
+        this._timeToHit = plan.time;
+      }
+    }
 
     // Aim short of the real intercept when this ball is meant to get away
     const goal = _p.copy(this._intercept);
@@ -240,39 +284,50 @@ export class Opponent {
       return;
     }
 
-    const closing = ball.mesh.position.z - HIT_PLANE_Z;
-    const nearContact = closing < 0.45 && ball.velocity.z < 0;
-
-    if (nearContact && !this._willMiss) {
-      if (this.state !== 'swinging') {
-        this.state = 'swinging';
-        this._swingElapsed = 0;
-        this._planSwing(ball);
-      }
-
-      this._swingElapsed += dt;
-
-      // A swing is a stroke, not a launch. It was integrating position along
-      // the swing vector every frame with nothing to stop it, so whenever
-      // the opponent missed, the bat kept accelerating away and sailed off
-      // over the player's head. Bound it: follow through for a fixed window,
-      // then give up on the ball and walk back.
-      if (this._swingElapsed > SWING_FOLLOW_THROUGH) {
-        this.paddle.enabled = false;
-        this.targetBall = null;
-        this.state = 'recover';
-        this._recover = 0.25;
-        return;
-      }
-
-      this.paddle.enabled = true;
-      _swingPos.copy(this._blade.getWorldPosition(_v));
-      _swingPos.addScaledVector(this._swingVel, dt);
-      this._place(_swingPos, this._swingNormal);
-    } else {
+    if (this._willMiss) {
       this.paddle.enabled = false;
       this._driftTo(goal, dt);
+      return;
     }
+
+    // Start the stroke on time remaining, not on distance. A fast ball
+    // covers the old fixed distance threshold in a fraction of the time a
+    // slow one does, so the bat was starting far too late for hard shots.
+    if (this._timeToHit > SWING_LEAD) {
+      this.paddle.enabled = false;
+      this._driftTo(goal, dt);
+      return;
+    }
+
+    if (this.state !== 'swinging') {
+      this.state = 'swinging';
+      this._swingElapsed = 0;
+      this._planSwing(ball);
+    }
+    this._swingElapsed += dt;
+
+    // A swing is a stroke, not a launch: follow through for a fixed window,
+    // then give up on the ball and walk back. Without the bound, a missed
+    // swing integrated forever and sailed the bat over the player's head.
+    if (this._swingElapsed > SWING_LEAD + SWING_FOLLOW_THROUGH) {
+      this.paddle.enabled = false;
+      this.targetBall = null;
+      this.state = 'recover';
+      this._recover = 0.25;
+      return;
+    }
+
+    // Drive the bat *to the contact point at the contact time*, rather than
+    // integrating from wherever it happened to be standing. Positioning it
+    // as an offset back along the swing means it arrives exactly where the
+    // ball will be, exactly when the ball is there, already moving at the
+    // planned speed — and Paddle still derives that speed from the motion,
+    // so the physics sees a real swing.
+    this.paddle.enabled = true;
+    _swingPos
+      .copy(this._intercept)
+      .addScaledVector(this._swingDir, -this._swingSpeed * this._timeToHit);
+    this._place(_swingPos, this._swingNormal);
   }
 
   // Move toward a point at a limited speed, so the bat travels rather than
@@ -299,33 +354,49 @@ export class Opponent {
       (Math.random() * 2 - 1) * (TABLE.WIDTH / 2 - 0.12) +
         (Math.random() * 2 - 1) * skill.error,
       TABLE.HEIGHT + BALL.RADIUS,
-      TABLE.LENGTH * 0.26 + Math.random() * TABLE.LENGTH * 0.2
+      TABLE.LENGTH * 0.2 + Math.random() * TABLE.LENGTH * 0.18
     );
 
     const from = this._intercept;
-    const outVel = solveReturn(from, target, skill.pace);
+    const outVel = solveReturn(from, target, skill.pace, this._interceptSpin);
 
-    _inDir.copy(ball.velocity).normalize();
-    _outDir.copy(outVel).normalize();
+    // Incoming direction and speed as they will be at contact, not as they
+    // are now — the bat meets the ball a moment later, by which point
+    // gravity and the bounce have turned it.
+    const inVel = this._interceptVel.lengthSq() > 1e-6
+      ? this._interceptVel
+      : ball.velocity;
 
-    // Mirror construction: the face normal bisects incoming and outgoing.
-    _normal.copy(_outDir).sub(_inDir);
+    // A contact only changes the ball's velocity along the face normal —
+    // the tangential part is carried through. So for the ball to leave with
+    // a chosen velocity, the *change* must lie along the normal:
+    //
+    //     v_out − v_in = k·n     ⟹     n = normalise(v_out − v_in)
+    //
+    // Built from the unit directions instead, as it was, that identity only
+    // holds when the speed is unchanged. With restitution below one and a
+    // moving bat it never is, so the ball left at the wrong angle and most
+    // returns failed to cross — the geometry was subtly wrong rather than
+    // the aim being off.
+    _normal.copy(outVel).sub(inVel);
     if (_normal.lengthSq() < 1e-8) _normal.set(0, 0, 1);
     _normal.normalize();
 
-    // Invert the contact for the speed along that normal. Restitution
-    // depends on impact speed, so settle it over a few passes.
-    const vinN = ball.velocity.dot(_normal);
+    // With the normal fixed, the required bat speed follows from
+    // v_out·n = −e·v_in·n + (1 + e)·v_bat·n. Restitution depends on impact
+    // speed, so settle it over a few passes.
+    const vinN = inVel.dot(_normal);
     const voutN = outVel.dot(_normal);
-    let vpN = 0;
-    for (let i = 0; i < 4; i++) {
-      const impact = Math.abs(vinN - vpN);
-      const e = restitution(impact);
+    let vpN = voutN;
+    for (let i = 0; i < 5; i++) {
+      const e = restitution(Math.abs(vinN - vpN));
       vpN = (voutN + e * vinN) / (1 + e);
     }
     vpN = THREE.MathUtils.clamp(vpN, -PADDLE.MAX_SWING_SPEED, PADDLE.MAX_SWING_SPEED);
 
     this._swingVel.copy(_normal).multiplyScalar(vpN);
+    this._swingSpeed = Math.abs(vpN);
+    this._swingDir.copy(_normal).multiplyScalar(Math.sign(vpN) || 1);
 
     this._swingNormal = _normal.clone();
 
@@ -382,7 +453,12 @@ function restitution(impact) {
 // Ballistic solve with drag, mirroring the launcher's approach: guess, fly
 // the shot, correct, repeat. A closed-form solve lands short because drag
 // takes metres off the range at these speeds.
-function solveReturn(origin, target, speed) {
+// `spin` is the ball's rotation at contact. A contact along the face normal
+// barely touches it, so it carries into the return — and relative to the new
+// direction of travel it is now backspin, which floats the ball long. Left
+// out of the flight model, the solver aimed for a target the ball sailed
+// straight past; that was most of the remaining overshoots.
+function solveReturn(origin, target, speed, spin) {
   const dx = target.x - origin.x;
   const dz = target.z - origin.z;
   const dy = target.y - origin.y;
@@ -394,25 +470,44 @@ function solveReturn(origin, target, speed) {
   let vy = (dy + 0.5 * 9.81 * (range / speed) ** 2) / (range / speed);
   const velocity = new THREE.Vector3();
 
-  for (let i = 0; i < 6; i++) {
+  // Correct both constraints every pass. Raising the arc for net clearance
+  // and then skipping the range correction — which is what `continue` did
+  // here — leaves a shot that clears the net beautifully and sails half a
+  // metre past the end of the table. That was most of the opponent's
+  // failures: the returns looked well struck and simply landed long.
+  for (let i = 0; i < 10; i++) {
     velocity.set(ux * horizontal, vy, uz * horizontal);
-    const shot = flyShot(origin, velocity, target.y);
+    const shot = flyShot(origin, velocity, target.y, spin);
+
+    let settled = true;
 
     // Clear the net with real margin. The planned shot and the shot the
     // contact actually produces differ a little — the inversion ignores
-    // tangential effects and where on the face the ball lands — and at a
-    // 6 cm margin that slop put roughly a quarter of returns into the net.
+    // tangential effects and where on the face the ball lands.
     if (shot.netClearance < NET_MARGIN) {
-      vy += (NET_MARGIN - shot.netClearance) * 2.2 + 0.05;
-      continue;
+      vy += (NET_MARGIN - shot.netClearance) * 2.2 + 0.04;
+      settled = false;
     }
-    if (!shot.landed) break;
 
-    const flown = Math.hypot(shot.x - origin.x, shot.z - origin.z);
-    if (flown < 1e-3) break;
-    const ratio = range / flown;
-    if (Math.abs(ratio - 1) < 0.02) break;
-    horizontal *= THREE.MathUtils.clamp(ratio, 0.75, 1.35);
+    if (shot.landed) {
+      const flown = Math.hypot(shot.x - origin.x, shot.z - origin.z);
+      if (flown > 1e-3) {
+        const ratio = range / flown;
+        if (Math.abs(ratio - 1) > 0.02) {
+          // Long shots are pulled in by taking pace off *and* flattening the
+          // arc; raising speed alone just trades one error for the other.
+          horizontal *= THREE.MathUtils.clamp(ratio, 0.7, 1.4);
+          if (ratio < 1) vy *= THREE.MathUtils.clamp(ratio, 0.8, 1);
+          settled = false;
+        }
+      }
+    } else {
+      // Never came down inside the window: too flat to reach, or too hot.
+      horizontal *= 0.9;
+      settled = false;
+    }
+
+    if (settled) break;
   }
 
   return velocity.set(ux * horizontal, vy, uz * horizontal);
@@ -421,10 +516,14 @@ function solveReturn(origin, target, speed) {
 const _fp = new THREE.Vector3();
 const _fv = new THREE.Vector3();
 const _fa = new THREE.Vector3();
+const _fs = new THREE.Vector3();
+const _fcross = new THREE.Vector3();
 
-function flyShot(origin, velocity, targetY) {
+function flyShot(origin, velocity, targetY, spin) {
   _fp.copy(origin);
   _fv.copy(velocity);
+  _fs.set(0, 0, 0);
+  if (spin) _fs.copy(spin);
   const h = 1 / 240;
   let netClearance = Infinity;
 
@@ -433,9 +532,16 @@ function flyShot(origin, velocity, targetY) {
     const prevY = _fp.y;
     const speed = _fv.length();
     _fa.set(0, PHYSICS.GRAVITY, 0);
-    if (speed > 1e-4) _fa.addScaledVector(_fv, -PHYSICS.DRAG * speed);
+    if (speed > 1e-4) {
+      _fa.addScaledVector(_fv, -PHYSICS.DRAG * speed);
+      if (_fs.lengthSq() > 1e-6) {
+        _fcross.copy(_fs).cross(_fv).multiplyScalar(PHYSICS.MAGNUS);
+        _fa.add(_fcross);
+      }
+    }
     _fv.addScaledVector(_fa, h);
     _fp.addScaledVector(_fv, h);
+    _fs.multiplyScalar(Math.pow(BALL.SPIN_DECAY, h));
 
     if (prevZ < 0 && _fp.z >= 0) {
       const t = Math.abs(prevZ) / Math.max(Math.abs(prevZ - _fp.z), 1e-6);
