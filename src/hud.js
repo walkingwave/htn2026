@@ -14,15 +14,9 @@ const H = 512;
 
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
+const PAPER = '#f2efe6';
+const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
+const SANS = 'Inter, "Helvetica Neue", Helvetica, Arial, sans-serif';
 
 export class Scoreboard {
   constructor(game, machine) {
@@ -51,7 +45,7 @@ export class Scoreboard {
 
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(1.46, 0.76, 0.02),
-      new THREE.MeshStandardMaterial({ color: 0x0b0d12, roughness: 0.6 })
+      new THREE.MeshStandardMaterial({ color: 0x0a0a0b, roughness: 0.7 })
     );
     frame.position.z = -0.015;
 
@@ -82,49 +76,62 @@ export class Scoreboard {
 
   draw() {
     const { ctx, game, machine } = this;
+    const red = hex(COLORS.ACCENT);
 
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(10,13,20,0.92)';
-    roundRect(ctx, 0, 0, W, H, 34);
-    ctx.fill();
+    ctx.fillStyle = '#0a0a0b';
+    ctx.fillRect(0, 0, W, H);
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-    ctx.lineWidth = 3;
-    roundRect(ctx, 6, 6, W - 12, H - 12, 30);
-    ctx.stroke();
+    // Red register bar down the left edge, echoing the start menu
+    ctx.fillStyle = red;
+    ctx.fillRect(0, 0, 14, H);
 
-    // Header: drill name and armed state
-    ctx.fillStyle = hex(COLORS.ACCENT);
-    ctx.font = 'bold 44px system-ui, sans-serif';
+    ctx.strokeStyle = 'rgba(242,239,230,0.16)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, W - 2, H - 2);
+
+    const L = 52; // left margin, clear of the register bar
+
+    // Header: mode name and armed state
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(machine.drill.name.toUpperCase(), 48, 82);
+    ctx.fillStyle = PAPER;
+    ctx.font = `700 40px ${SANS}`;
+    ctx.fillText(machine.drill.name.toUpperCase(), L, 76);
 
-    ctx.fillStyle = machine.enabled ? hex(COLORS.ACCENT) : '#8a3a3a';
-    ctx.beginPath();
-    ctx.arc(W - 70, 66, 15, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font = '26px system-ui, sans-serif';
+    const armed = machine.enabled;
+    ctx.font = `500 22px ${MONO}`;
+    const stateLabel = armed ? 'ARMED' : 'PAUSED';
+    const labelWidth = ctx.measureText(stateLabel).width;
+    if (armed) {
+      ctx.fillStyle = red;
+      ctx.fillRect(W - 48 - labelWidth - 20, 50, labelWidth + 20, 32);
+      ctx.fillStyle = PAPER;
+    } else {
+      ctx.strokeStyle = 'rgba(242,239,230,0.3)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(W - 48 - labelWidth - 20, 50, labelWidth + 20, 32);
+      ctx.fillStyle = 'rgba(242,239,230,0.5)';
+    }
     ctx.textAlign = 'right';
-    ctx.fillText(machine.enabled ? 'ARMED' : 'PAUSED', W - 100, 76);
+    ctx.fillText(stateLabel, W - 58, 74);
     ctx.textAlign = 'left';
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.strokeStyle = 'rgba(242,239,230,0.16)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(48, 108);
-    ctx.lineTo(W - 48, 108);
+    ctx.moveTo(L, 104);
+    ctx.lineTo(W - 48, 104);
     ctx.stroke();
 
     // Primary stat: targets in target practice, otherwise the rally streak
     const targeting = machine.mode.type === 'target';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 150px system-ui, sans-serif';
-    ctx.fillText(String(targeting ? game.targetsHit : game.streak), 48, 262);
+    ctx.fillStyle = PAPER;
+    ctx.font = `700 150px ${MONO}`;
+    ctx.fillText(String(targeting ? game.targetsHit : game.streak), L, 258);
 
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.font = '30px system-ui, sans-serif';
-    ctx.fillText(targeting ? 'TARGETS' : 'STREAK', 52, 306);
+    ctx.fillStyle = red;
+    ctx.font = `500 26px ${MONO}`;
+    ctx.fillText(targeting ? 'TARGETS' : 'STREAK', L + 4, 300);
 
     // Secondary stats
     const stats = targeting
@@ -140,41 +147,42 @@ export class Scoreboard {
           ['MISSES', game.misses],
           ['BEST', game.bestStreak],
         ];
-    let x = 430;
+    let x = 420;
     for (const [label, value] of stats) {
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 62px system-ui, sans-serif';
-      ctx.fillText(String(value), x, 230);
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
-      ctx.font = '24px system-ui, sans-serif';
-      ctx.fillText(label, x, 272);
-      x += 150;
+      ctx.fillStyle = PAPER;
+      ctx.font = `700 60px ${MONO}`;
+      ctx.fillText(String(value), x, 226);
+      ctx.fillStyle = 'rgba(242,239,230,0.42)';
+      ctx.font = `500 21px ${MONO}`;
+      ctx.fillText(label, x, 266);
+      x += 152;
     }
 
-    // Accuracy bar
-    const barY = 350;
-    const barW = W - 96;
-    ctx.fillStyle = 'rgba(255,255,255,0.10)';
-    roundRect(ctx, 48, barY, barW, 26, 13);
-    ctx.fill();
+    // Accuracy bar — square, drawn as a ruled track with a solid red fill
+    const barY = 344;
+    const barW = W - L - 48;
+    ctx.strokeStyle = 'rgba(242,239,230,0.22)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(L, barY, barW, 22);
+    ctx.fillStyle = red;
+    ctx.fillRect(L, barY, (barW * game.accuracy) / 100, 22);
 
-    ctx.fillStyle = hex(COLORS.ACCENT);
-    roundRect(ctx, 48, barY, Math.max(26, (barW * game.accuracy) / 100), 26, 13);
-    ctx.fill();
+    ctx.fillStyle = 'rgba(242,239,230,0.62)';
+    ctx.font = `500 24px ${MONO}`;
+    ctx.fillText(`ON-TABLE ${String(game.accuracy).padStart(3, ' ')}%`, L, 414);
 
-    ctx.fillStyle = 'rgba(255,255,255,0.65)';
-    ctx.font = '28px system-ui, sans-serif';
-    ctx.fillText(`ON-TABLE RETURNS  ${game.accuracy}%`, 48, 418);
-
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.font = '26px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(242,239,230,0.4)';
     ctx.textAlign = 'right';
-    ctx.fillText(`SERVED ${machine.servedCount}  ·  ${game.lastEvent}`, W - 48, 418);
+    ctx.fillText(
+      `SERVED ${machine.servedCount} / ${game.lastEvent.toUpperCase()}`,
+      W - 48,
+      414
+    );
 
     ctx.textAlign = 'left';
-    ctx.fillStyle = 'rgba(255,255,255,0.28)';
-    ctx.font = '24px system-ui, sans-serif';
-    ctx.fillText('TRIGGER  pause  ·  GRIP  next drill', 48, 468);
+    ctx.fillStyle = 'rgba(242,239,230,0.26)';
+    ctx.font = `500 21px ${MONO}`;
+    ctx.fillText('TRIGGER PAUSE   ·   GRIP NEXT MODE', L, 462);
 
     this.texture.needsUpdate = true;
   }

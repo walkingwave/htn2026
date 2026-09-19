@@ -179,7 +179,11 @@ function buildVenue() {
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(28, 28),
-    new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.8 })
+    new THREE.MeshStandardMaterial({
+      map: floorTexture(),
+      roughness: 0.95,
+      envMapIntensity: 0.2,
+    })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
@@ -190,11 +194,10 @@ function buildVenue() {
   // larger quad showing through underneath.
   const border = new THREE.Mesh(
     new THREE.PlaneGeometry(4.72, 8.12),
-    new THREE.MeshStandardMaterial({
-      color: COLORS.LINE,
-      roughness: 0.9,
+    new THREE.MeshBasicMaterial({
+      color: COLORS.ACCENT,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.32,
     })
   );
   border.rotation.x = -Math.PI / 2;
@@ -204,10 +207,9 @@ function buildVenue() {
   const court = new THREE.Mesh(
     new THREE.PlaneGeometry(4.6, 8.0),
     new THREE.MeshStandardMaterial({
-      color: COLORS.SURROUND,
-      roughness: 0.85,
-      transparent: true,
-      opacity: 0.5,
+      color: COLORS.COURT,
+      roughness: 0.95,
+      envMapIntensity: 0.15,
     })
   );
   court.rotation.x = -Math.PI / 2;

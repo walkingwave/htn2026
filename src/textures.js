@@ -37,7 +37,7 @@ export function tableSurfaceTexture() {
   // Near-flat colour. A strong gradient across a surface this large reads as
   // uneven lighting rather than as a material, and it fights the actual
   // lighting in the scene.
-  ctx.fillStyle = hex(COLORS.TABLE_BLUE);
+  ctx.fillStyle = hex(COLORS.TABLE_SURFACE);
   ctx.fillRect(0, 0, w, h);
 
   const grad = ctx.createLinearGradient(0, 0, 0, h);
@@ -62,7 +62,10 @@ export function tableSurfaceTexture() {
   ctx.fillRect(0, 0, w, line); // end lines
   ctx.fillRect(0, h - line, w, line);
 
+  // Centre line in red rather than white — the one deliberate break from
+  // regulation, and it ties the table to the rest of the palette.
   const centre = Math.round(line / 2);
+  ctx.fillStyle = hex(COLORS.ACCENT);
   ctx.fillRect(Math.round(w / 2 - centre / 2), 0, centre, h);
 
   return toTexture(el, { anisotropy: 16 });
@@ -116,36 +119,42 @@ export function ballTexture() {
   ctx.lineTo(w, h / 2);
   ctx.stroke();
 
-  ctx.fillStyle = 'rgba(200,60,60,0.85)';
+  ctx.fillStyle = hex(COLORS.ACCENT);
   ctx.beginPath();
   ctx.arc(w * 0.28, h * 0.32, 11, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = 'rgba(40,60,90,0.7)';
-  ctx.font = 'bold 22px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(20,20,22,0.65)';
+  ctx.font = 'bold 22px ui-monospace, monospace';
   ctx.fillText('3★', w * 0.62, h * 0.4);
 
   return toTexture(el);
 }
 
-// Venue floor: sports-hall boards.
+// Venue floor: a dark grid. Wood grain lit up to a pale taupe that fought
+// the black-and-red palette; a faint grid keeps the floor readable for
+// distance judgement while staying visually silent.
 export function floorTexture() {
-  const size = 512;
+  const size = 256;
   const { el, ctx } = canvas(size, size);
   ctx.fillStyle = hex(COLORS.FLOOR);
   ctx.fillRect(0, 0, size, size);
 
-  const plank = size / 8;
-  for (let i = 0; i < 8; i++) {
-    ctx.fillStyle = `rgba(255,220,180,${0.012 + (i % 3) * 0.008})`;
-    ctx.fillRect(0, i * plank, size, plank - 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.38)';
-    ctx.fillRect(0, i * plank + plank - 2, size, 2);
+  ctx.strokeStyle = 'rgba(242,239,230,0.05)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, size, size);
+
+  ctx.strokeStyle = 'rgba(242,239,230,0.022)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const p = (size / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(p, 0);
+    ctx.lineTo(p, size);
+    ctx.moveTo(0, p);
+    ctx.lineTo(size, p);
+    ctx.stroke();
   }
-  // Staggered board ends
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  for (let i = 0; i < 8; i++) {
-    ctx.fillRect(((i * 197) % size), i * plank, 2, plank);
-  }
-  return toTexture(el, { repeat: [6, 6] });
+
+  return toTexture(el, { repeat: [14, 14] });
 }

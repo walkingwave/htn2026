@@ -25,6 +25,9 @@ export class Paddle {
     // before that, and a bogus first value can launch a ball across the room.
     this.tracking = false;
 
+    // Whether this hand is actually holding the bat (see handedness setting).
+    this.enabled = true;
+
     this._blade = this.mesh.getObjectByName('blade');
     this._prevPos = new THREE.Vector3();
     this._prevQuat = new THREE.Quaternion();

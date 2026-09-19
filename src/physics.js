@@ -229,7 +229,7 @@ export class PhysicsWorld {
   // would let fast balls pass straight through the bat — which in a trainer
   // reads as "my hit didn't register".
   _collidePaddle(ball, paddle, prev) {
-    if (!paddle.tracking) return;
+    if (!paddle.tracking || !paddle.enabled) return;
 
     const p = ball.mesh.position;
     _n.copy(paddle.bladeNormal);

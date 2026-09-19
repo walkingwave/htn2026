@@ -66,13 +66,16 @@ export const PLAY_AREA = {
 };
 
 // Shared palette so the table, venue and HUD read as one design.
+// Red, black and bone white. The table is charcoal rather than the usual
+// tournament blue so the red reads as the single accent everywhere — lines,
+// markers and UI all come from the same three inks.
 export const COLORS = {
-  TABLE_BLUE: 0x11365f,
-  TABLE_BLUE_DARK: 0x0c2847,
-  LINE: 0xf2f5f8,
-  FRAME: 0x23262d,
-  FLOOR: 0x2a211c,
-  SURROUND: 0x102845,
-  ACCENT: 0x35d07f,
-  BALL: 0xfaf4e0,
+  TABLE_SURFACE: 0x16181c,
+  TABLE_SURFACE_DARK: 0x0e1013,
+  LINE: 0xf2efe6,
+  FRAME: 0x121316,
+  FLOOR: 0x0d0d0f,
+  COURT: 0x24090a,
+  ACCENT: 0xe2231a,
+  BALL: 0xf6f2e7,
 };

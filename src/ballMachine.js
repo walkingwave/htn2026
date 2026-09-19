@@ -40,8 +40,9 @@ const _flat = new THREE.Vector3();
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
 
 export class BallMachine {
-  constructor(balls) {
+  constructor(balls, settings) {
     this.balls = balls; // pooled Ball instances
+    this.settings = settings;
     this.enabled = true;
     this.spread = 0.5; // lateral spread of the target point (m)
     this.modeIndex = 0;
@@ -119,9 +120,16 @@ export class BallMachine {
     }
   }
 
+  // Settings are multipliers on whatever the mode specifies, so changing
+  // them adjusts the challenge without flattening each mode's character.
+  _setting(key, fallback = 1) {
+    return this.settings?.get(key) ?? fallback;
+  }
+
   _nextInterval() {
     const mode = this.mode;
-    return mode.intervalRange ? rand(...mode.intervalRange) : mode.interval;
+    const base = mode.intervalRange ? rand(...mode.intervalRange) : mode.interval;
+    return base * this._setting('feedRate');
   }
 
   // In infinite mode the machine slides along the baseline, so shots arrive
@@ -166,7 +174,7 @@ export class BallMachine {
 
   _launch(ball) {
     const mode = this.mode;
-    const spread = mode.spread ?? this.spread;
+    const spread = (mode.spread ?? this.spread) * this._setting('placement');
 
     // Aim at a point on the player's half, short of the end line
     _target.set(
@@ -204,7 +212,7 @@ export class BallMachine {
       spin.set(spinAmount, 0, 0);
     }
 
-    const velocity = solveLaunch(origin, _target, speed, spin);
+    const velocity = solveLaunch(origin, _target, speed * this._setting('pace'), spin);
     ball.serve(origin, velocity, spin);
   }
 

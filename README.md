@@ -31,15 +31,36 @@ Open `https://localhost:5173`, accept the cert warning. You get an orbit-camera 
 
 ### Controls
 
-Paddles are attached to both controllers.
-
 | | In headset | Desktop |
 | --- | --- | --- |
+| Swing the bat | Move your hand | — |
 | Pause / arm the machine | Trigger | <kbd>Space</kbd> |
 | Next mode | Grip | <kbd>D</kbd> |
+| Open the menu | A / X / B / Y | <kbd>Tab</kbd> |
 | Serve one ball | — | <kbd>S</kbd> |
 | Reset the score | — | <kbd>R</kbd> |
+| Back to main menu | Menu → Quit | <kbd>Esc</kbd> |
 | Look around | Head tracking | Drag to orbit |
+
+### The paddle
+
+The bat is parented to the controller's **grip space**, so it inherits the
+tracked pose every frame — your hand *is* the paddle, one to one, with no
+smoothing or lag added on our side. The paddle also measures its own linear
+and angular velocity between frames, which is what the physics needs: blade
+speed sets how hard the ball leaves, and the speed of the face across the
+ball — mostly a product of wrist rotation — is what puts spin on it.
+
+You hold one bat, not two. The off hand keeps its controller model visible so
+you can see where it is but carries no paddle, otherwise it swats balls out
+of the air by accident. Swap hands under **Paddle hand** in the menu.
+
+### Menus in VR
+
+DOM overlays are invisible inside an immersive session, so the pause menu is
+rendered in world space as well. Point a controller and pull the trigger, or
+just look at a row and hold your gaze — the dwell bar fills and commits, so
+the menu is fully usable on head tracking alone.
 
 ### AR vs VR
 
@@ -92,8 +113,22 @@ src/
   target.js       Target-practice pad
   game.js         Scoring and streaks
   hud.js          In-world scoreboard
-  xrButtons.js    Dual-mode AR/VR entry
+  menuModel.js    Menu contents, shared by the flat and VR renderers
+  ui.js / ui.css  Start menu, status bar and settings on a screen
+  vrMenu.js       The same menu in world space, for inside the headset
+  settings.js     Player settings, persisted to localStorage
+  audio.js        Procedural WebAudio sound effects
+  xr.js           WebXR session management
 ```
+
+## Working on the desktop build
+
+The **Computer** entry on the start menu is the hand-off point for the
+screen-and-keyboard version. `UI`'s `onStart` callback receives the chosen
+mode — an XR session mode, or `null` for the on-screen path — so the desktop
+build can branch there without touching the VR code. Everything below the UI
+layer (physics, modes, scoring, the machine) is input-agnostic and already
+shared.
 
 ## Ideas / next steps
 
