@@ -158,7 +158,9 @@ export class Scoreboard {
         ? { value: game.targetsHit, label: 'TARGETS' }
         : kind === 'rally'
           ? { value: game.rally, label: 'RALLY' }
-          : { value: game.streak, label: 'STREAK' };
+          : kind === 'coach'
+            ? { value: game.lessonScore, label: 'MATCH %' }
+            : { value: game.streak, label: 'STREAK' };
 
     ctx.fillStyle = PAPER;
     ctx.font = `700 300px ${MONO}`;
@@ -172,7 +174,13 @@ export class Scoreboard {
     // Three, not four: a fourth column costs every number ~25% of its width
     // and buys a figure nobody reads mid-drill.
     const stats =
-      kind === 'target'
+      kind === 'coach'
+        ? [
+            ['BEST', game.lessonBest],
+            ['TRIES', game.lessonAttempts],
+            ['', ''],
+          ]
+        : kind === 'target'
         ? [
             ['HITS', game.hits],
             ['MISSES', game.misses],
@@ -231,15 +239,24 @@ export class Scoreboard {
     // --- Last event -------------------------------------------------------
     // The one line that changes on every ball, so it reads as a status light:
     // red for a fault, paper for a good return.
-    const event = game.lastEvent.toUpperCase();
-    const fault = event.startsWith('MISS');
+    // In a lesson this line carries the coaching instead — what to do now,
+    // or what the last few attempts say you should work on. That is the
+    // whole point of the mode, so it gets the status slot rather than a
+    // ball-by-ball event nobody is watching for.
+    const coaching = machine.mode.type === 'coach' && this.coach;
+    const event = (coaching ? this.coach.instruction : game.lastEvent).toUpperCase();
+    const fault = !coaching && event.startsWith('MISS');
     ctx.fillStyle = fault ? red : DIM;
-    ctx.font = `700 56px ${MONO}`;
-    tracked(ctx, event, L, 912, 9);
+    // The advice runs longer than an event word, so it is set smaller and
+    // tighter to stay on one line at this width.
+    ctx.font = `700 ${coaching ? 40 : 56}px ${MONO}`;
+    tracked(ctx, event, L, 912, coaching ? 4 : 9);
 
-    ctx.fillStyle = FAINT;
-    ctx.font = `500 44px ${MONO}`;
-    tracked(ctx, `SERVED ${machine.servedCount}`, W - R, 912, 7, 'right');
+    if (!coaching) {
+      ctx.fillStyle = FAINT;
+      ctx.font = `500 44px ${MONO}`;
+      tracked(ctx, `SERVED ${machine.servedCount}`, W - R, 912, 7, 'right');
+    }
 
     this.texture.needsUpdate = true;
   }

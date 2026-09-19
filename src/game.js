@@ -14,6 +14,9 @@ export class Game {
     this.targetsHit = 0; // target-practice mode only
     this.rally = 0; // exchanges in the rally currently in play
     this.longestRally = 0;
+    this.lessonScore = 0; // last coached stroke, as a percentage
+    this.lessonBest = 0;
+    this.lessonAttempts = 0;
     this.lastEvent = 'Ready';
     this.revision = 0; // bumped whenever a displayed value changes
   }
@@ -89,6 +92,14 @@ export class Game {
     }
   }
 
+  // A coached stroke has been traced and graded.
+  onLessonScore(score) {
+    this.lessonScore = score.total;
+    this.lessonBest = Math.max(this.lessonBest, score.total);
+    this.lessonAttempts++;
+    this._changed(`${score.total}% ${score.note}`);
+  }
+
   onTargetHit() {
     this.targetsHit++;
     this._changed('Target hit!');
@@ -130,6 +141,9 @@ export class Game {
     this.targetsHit = 0;
     this.rally = 0;
     this.longestRally = 0;
+    this.lessonScore = 0;
+    this.lessonBest = 0;
+    this.lessonAttempts = 0;
     this._changed('Reset');
   }
 }

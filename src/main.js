@@ -19,6 +19,7 @@ import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
 import { Opponent } from './opponent.js';
+import { Coach, LESSONS } from './coach.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
@@ -168,6 +169,18 @@ scene.add(targetZone.mesh);
 const opponent = new Opponent();
 scene.add(opponent.mesh);
 machine.server = opponent; // in rally mode the opponent puts the ball in play
+
+// Coach mode: a lesson is a path the bat should travel, shown as a ribbon
+// and scored on how closely you trace it.
+const coach = new Coach({
+  sfx,
+  onScore: (score) => {
+    game.onLessonScore(score);
+    ui.toast(`${score.total}% · ${coach.advice}`);
+  },
+});
+scene.add(coach.group);
+scoreboard.coach = coach; // the board shows the lesson's guidance line
 
 // AR: transparent background, no virtual floor, dimmer fill so the real room
 // carries the lighting. VR: full venue.
@@ -419,12 +432,28 @@ function applyHandedness() {
   });
 }
 
+function applyLesson() {
+  const index = LESSONS.findIndex((l) => l.id === settings.get('lesson'));
+  coach.setLesson(index < 0 ? 0 : index);
+}
+
 settings.onChange((key) => {
   if (key === 'hand') applyHandedness();
   if (key === 'difficulty') opponent.setSkill(settings.get('difficulty'));
+  if (key === 'lesson') applyLesson();
 });
+
 applyHandedness();
 opponent.setSkill(settings.get('difficulty'));
+applyLesson();
+
+// Guidance buzz while tracing a lesson, on whichever hand holds the bat.
+function hapticGuide(strength) {
+  const index = paddles.findIndex((p) => p.enabled);
+  const actuator =
+    inputSources[index < 0 ? 0 : index]?.gamepad?.hapticActuators?.[0];
+  actuator?.pulse?.(Math.min(strength, 1) * 0.55, 45);
+}
 
 // Short haptic tap on contact, on whichever hand actually struck the ball.
 function pulse(ball) {
@@ -452,6 +481,7 @@ renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
 const clock = new THREE.Clock();
 let servedSeen = 0;
 const activePaddles = [];
+let lastCoachLine = '';
 
 function tick(dt) {
   // Choose what drives each bat before reading its pose, so the velocity
@@ -477,6 +507,14 @@ function tick(dt) {
   // step so the bat's derived velocity matches the motion this frame.
   opponent.setActive(machine.isRallyMode && !vrMenu.open);
   opponent.update(dt, balls);
+
+  coach.setActive(machine.isCoachMode && !vrMenu.open);
+  const guide = coach.update(dt, paddles.find((p) => p.enabled) ?? paddles[0]);
+  // Steady guidance rather than one-off taps: the buzz strengthens the
+  // further the bat drifts off the taught line, so it reads as a nudge back
+  // toward it. Pulses are short and re-issued each frame because WebXR has
+  // no sustained-rumble primitive.
+  if (guide > 0.08) hapticGuide(guide);
 
   pollMenuButton(dt);
   vrMenu.update(dt, controllers);
@@ -537,6 +575,16 @@ function tick(dt) {
     }
   }
 
+  // The coach's line changes without the score changing — arming, tracing,
+  // switching lesson — so the board needs to know to repaint.
+  if (machine.isCoachMode) {
+    const line = coach.instruction;
+    if (line !== lastCoachLine) {
+      lastCoachLine = line;
+      game.revision++;
+    }
+  }
+
   scoreboard.update();
   ui.update();
   renderer.render(scene, camera);
@@ -557,7 +605,7 @@ renderer.setAnimationLoop(() => tick(clock.getDelta()));
 if (import.meta.env.DEV) {
   window.__probe = {
     balls, machine, physics, game, paddles, targetZone,
-    settings, ui, vrMenu, opponent, scene, camera, tick,
+    settings, ui, vrMenu, opponent, coach, scene, camera, tick,
   };
 }
 

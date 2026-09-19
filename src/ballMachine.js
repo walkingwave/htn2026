@@ -32,6 +32,8 @@ export const MODES = [
   // Rally: the machine puts one ball in play and then goes quiet. From there
   // the opponent keeps it going, so the interval only governs how quickly a
   // dead rally is restarted.
+  // Coach hands ball control to the lesson, so the machine stays quiet.
+  { name: 'Coach', type: 'coach', interval: 3.0 },
   {
     name: 'Rally',
     type: 'rally',
@@ -102,6 +104,10 @@ export class BallMachine {
     return this.mode.type === 'rally';
   }
 
+  get isCoachMode() {
+    return this.mode.type === 'coach';
+  }
+
   update(dt) {
     this._updateRoaming(dt);
 
@@ -129,6 +135,13 @@ export class BallMachine {
     }
 
     if (!this.enabled) return;
+
+    // Coach mode drives its own lesson; the machine never fires here. Left
+    // to run, it launched from a mode entry with no spin or speed defined,
+    // which served a ball with an undefined velocity — NaN through the
+    // physics, and then a thrown error the moment the audio layer was handed
+    // the result.
+    if (this.isCoachMode) return;
 
     // In rally mode the opponent sustains the exchange; the machine only
     // steps in to restart once the ball is dead.
@@ -171,7 +184,7 @@ export class BallMachine {
         this._roamTarget = rand(-BASELINE_TRAVEL, BASELINE_TRAVEL);
       }
       desiredX = this._roamTarget;
-    } else if (this.isTargetMode || this.isRallyMode) {
+    } else if (this.isTargetMode || this.isRallyMode || this.isCoachMode) {
       // Stand aside: in target mode it is not firing down the line, and in
       // rally mode the opponent plays from roughly where it parks.
       desiredX = BASELINE_TRAVEL + 0.45;
@@ -235,9 +248,12 @@ export class BallMachine {
 
     // Infinite mode rolls fresh spin and pace for every ball, including the
     // spin axis, so you can't settle into one stroke.
-    let spinAmount;
-    let axis;
-    let speed;
+    // Defaults, so a mode that omits these cannot serve a NaN ball. Adding
+    // a mode without them is an easy mistake to make — this file just made
+    // it — and the failure lands far away, in the audio layer.
+    let spinAmount = mode.spin ?? 0;
+    let axis = mode.axis ?? 'x';
+    let speed = mode.speed ?? 4.5;
     if (mode.type === 'infinite') {
       spinAmount = rand(...mode.spinRange);
       axis = Math.random() < 0.35 ? 'y' : 'x';

@@ -31,6 +31,12 @@ export const OPTIONS = {
     { label: 'Controller', value: 'controller' },
     { label: 'Real paddle', value: 'hand' },
   ],
+  // Which stroke Coach mode teaches.
+  lesson: [
+    { label: 'Serve', value: 'serve' },
+    { label: 'Drive', value: 'drive' },
+    { label: 'Push', value: 'push' },
+  ],
   // How hard the rally opponent is to beat.
   difficulty: [
     { label: 'Easy', value: 'easy' },
@@ -46,6 +52,7 @@ const DEFAULTS = {
   hand: 'right',
   paddleSource: 'controller',
   difficulty: 'normal',
+  lesson: 'serve',
   sound: true,
   aimMarker: true,
 };
