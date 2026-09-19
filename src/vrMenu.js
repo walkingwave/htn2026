@@ -25,6 +25,7 @@ const PANEL_HEIGHT = (PANEL_WIDTH * H) / W;
 const ROW_TOP = 176;
 const ROW_H = 52;
 const DWELL_TIME = 1.4; // seconds of sustained gaze to activate
+const DWELL_STEPS = 20; // visible increments of the dwell bar; see update()
 
 const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const PAPER = '#f2efe6';
@@ -48,6 +49,7 @@ export class VRMenu {
     this.usingGaze = false;
 
     this._dwell = 0;
+    this._dwellStep = -1;
     this._dwellSpent = false;
     this._dirty = true;
 
@@ -90,6 +92,7 @@ export class VRMenu {
     this.open = next;
     this.group.visible = next;
     this._dwell = 0;
+    this._dwellStep = -1;
     this._dwellSpent = false;
     this.hovered = -1;
 
@@ -162,6 +165,7 @@ export class VRMenu {
     if (index !== this.hovered) {
       this.hovered = index;
       this._dwell = 0;
+      this._dwellStep = -1;
       this._dwellSpent = false; // new row, so a fresh dwell is allowed
       this._dirty = true;
       if (index >= 0) this.sfx.ui();
@@ -172,9 +176,20 @@ export class VRMenu {
     // DWELL_TIME and spins a cycle row through its values forever.
     if (this.usingGaze && this.hovered >= 0 && !this._dwellSpent) {
       this._dwell += dt;
-      this._dirty = true;
+
+      // Only repaint when the progress bar would visibly move. Flagging
+      // dirty every frame means a full 1024×768 canvas repaint and texture
+      // upload at headset framerate — measured at 42/s — for an indicator
+      // that only has a couple of dozen distinguishable states.
+      const step = Math.floor((this._dwell / DWELL_TIME) * DWELL_STEPS);
+      if (step !== this._dwellStep) {
+        this._dwellStep = step;
+        this._dirty = true;
+      }
+
       if (this._dwell >= DWELL_TIME) {
         this._dwell = 0;
+        this._dwellStep = -1;
         this._dwellSpent = true;
         this.activate();
       }
