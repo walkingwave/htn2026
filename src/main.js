@@ -42,10 +42,18 @@ function updateTargetMarker(move) {
 }
 
 function buildHands() {
-  const group = new THREE.Group(); const skin = new THREE.MeshStandardMaterial({ color: 0xe0a078, roughness: .8 }); const sleeve = new THREE.MeshStandardMaterial({ color: 0xef5b45, roughness: .7 });
+  const group = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: 0xe0a078, roughness: .82 });
+  const sleeve = new THREE.MeshStandardMaterial({ color: 0xef5b45, roughness: .72 });
   for (const side of [-1, 1]) {
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(.055, .075, .36, 12), sleeve); arm.rotation.z = side * .45; arm.position.set(side * .24, -.08, .01); group.add(arm);
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(.09, 16, 12), skin); hand.position.set(side * .18, .1, -.02); group.add(hand);
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(.022, .032, .22, 12), sleeve);
+    arm.rotation.z = side * .35;
+    arm.position.set(side * .14, -.13, .045);
+    group.add(arm);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(.034, 16, 12), skin);
+    hand.scale.set(.9, 1.15, .75);
+    hand.position.set(side * .1, -.005, .03);
+    group.add(hand);
   }
   return group;
 }
@@ -67,9 +75,9 @@ const machine = new BallMachine(balls); scene.add(machine.mesh); const session =
 let training = false; let paused = false; let cvStop = null; let cvActive = false;
 const paddles = []; const controllerModelFactory = new XRControllerModelFactory();
 for (const index of [0, 1]) { const grip = renderer.xr.getControllerGrip(index); grip.add(controllerModelFactory.createControllerModel(grip)); playerRig.add(grip); const paddle = new Paddle(); paddle.attachTo(grip); paddles.push(paddle); const controller = renderer.xr.getController(index); controller.addEventListener('selectstart', () => { machine.enabled = !machine.enabled; }); playerRig.add(controller); }
-const cvRig = new THREE.Group(); cvRig.visible = true; cvRig.add(buildHands()); playerRig.add(cvRig); const cvPaddle = new Paddle({ owner: 'player', vertical: true }); cvPaddle.attachTo(cvRig); paddles.push(cvPaddle); paddles.push(flyPaddle);
+const cvRig = new THREE.Group(); cvRig.visible = true; cvRig.add(buildHands()); playerRig.add(cvRig); const cvPaddle = new Paddle({ owner: 'player', vertical: true }); cvPaddle.mesh.scale.setScalar(.72); cvPaddle.attachTo(cvRig); paddles.push(cvPaddle); paddles.push(flyPaddle);
 
-function setPointerPose(clientX, clientY) { if (cvActive || renderer.xr.isPresenting) return; const x = clientX / window.innerWidth; const y = clientY / window.innerHeight; cvRig.position.set((x - .5) * 1.25, .95 + (.5 - y) * .7, -.25); cvRig.rotation.set(0, 0, -(x - .5) * .6); }
+function setPointerPose(clientX, clientY) { if (cvActive || renderer.xr.isPresenting) return; const x = clientX / window.innerWidth; const y = clientY / window.innerHeight; cvRig.position.set((x - .5) * 1.25, .95 + (.5 - y) * .7, -.72); cvRig.rotation.set(0, 0, -(x - .5) * .6); }
 renderer.domElement.addEventListener('pointermove', (event) => setPointerPose(event.clientX, event.clientY));
 renderer.domElement.addEventListener('pointerdown', (event) => setPointerPose(event.clientX, event.clientY));
 
@@ -78,7 +86,7 @@ const ui = createTrainerUI({
   onPause() { paused = !paused; machine.enabled = training && !paused; ui.feedback(paused ? 'Training paused.' : 'Rally live.', paused ? '' : 'success'); },
   onReset() { training = false; paused = false; machine.enabled = false; flyPaddle.enabled = false; updateTargetMarker(null); balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.update(session.summary(), 'READY'); },
   onMachineToggle() { machine.enabled = !machine.enabled; return machine.enabled; },
-  onEnableCV() { if (cvStop) { cvStop(); cvStop = null; cvActive = false; cvRig.visible = true; return; } cvActive = true; startHandTracking((pose) => { cvRig.visible = true; cvRig.position.set((pose.x - .5) * 1.25, .95 + (.5 - pose.y) * .7, -.25); cvRig.rotation.set(0, 0, -pose.angle); }, (message) => ui.feedback(message, 'success')).then((stop) => { cvStop = stop; }).catch((error) => { cvActive = false; ui.feedback(error.message, 'error'); }); },
+  onEnableCV() { if (cvStop) { cvStop(); cvStop = null; cvActive = false; cvRig.visible = true; return; } cvActive = true; startHandTracking((pose) => { cvRig.visible = true; cvRig.position.set((pose.x - .5) * 1.25, .95 + (.5 - pose.y) * .7, -.72); cvRig.rotation.set(0, 0, -pose.angle); }, (message) => ui.feedback(message, 'success')).then((stop) => { cvStop = stop; }).catch((error) => { cvActive = false; ui.feedback(error.message, 'error'); }); },
 });
 
 machine.onServe = () => { session.serve(); ui.update(session.summary(), 'SERVE'); };
@@ -107,7 +115,11 @@ physics.onBounce = (ball, event, details = {}) => {
   }
   if (event === 'table') ui.update(session.summary(), 'RALLY');
   if (event === 'net') ui.feedback('Net error — close the racket angle.', 'error');
-  if (event === 'floor') { const flyMiss = session.drill === 'fly' && ball.mesh.position.z < 0; ui.feedback(flyMiss ? 'The fly missed — keep the pressure on.' : 'Rally ended — reset your feet.', flyMiss ? 'success' : 'error'); setTimeout(() => ball.deactivate(), 700); if (session.misses >= 5 || (session.drill === 'fly' && session.flyMisses >= 3)) { training = false; machine.enabled = false; updateTargetMarker(null); ui.showSummary(session.finish()); } }
+  if (event === 'floor') {
+    const flyMiss = session.drill === 'fly' && ball.mesh.position.z < 0;
+    ui.feedback(flyMiss ? 'The fly missed — keep the pressure on.' : 'Rally ended — reset your feet. Next ball coming.', flyMiss ? 'success' : 'error');
+    setTimeout(() => ball.deactivate(), 700);
+  }
   ui.update(session.summary(), 'TRAINING');
 };
 

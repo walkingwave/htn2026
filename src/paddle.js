@@ -36,42 +36,72 @@ export class Paddle {
   }
 }
 
+function createBladeShape() {
+  const shape = new THREE.Shape();
+  // A slightly tapered, rounded ITTF-style blade: broad at the shoulder,
+  // rounded across the top, and narrower where it meets the handle.
+  shape.moveTo(-0.052, -0.012);
+  shape.lineTo(-0.074, 0.026);
+  shape.quadraticCurveTo(-0.082, 0.052, -0.071, 0.078);
+  shape.quadraticCurveTo(-0.045, 0.105, 0, 0.108);
+  shape.quadraticCurveTo(0.045, 0.105, 0.071, 0.078);
+  shape.quadraticCurveTo(0.082, 0.052, 0.074, 0.026);
+  shape.lineTo(0.052, -0.012);
+  shape.quadraticCurveTo(0.025, -0.025, 0, -0.026);
+  shape.quadraticCurveTo(-0.025, -0.025, -0.052, -0.012);
+  return shape;
+}
+
+function createFaceMesh(shape, material, z) {
+  const face = new THREE.Mesh(new THREE.ShapeGeometry(shape), material);
+  face.position.z = z;
+  return face;
+}
+
 function buildPaddleMesh(color, vertical) {
   const group = new THREE.Group();
-  const woodMat = new THREE.MeshStandardMaterial({ color: 0xc89f6b, roughness: 0.8 });
-  const rubberFront = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
-  const rubberBack = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.7 });
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0xc8945b, roughness: 0.72 });
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x5b3423, roughness: 0.82 });
+  const rubberFront = new THREE.MeshStandardMaterial({ color, roughness: 0.82 });
+  const rubberBack = new THREE.MeshStandardMaterial({ color: 0x17191d, roughness: 0.78 });
+  const shape = createBladeShape();
 
   const handle = new THREE.Mesh(
-    new THREE.CylinderGeometry(PADDLE.HANDLE_RADIUS, PADDLE.HANDLE_RADIUS * 1.15, PADDLE.HANDLE_LENGTH, 12),
+    new THREE.CylinderGeometry(PADDLE.HANDLE_RADIUS * 0.9, PADDLE.HANDLE_RADIUS * 1.2, PADDLE.HANDLE_LENGTH, 12),
     woodMat
   );
-  handle.rotation.x = Math.PI / 2;
+  handle.name = 'handle';
+  handle.position.y = -PADDLE.HANDLE_LENGTH / 2 - 0.012;
   group.add(handle);
+
+  const neck = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.018), edgeMat);
+  neck.name = 'neck';
+  neck.position.y = 0.004;
+  group.add(neck);
 
   const blade = new THREE.Group();
   blade.name = 'blade';
-  const core = new THREE.Mesh(
-    new THREE.CylinderGeometry(PADDLE.HEAD_RADIUS, PADDLE.HEAD_RADIUS, PADDLE.HEAD_THICKNESS, 32),
-    woodMat
-  );
-  core.rotation.x = Math.PI / 2;
+  blade.position.y = 0.062;
+  blade.rotation.x = vertical ? 0 : -Math.PI / 2;
+
+  const core = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {
+    depth: PADDLE.HEAD_THICKNESS,
+    bevelEnabled: true,
+    bevelThickness: 0.003,
+    bevelSize: 0.003,
+    bevelSegments: 2,
+    curveSegments: 8,
+  }), woodMat);
+  core.position.z = -PADDLE.HEAD_THICKNESS / 2;
+  core.name = 'wood-core';
   blade.add(core);
 
-  const faceGeo = new THREE.CylinderGeometry(PADDLE.HEAD_RADIUS, PADDLE.HEAD_RADIUS, 0.002, 32);
-  const faceFront = new THREE.Mesh(faceGeo, rubberFront);
-  faceFront.rotation.x = Math.PI / 2;
-  faceFront.position.z = PADDLE.HEAD_THICKNESS / 2 + 0.001;
-  blade.add(faceFront);
-  const faceBack = new THREE.Mesh(faceGeo, rubberBack);
-  faceBack.rotation.x = Math.PI / 2;
-  faceBack.position.z = -(PADDLE.HEAD_THICKNESS / 2 + 0.001);
-  blade.add(faceBack);
+  blade.add(createFaceMesh(shape, rubberFront, PADDLE.HEAD_THICKNESS / 2 + 0.0015));
+  blade.add(createFaceMesh(shape, rubberBack, -PADDLE.HEAD_THICKNESS / 2 - 0.0015));
 
-  blade.position.set(0, 0.02, -(PADDLE.HANDLE_LENGTH / 2 + PADDLE.HEAD_RADIUS));
-  // XR controller grips supply their own orientation. Desktop/CV/AI need a
-  // vertical blade whose normal points along the table's z axis.
-  blade.rotation.x = vertical ? 0 : -Math.PI / 2;
+  // A thin contrasting edge tape makes the blade readable from the side.
+  const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(shape.getPoints(32).map((point) => new THREE.Vector3(point.x, point.y, PADDLE.HEAD_THICKNESS / 2 + 0.002))), new THREE.LineBasicMaterial({ color: 0xf1c27d }));
+  blade.add(edge);
   group.add(blade);
   return group;
 }

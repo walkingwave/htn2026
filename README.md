@@ -30,7 +30,7 @@ The landing page highlights skill-building, playing against the fly, and the pro
 - **Face the fly** — the fly's paddle predicts incoming ball position, moves to intercept it, and returns it through the same physics engine. The match tracks fly returns and fly misses.
 - Every target move displays a live target, technique cue, repetition counter, and move-completion feedback. A miss keeps the current move active rather than silently advancing.
 
-The HUD tracks score, current and best rally, accuracy, table bounces, boss level, misses, net errors, survival time, estimated reaction timing, and target-sequence progress. Target sessions finish when all six moves are complete or after five missed balls; other sessions finish after five missed balls. Results can be submitted to the fundamentals or boss leaderboard.
+The HUD tracks score, current and best rally, accuracy, table bounces, boss level, misses, net errors, survival time, estimated reaction timing, and target-sequence progress. Drills are practice-first: a dropped ball ends the current rally, but the ball machine keeps serving until you reset or, for the target drill, complete all six moves. Results can be submitted to the fundamentals or boss leaderboard.
 
 ## Input modes
 
