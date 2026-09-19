@@ -20,8 +20,27 @@ export const NET = {
 export const BALL = {
   RADIUS: 0.02,
   MASS: 0.0027, // kg
-  RESTITUTION_TABLE: 0.87,
-  RESTITUTION_PADDLE: 0.78,
+
+  // Restitution falls as impact speed rises: both the ball and the rubber
+  // deform further and lose proportionally more energy in a hard contact.
+  // Real measurements bear this out — the ITTF's own COR figure is quoted
+  // for a gentle 30 cm drop and does not hold for a drive.
+  //
+  // It also matters enormously for feel. With a single fixed COR the paddle
+  // returns (1 + e) times its own speed no matter how hard you swing, so the
+  // ball behaves like a super-ball and any real swing launches it off the
+  // end of the table. The falloff gives the ball weight: soft touches stay
+  // lively, hard hits stop running away.
+  //
+  //   e(impact) = min + (base − min) / (1 + (impact / ref)²)
+  RESTITUTION_TABLE: 0.90,
+  RESTITUTION_TABLE_MIN: 0.55,
+  RESTITUTION_TABLE_REF: 26, // m/s — a gentle falloff; the table is rigid
+
+  RESTITUTION_PADDLE: 0.80,
+  RESTITUTION_PADDLE_MIN: 0.25,
+  RESTITUTION_PADDLE_REF: 9, // m/s — rubber absorbs far more at speed
+
   RESTITUTION_FLOOR: 0.5,
   // Coulomb friction at contact. Table rubber grips enough to convert a good
   // chunk of spin into speed (and vice versa) — this is what makes topspin
@@ -33,10 +52,20 @@ export const BALL = {
 };
 
 export const PADDLE = {
-  HEAD_RADIUS: 0.085,
+  // Contact disc. Kept between the blade's two semi-axes (75 x 79 mm) so it
+  // neither overhangs the rim — which produces hits off thin air — nor sits
+  // so far inside that the edge of the visible bat passes through the ball.
+  HEAD_RADIUS: 0.077,
   HEAD_THICKNESS: 0.015,
-  HANDLE_LENGTH: 0.1,
+  HANDLE_LENGTH: 0.105,
   HANDLE_RADIUS: 0.016,
+
+  // Ceiling on the swing speed the physics will believe. Hand tracking drops
+  // and recovers, and a single dropped frame reads as an enormous velocity
+  // spike that would fire the ball across the room. Well above a real
+  // stroke, so it only ever rejects glitches.
+  MAX_SWING_SPEED: 9, // m/s
+  MAX_SWING_SPIN: 40, // rad/s
 };
 
 export const PHYSICS = {

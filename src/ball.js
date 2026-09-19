@@ -36,6 +36,14 @@ export class Ball {
     this.touchedByPaddle = false; // did the player actually hit this one?
     this.isFeed = false; // tossed up for the player rather than launched at them
 
+    // Single-player bounce bookkeeping (see game.js / main.js). A "legal"
+    // feed is one that has bounced at least once on the player's receiving
+    // half (world z > 0); a ball that leaves play without ever doing so is a
+    // dead feed (the machine's fault) and must not score as a miss. The
+    // per-paddle counter drives the double-bounce rule.
+    this.everBouncedPlayerHalf = false; // any table bounce on the player's half
+    this.playerHalfBouncesSincePaddle = 0; // resets on every paddle contact
+
     // Scoring bookkeeping, owned here so that serving a ball is the single
     // point where a ball's life resets. Hanging these off the retire path
     // instead would mean any other route back into the pool leaves a ball
@@ -57,6 +65,8 @@ export class Ball {
     this.retireIn = null;
     this.touchedByPaddle = false;
     this.isFeed = false;
+    this.everBouncedPlayerHalf = false;
+    this.playerHalfBouncesSincePaddle = 0;
     this.scoredTarget = false;
     this.countedHit = false;
     this.countedReturn = false;

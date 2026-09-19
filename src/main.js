@@ -6,7 +6,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createTable } from './table.js';
 import { XRManager } from './xr.js';
 import { UI } from './ui.js';
-import { Settings } from './settings.js';
+import { Settings, OPTIONS } from './settings.js';
 import { Sfx } from './audio.js';
 import { VRMenu } from './vrMenu.js';
 import { Paddle } from './paddle.js';
@@ -29,6 +29,7 @@ import {
   isRealtimeAvailable,
 } from './net.js';
 import { VersusMatch, VERSUS_TARGET } from './versus.js';
+import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
 
 const BALL_POOL_SIZE = 10;
 const DEAD_BALL_LINGER = 1.5; // seconds a dead ball stays visible before recycling
@@ -165,6 +166,21 @@ function startLaunchCountdown() {
   ui.showCountdown(3);
 }
 
+// Single-player is point-based: exactly one ball is in play at a time. This
+// holds the ball the current point is being played with; the per-frame loop
+// watches it, and when the point resolves (miss / double bounce / dead feed /
+// a return that settles) it runs the 3-2-1 before the machine feeds again.
+let pointBall = null;
+function endPoint() {
+  if (netMode !== null) return; // versus/tournament run their own scoring
+  if (machine.isTargetMode) return; // drills feed continuously — no per-point 3-2-1
+  if (launchCountdown > 0) return; // a countdown is already queuing the next feed
+  machine.enabled = false; // hold the machine through the countdown
+  if (pointBall && pointBall.active) pointBall.deactivate();
+  pointBall = null;
+  startLaunchCountdown();
+}
+
 const ui = new UI({
   xr,
   machine,
@@ -173,28 +189,52 @@ const ui = new UI({
   sfx,
   // `choice` = { mode, input, background, xrMode } from the setup wizard.
   onStart: (choice = {}) => {
-    const { mode = 'bot', input = 'mouse', background = 'arena' } = choice;
+    const { mode = 'bot', input = 'mouse', background = 'arena', botSettings } = choice;
     applyBackground(background);
-    // Map the chosen endpoint onto a ball-machine mode: Drills -> target
-    // practice, everything else -> a live rally against the roaming machine.
-    machine.modeIndex = mode === 'drills'
-      ? MODES.findIndex((m) => m.type === 'target')
-      : MODES.findIndex((m) => m.type === 'infinite');
-    // Endpoints that still need the networking/CV ports fall back to the bot,
-    // with a clear note so it isn't a silent surprise.
+    // Beta endpoints still fall back to a local experience, with a clear note.
     if (mode === 'friend') ui.toast('Online play is in beta — playing the bot');
     else if (mode === 'tournament') ui.toast('Tournaments are in beta — playing the bot');
-    else if (input === 'paddle') ui.toast('Paddle cam is coming — using the mouse');
     else if (input === 'phone') ui.toast('Phone control is coming — using the mouse');
+    // Webcam paddle is a real input now: start the tracker for it, stop it for
+    // any other input so the pointer takes back over.
+    if (input === 'paddle') startCamPaddle();
+    else stopCamPaddle();
+
+    // Play a Bot: a real 1v1 rally against the AI "fly brain" — no ball
+    // machine. The host loop drives the opponent paddle and scoring.
+    if (mode === 'bot' || mode === 'friend' || mode === 'tournament') {
+      startBotGame();
+      return;
+    }
+
+    // Drills: the ball machine feeds CONTINUOUSLY. The wizard's settings step
+    // maps pace/feed/placement onto their Settings multipliers and the shot
+    // type onto a machine mode, defaulting to target practice.
+    machine.modeIndex = MODES.findIndex((m) => m.type === 'target');
+    if (botSettings) {
+      const applyOpt = (key) => {
+        const opt = OPTIONS[key]?.find((o) => o.label === botSettings[key]);
+        if (opt) settings.set(key, opt.value);
+      };
+      applyOpt('pace');
+      applyOpt('feedRate');
+      applyOpt('placement');
+      const shotIndex = MODES.findIndex((m) => m.name === botSettings.modeName);
+      if (shotIndex >= 0) machine.modeIndex = shotIndex;
+    }
     game.reset();
     game.revision++;
-    // 3-2-1 before the machine sends the first ball.
-    machine.enabled = false;
-    startLaunchCountdown();
+    pointBall = null;
+    balls.forEach((b) => b.deactivate());
+    // No 3-2-1, no point-based hold: the machine keeps feeding until reset.
+    ui.hideCountdown();
+    machine.enabled = true;
   },
   onExit: () => {
+    stopCamPaddle();
     machine.enabled = false;
     launchCountdown = 0;
+    pointBall = null;
     ui.hideCountdown();
   },
   // Online versus lobby hooks. The lobby UI (built separately) calls these to
@@ -279,11 +319,32 @@ physics.onBounce = (ball, event) => {
     sfx.targetHit();
   }
 
+  // Double bounce: a second landing on the player's half with no return in
+  // between loses the point (game.onContact has already logged the miss).
+  // Recycle the ball at once so the per-frame watcher runs the 3-2-1.
+  if (
+    event === 'table' &&
+    ball === pointBall &&
+    !ball.touchedByPaddle &&
+    ball.playerHalfBouncesSincePaddle >= 2
+  ) {
+    ball.deactivate();
+    return;
+  }
+
   // Floor contact means the rally is over for this ball; start a countdown
   // that returns it to the pool. Timed in simulation seconds rather than via
   // setTimeout so it can't drift when the browser throttles the frame loop.
   if (event === 'floor' && ball.retireIn === null) {
-    ball.retireIn = DEAD_BALL_LINGER;
+    // Dead feed: the machine launched a ball that never made a legal bounce on
+    // the player's half (and the player never touched it). That's the
+    // machine's fault, not a miss — recycle it silently and immediately, no
+    // lingering, so the next point's 3-2-1 starts right away.
+    if (ball === pointBall && !ball.touchedByPaddle && !ball.everBouncedPlayerHalf) {
+      ball.deactivate();
+    } else {
+      ball.retireIn = DEAD_BALL_LINGER;
+    }
   }
 };
 
@@ -366,6 +427,29 @@ const mousePaddleRig = new THREE.Group();
 playerRig.add(mousePaddleRig);
 const mousePaddle = new Paddle({ vertical: true });
 mousePaddle.attachTo(mousePaddleRig);
+
+// Webcam paddle (ported from main): an HSV colour tracker follows a real
+// paddle and drives the mouse rig. Opt-in via the "A Ping Pong Paddle" menu
+// choice; the pointer is suspended while it's active and takes back over
+// whenever the tracker isn't actually TRACKING.
+let camTracker = null;
+let useCamPaddle = false;
+function startCamPaddle() {
+  if (useCamPaddle) return;
+  useCamPaddle = true;
+  camTracker = new PaddleTracker();
+  camTracker.onState = (state, err) => {
+    if (state === TRACKER_STATE.ERROR) ui.toast?.(err || 'Camera unavailable — using mouse');
+    else if (state === TRACKER_STATE.TRACKING) ui.toast?.('Paddle cam live — move your bat');
+    else if (state === TRACKER_STATE.CALIBRATING) ui.toast?.('Hold your paddle up to calibrate…');
+  };
+  camTracker.start().catch((e) => { ui.toast?.(e?.message || 'Camera failed — using mouse'); stopCamPaddle(); });
+}
+function stopCamPaddle() {
+  useCamPaddle = false;
+  camTracker?.stop();
+  camTracker = null;
+}
 paddles.push(mousePaddle);
 
 // ---------------------------------------------------------------------------
@@ -380,7 +464,6 @@ let room = null; // active net room handle
 // When vsBot is true, runVersusHost drives an AI opponent paddle and the
 // match winner is resolved through endBotMatch instead of the win overlay.
 let vsBot = false;
-let botResultResolve = null; // resolve() of the current startBotMatch promise
 let botOpponentName = '';
 const match = new VersusMatch();
 let versusBall = null; // current rally ball (host authoritative)
@@ -577,6 +660,7 @@ function leaveVersus() {
   room?.close();
   room = null;
   netMode = null;
+  vsBot = false; // exit any local bot match cleanly
   remotePaddle.enabled = false;
   remotePaddle.tracking = false;
   versusBall = null;
@@ -585,6 +669,10 @@ function leaveVersus() {
   netSendAccum = 0;
   balls.forEach((b) => b.deactivate());
   ui.hideCountdown();
+  // Restore the opponent anchor to identity so networked versus (which poses
+  // remotePaddle relative to this anchor) isn't offset by a prior bot match.
+  remoteAnchor.rotation.set(0, 0, 0);
+  remoteAnchor.position.set(0, 0, 0);
   playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
   playerRig.rotation.y = 0;
   clearRoomFromUrl();
@@ -601,49 +689,49 @@ function wireTourneyRoom(roomHandle) {
   roomHandle.onOpponent((present) => ui._onTourneyPresence?.(present));
 }
 
-// --- Local tournament bot match ---------------------------------------------
-// A single playable game to 11 (win by 2) against an AI opponent, built on the
-// host loop with no network room. Returns a Promise that resolves true if you
-// win. The AI paddle lives at the far (-Z) end and tries to intercept balls
-// heading toward it, deliberately imperfect so you can score.
+// --- Local AI rally ("fly brain") -------------------------------------------
+// A real 1v1 game to 11 (win by 2) against an AI opponent, built on the host
+// loop with no network room. The AI paddle lives at the far (-Z) end, predicts
+// where incoming balls will cross its plane, and returns them over the net —
+// deliberately imperfect so the player can score.
 
 // Reaction plane for the AI paddle — a little in front of the far baseline.
 const BOT_HOME_Z = -(TABLE.LENGTH / 2 - 0.35);
 
-function startBotMatch(opponentName) {
-  return new Promise((resolve) => {
-    botResultResolve = resolve;
-    vsBot = true;
-    botOpponentName = opponentName || 'Opponent';
+function startBotGame() {
+  vsBot = true;
+  botOpponentName = 'Bot';
 
-    machine.enabled = false;
-    launchCountdown = 0;
-    ui.hideCountdown();
-    game.reset?.();
-    balls.forEach((b) => b.deactivate());
-    versusBall = null;
-    guestBallActive = false;
-    versusServeTimer = 0;
-    netSendAccum = 0;
-    match.reset();
+  machine.enabled = false;
+  launchCountdown = 0;
+  ui.hideCountdown();
+  game.reset?.();
+  balls.forEach((b) => b.deactivate());
+  versusBall = null;
+  guestBallActive = false;
+  versusServeTimer = 0;
+  netSendAccum = 0;
+  match.reset();
 
-    // Host loop with no room: broadcastHostState() is a no-op (guards !room).
-    netMode = 'host';
-    room = null;
+  // Host loop with no room: broadcastHostState() is a no-op (guards !room).
+  netMode = 'host';
+  room = null;
 
-    remotePaddle.enabled = true;
-    remotePaddle.networked = true;
+  remotePaddle.enabled = true;
+  remotePaddle.networked = true;
 
-    // You play from the near (+Z) end, unrotated; the bot faces you from -Z.
-    playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
-    playerRig.rotation.y = 0;
-    remoteAnchor.rotation.y = Math.PI; // blade faces +Z (back toward the player)
-    remoteAnchor.position.set(0, TABLE.HEIGHT + 0.2, BOT_HOME_Z);
+  // You play from the near (+Z) end, unrotated; the bot faces you from -Z with
+  // its blade turned toward +Z so returns come back over the net.
+  playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
+  playerRig.rotation.y = 0;
+  remoteAnchor.rotation.y = Math.PI; // blade faces +Z (back toward the player)
+  remoteAnchor.position.set(0, TABLE.HEIGHT + 0.2, BOT_HOME_Z);
 
-    ui.beginMatchView(botOpponentName);
-    ui.updateVersusScore(match.snapshot(), 'host');
-    startVersusServe();
-  });
+  // Scoreboard-only view (no lobby/room code), then serve directly — there's
+  // no room to wait on, so we don't rely on room.onOpponent.
+  ui.showBotMatch(botOpponentName);
+  ui.updateVersusScore(match.snapshot(), 'host');
+  startVersusServe();
 }
 
 function updateBotPaddle(dt) {
@@ -678,44 +766,61 @@ function updateBotPaddle(dt) {
   // The networked flag makes the tick loop skip this paddle, so update it here
   // to derive bladeCenter/normal/velocity for the physics collision.
   remotePaddle.update(dt);
+
+  // Return bias: the blade faces +Z (back toward the player); tilting its
+  // normal a little upward makes the reflected ball arc up and over the net
+  // instead of driving flat into it. The collision reflects off bladeNormal,
+  // so nudging it here is enough. Tuned conservatively — increase for a
+  // loopier, safer return, decrease for a flatter, more aggressive one.
+  remotePaddle.bladeNormal.y += 0.32;
+  remotePaddle.bladeNormal.normalize();
 }
 
 function endBotMatch(winner) {
-  const youWon = winner === 'host';
+  // The rally ball is already retired by handleVersusHostBounce; freeze the
+  // match on the win overlay. Full teardown (netMode/vsBot/rig/anchor) happens
+  // when the player taps Back-to-menu -> leaveVersus().
   ui.hideCountdown();
-  netMode = null;
-  vsBot = false;
-  remotePaddle.enabled = false;
-  remotePaddle.tracking = false;
   versusBall = null;
   guestBallActive = false;
   versusServeTimer = 0;
   balls.forEach((b) => b.deactivate());
-  remoteAnchor.rotation.y = 0;
-  remoteAnchor.position.set(0, 0, 0);
-  ui.endMatchView?.();
-  const r = botResultResolve;
-  botResultResolve = null;
-  r?.(youWon);
+  ui.showVersusWin(winner === 'host', match.snapshot());
 }
 
+// Depth of the mouse paddle along Z. Scrolling sets a TARGET; the render loop
+// eases the rig toward it, so the motion carries real velocity (momentum) into
+// the ball instead of teleporting.
+let mouseDepthTarget = -0.72;
 function setMousePaddlePose(clientX, clientY) {
   if (renderer.xr.isPresenting) return; // XR controllers own the paddles
+  if (useCamPaddle) return; // the webcam tracker owns the rig while active
   const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
   const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
   // X spans a little more than the table width; Y rides just above the surface
   // up to head height; Z sits the blade a bit in front of the player over the
   // near half of the table. All relative to playerRig.
-  mousePaddleRig.position.set(
-    (x - 0.5) * 1.25,
-    0.95 + (0.5 - y) * 0.7,
-    -0.72
-  );
+  mousePaddleRig.position.x = (x - 0.5) * 1.25;
+  // Never let the blade drop below the table surface.
+  mousePaddleRig.position.y = Math.max(TABLE.HEIGHT + 0.03, 0.95 + (0.5 - y) * 0.7);
+  // Z (depth) is eased toward mouseDepthTarget in the render loop so a forward
+  // scroll is a real thrust with momentum, not a one-frame teleport.
   // A gentle roll with horizontal position gives natural left/right steering.
   mousePaddleRig.rotation.set(0, 0, -(x - 0.5) * 0.6);
 }
 window.addEventListener('pointermove', (e) => setMousePaddlePose(e.clientX, e.clientY), { passive: true });
 window.addEventListener('pointerdown', (e) => setMousePaddlePose(e.clientX, e.clientY), { passive: true });
+// Scroll wheel moves the paddle back/forward in depth so you can step behind
+// the bounce. (OrbitControls' own wheel-zoom is disabled below so it doesn't
+// fight this.) Scroll down = back toward you; scroll up = forward toward net.
+window.addEventListener('wheel', (e) => {
+  if (renderer.xr.isPresenting || useCamPaddle) return;
+  if (ui.menu && !ui.menu.hidden) return; // let the menu scroll normally
+  e.preventDefault();
+  // Set a target; the render loop eases the paddle toward it so a forward
+  // scroll swings the bat with momentum instead of snapping instantly.
+  mouseDepthTarget = THREE.MathUtils.clamp(mouseDepthTarget + Math.sign(e.deltaY) * 0.12, -1.3, -0.15);
+}, { passive: false });
 
 // The mouse paddle is a desktop-only stand-in for a tracked controller: hide
 // and disable it in XR so it can't swat balls out of the air from a stale
@@ -806,7 +911,20 @@ function pulse(ball) {
 // --- Desktop fallback: orbit controls for dev without a headset -------------
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.target.set(0, TABLE.HEIGHT, 0);
+orbit.enableZoom = false; // the scroll wheel moves the paddle depth instead
 orbit.update();
+
+// On-screen desktop controls legend, shown while playing (hidden on the menu
+// and in XR). Kept in sync with menu visibility in the render loop.
+const controlsHint = document.createElement('div');
+controlsHint.id = 'controls-hint';
+controlsHint.innerHTML =
+  '<span><b>Move</b> paddle</span>' +
+  '<span><b>Scroll</b> depth</span>' +
+  '<span><b>Z</b>/<b>X</b> zoom</span>' +
+  '<span><b>Space</b> pause</span>' +
+  '<span><b>S</b> serve</span>';
+document.body.appendChild(controlsHint);
 renderer.xr.addEventListener('sessionstart', () => (orbit.enabled = false));
 renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
 
@@ -815,6 +933,17 @@ const clock = new THREE.Clock();
 let servedSeen = 0;
 
 function tick(dt) {
+  // Webcam paddle: pose the rig from the tracker before paddles sample their
+  // velocity, so the derived swing speed/spin is measured against this pose.
+  if (useCamPaddle && camTracker && camTracker.state === TRACKER_STATE.TRACKING) {
+    mousePaddleRig.position.copy(camTracker.position);
+    mousePaddleRig.quaternion.copy(camTracker.quaternion);
+  } else if (!renderer.xr.isPresenting) {
+    // Ease the paddle depth toward the scroll target. Doing it here (rather
+    // than snapping on the wheel event) means Paddle.update samples a smooth,
+    // sustained Z velocity, so a forward scroll drives the ball with momentum.
+    mousePaddleRig.position.z += (mouseDepthTarget - mousePaddleRig.position.z) * Math.min(1, dt * 10);
+  }
   for (const paddle of paddles) {
     // Networked (opponent) paddles are posed from incoming packets, not from
     // local input, so they must not run the velocity-sampling update.
@@ -858,6 +987,8 @@ function tick(dt) {
     if (machine.servedCount !== servedSeen) {
       servedSeen = machine.servedCount;
       game.onServe();
+      // Drills feed continuously — no point-based hold. The ball machine keeps
+      // launching until the player resets or leaves the mode.
     }
 
     if (vrMenu.open) machine.enabled = wasEnabled; // restore; the pause is momentary
@@ -894,10 +1025,19 @@ function tick(dt) {
         if (ball.retireIn <= 0) retire(ball);
       }
     }
+
+    // The point ends the moment its ball leaves play — a miss, a double
+    // bounce, a dead feed recycled above, or a return that has settled.
+    // Run the 3-2-1 (endPoint guards against firing during a countdown),
+    // then the machine feeds the next single ball when it hits zero.
+    if (pointBall && !pointBall.active && launchCountdown <= 0) {
+      endPoint();
+    }
   }
 
   scoreboard.update();
   ui.update();
+  controlsHint.style.display = (!renderer.xr.isPresenting && ui.menu && ui.menu.hidden) ? 'flex' : 'none';
 
   // Hide the OS cursor while the desktop player is training so it doesn't sit
   // on top of the paddle, but restore it over the start menu so the buttons
@@ -952,6 +1092,14 @@ window.addEventListener('keydown', (e) => {
     ui.toast('Score reset');
   } else if (e.code === 'KeyS') {
     machine.serve();
+  } else if (e.code === 'KeyZ') {
+    // Zoom in (narrower field of view).
+    camera.fov = Math.max(40, camera.fov - 4);
+    camera.updateProjectionMatrix();
+  } else if (e.code === 'KeyX') {
+    // Zoom out (wider field of view).
+    camera.fov = Math.min(85, camera.fov + 4);
+    camera.updateProjectionMatrix();
   }
 });
 

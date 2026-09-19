@@ -1,6 +1,24 @@
 import './ui.css';
 import { buildPauseMenu } from './menuModel.js';
 import { createTournament, reportResult, currentMatches, isComplete, renderBracketLines } from './tournament.js';
+import { OPTIONS } from './settings.js';
+import { MODES } from './ballMachine.js';
+
+// Play-a-Bot settings step. Each row cycles through a short list; the labels
+// are the source of truth passed to main via choice.botSettings, which maps
+// them back onto Settings values / machine.modeIndex.
+const BOT_SETTING_ROWS = [
+  { id: 'pace', label: 'Ball pace', options: OPTIONS.pace.map((o) => o.label) },
+  { id: 'feedRate', label: 'Feed rate', options: OPTIONS.feedRate.map((o) => o.label) },
+  { id: 'placement', label: 'Placement', options: OPTIONS.placement.map((o) => o.label) },
+  {
+    id: 'shot',
+    label: 'Shot type',
+    // The playable drill/rally shots — everything the machine can launch
+    // except the target-practice feed (that's the Drills mode).
+    options: MODES.filter((m) => m.type !== 'target').map((m) => m.name),
+  },
+];
 
 // Escape user-supplied text (player names) before it goes into innerHTML.
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -63,6 +81,10 @@ export class UI {
 
     this._xrSupport = { 'immersive-ar': false, 'immersive-vr': false };
     this._flow = { step: 'mode', mode: null, input: null, background: null };
+    // Default Play-a-Bot config: Normal pace/feed/placement, roaming Infinite
+    // shot. Stored as an index into each row's option list.
+    this._botSel = { pace: 1, feedRate: 1, placement: 1, shot: BOT_SETTING_ROWS[3].options.indexOf('Infinite') };
+    if (this._botSel.shot < 0) this._botSel.shot = 0;
     this._gotoStep('mode');
   }
 
@@ -94,15 +116,31 @@ export class UI {
         ],
       };
     }
+    if (step === 'background') {
+      return {
+        prompt: 'Choose your court',
+        note: 'Set the scene, then play',
+        entries: [
+          { id: 'arena', label: 'Charcoal Arena' },
+          { id: 'sunset', label: 'Sunset Court' },
+          { id: 'neon', label: 'Neon Night' },
+          { id: 'void', label: 'Blackout' },
+        ],
+      };
+    }
+    // Drills only: tune how the ball machine feeds before launching. Each row
+    // shows its current value and cycles on select; a final row starts the
+    // drill. Uses the same .item/caret rows as every other step.
+    const rows = BOT_SETTING_ROWS.map((row) => ({
+      id: row.id,
+      label: row.label,
+      note: row.options[this._botSel[row.id]],
+    }));
+    rows.push({ id: 'launch', label: 'Start drills', note: '▸ play' });
     return {
-      prompt: 'Choose your court',
-      note: 'Set the scene, then play',
-      entries: [
-        { id: 'arena', label: 'Charcoal Arena' },
-        { id: 'sunset', label: 'Sunset Court' },
-        { id: 'neon', label: 'Neon Night' },
-        { id: 'void', label: 'Blackout' },
-      ],
+      prompt: 'Set up your drill',
+      note: '← → change · enter cycles · Start drills to play',
+      entries: rows,
     };
   }
 
@@ -172,16 +210,38 @@ export class UI {
     } else if (step === 'input') {
       this._flow.input = entry.id;
       this._gotoStep('background');
-    } else {
+    } else if (step === 'background') {
       this._flow.background = entry.id;
-      this._launchFlow();
+      // Drills get a ball-machine settings step; every other mode (including
+      // Play a Bot) launches straight away.
+      if (this._flow.mode === 'drills') this._gotoStep('settings');
+      else this._launchFlow();
+    } else {
+      // Settings step: choice rows cycle their value; the launch row plays.
+      if (entry.id === 'launch') this._launchFlow();
+      else this._cycleSetting(entry.id, 1);
     }
+  }
+
+  // Advance (or rewind) one bot-setting row through its option list, wrapping,
+  // then re-render in place so the caret stays put.
+  _cycleSetting(id, delta) {
+    const row = BOT_SETTING_ROWS.find((r) => r.id === id);
+    if (!row) return;
+    const n = row.options.length;
+    this._botSel[id] = (this._botSel[id] + delta + n) % n;
+    const keep = this._selected;
+    this._gotoStep('settings');
+    this._selected = keep;
+    this._syncMenuSelection();
+    this.sfx.ui();
   }
 
   _stepBack() {
     const step = this._flow.step;
     if (step === 'input') this._gotoStep('mode');
     else if (step === 'background') this._gotoStep('input');
+    else if (step === 'settings') this._gotoStep('background');
     else return;
     this.sfx.ui();
   }
@@ -211,7 +271,17 @@ export class UI {
     this.menu.hidden = true;
     this.bar.hidden = false;
 
-    this.onStart?.({ mode, input, background, xrMode });
+    // Only Drills carry a tuned ball-machine config; other modes launch as-is.
+    const botSettings = mode === 'drills'
+      ? {
+          pace: BOT_SETTING_ROWS[0].options[this._botSel.pace],
+          feedRate: BOT_SETTING_ROWS[1].options[this._botSel.feedRate],
+          placement: BOT_SETTING_ROWS[2].options[this._botSel.placement],
+          modeName: BOT_SETTING_ROWS[3].options[this._botSel.shot],
+        }
+      : null;
+
+    this.onStart?.({ mode, input, background, xrMode, botSettings });
 
     if (xrMode) {
       try {
@@ -369,9 +439,19 @@ export class UI {
       return;
     }
     if (!this.menu.hidden) {
+      const inSettings = this._flow.step === 'settings';
+      const sel = this._entries[this._selected];
+      const onChoiceRow = inSettings && sel && sel.id !== 'launch';
       if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);
-      else if (e.code === 'Escape' || e.code === 'ArrowLeft') this._stepBack();
+      else if (e.code === 'ArrowLeft') {
+        if (onChoiceRow) this._cycleSetting(sel.id, -1);
+        else this._stepBack();
+      }
+      else if (e.code === 'ArrowRight') {
+        if (onChoiceRow) this._cycleSetting(sel.id, 1);
+      }
+      else if (e.code === 'Escape') this._stepBack();
       else if (e.code === 'Enter' || e.code === 'Space') {
         e.preventDefault();
         this._activateMenu(this._selected);
@@ -702,7 +782,7 @@ export class UI {
           </div>
           <span class="vs-dash">–</span>
           <div class="vs-side">
-            <small class="vs-name">OPPONENT</small>
+            <small class="vs-name" data-vs-them-name>OPPONENT</small>
             <span class="vs-score" data-vs-them>0</span>
           </div>
         </div>
@@ -726,6 +806,7 @@ export class UI {
     this.versusScoreboard = el.querySelector('[data-versus-scoreboard]');
     this.vsYou = el.querySelector('[data-vs-you]');
     this.vsThem = el.querySelector('[data-vs-them]');
+    this.vsThemName = el.querySelector('[data-vs-them-name]');
     this.vsServe = el.querySelector('[data-vs-serve]');
     this.vsTarget = el.querySelector('[data-vs-target]');
 
@@ -773,6 +854,7 @@ export class UI {
     // Reset to the lobby (waiting) view.
     this.versusLobby.hidden = false;
     this.versusScoreboard.hidden = true;
+    if (this.vsThemName) this.vsThemName.textContent = 'OPPONENT';
 
     const isGuest = role === 'guest';
     this.versusTitle.innerHTML = isGuest
@@ -798,8 +880,27 @@ export class UI {
     this.sfx?.ui?.();
   }
 
-  setVersusOpponent(present) {
-    if (!this.versusEl || this.versusEl.hidden) return;
+  // A local AI match reuses the versus scoreboard, but there's no lobby/room:
+  // reveal #versus straight to the scoreboard (the same DOM setVersusOpponent
+  // exposes) and label the opponent side with the bot's name.
+  showBotMatch(opponentName) {
+    this.menu.hidden = true;
+    if (this.bar) this.bar.hidden = true;
+    if (this.tournamentEl) this.tournamentEl.hidden = true;
+    this.versusWinEl.hidden = true;
+    this.versusEl.hidden = false;
+    this._versusRole = 'host';
+
+    this.versusTitle.innerHTML = `Versus<span class="blink">_</span>`;
+
+    // Only the scoreboard — hide the lobby (code/share/waiting) section.
+    this.versusLobby.hidden = true;
+    this.versusScoreboard.hidden = false;
+    if (this.vsThemName) this.vsThemName.textContent = String(opponentName || 'Bot').toUpperCase();
+    this.sfx?.ui?.();
+  }
+
+  setVersusOpponent(present) {    if (!this.versusEl || this.versusEl.hidden) return;
     if (present) {
       this.versusLobby.hidden = true;
       this.versusScoreboard.hidden = false;

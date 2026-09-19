@@ -47,6 +47,7 @@ export class BallMachine {
     this.spread = 0.5; // lateral spread of the target point (m)
     this.modeIndex = 0;
     this.servedCount = 0;
+    this.lastServed = null; // the ball produced by the most recent serve()
 
     this._timer = 1.2; // small delay before the first serve
     this._flash = 0; // indicator lamp decay
@@ -168,73 +169,90 @@ export class BallMachine {
       this._launch(ball);
     }
 
+    this.lastServed = ball;
     this.servedCount++;
     this._flash = 1;
   }
 
+  // Play-a-Bot feed. A 2D input (mouse / phone) can only reach a small volume
+  // in front of the player — world x ≈ ±0.6, y ≈ 0.8–1.2, on the fixed paddle
+  // plane at z ≈ 1.05. A fast flat drive from the far end never passes through
+  // that box, so instead we lob the ball up and let it come DOWN through the
+  // window, then bounce once on the player's half. That gives a wide timing
+  // window and a legal receiving bounce (so a genuine miss still counts).
   _launch(ball) {
     const mode = this.mode;
-    const spread = (mode.spread ?? this.spread) * this._setting('placement');
+    const placement = this._setting('placement');
+    const pace = this._setting('pace');
+    const sideX = (mode.type === 'infinite' ? rand(-0.3, 0.3) : rand(-0.15, 0.15)) * placement;
 
-    // Aim at a point on the player's half, short of the end line
-    _target.set(
-      (Math.random() * 2 - 1) * spread,
-      TABLE.HEIGHT + BALL.RADIUS,
-      TABLE.LENGTH * 0.18 + Math.random() * TABLE.LENGTH * 0.22
-    );
-    this.aim.copy(_target);
-
+    // Serve from the muzzle to land SHORT on the player's half so the ball
+    // bounces once (satisfying the no-volley rule), then runs slowly up toward
+    // the strike plane where a mouse/phone paddle can meet it. Use Z/X to step
+    // back behind the bounce.
     const origin = new THREE.Vector3(
       this.mesh.position.x,
       MUZZLE_HEIGHT,
       this.mesh.position.z + 0.12
     );
+    const target = new THREE.Vector3(sideX, TABLE.HEIGHT + BALL.RADIUS, rand(0.25, 0.5));
 
-    // Infinite mode rolls fresh spin and pace for every ball, including the
-    // spin axis, so you can't settle into one stroke.
-    let spinAmount;
-    let axis;
-    let speed;
-    if (mode.type === 'infinite') {
-      spinAmount = rand(...mode.spinRange);
-      axis = Math.random() < 0.35 ? 'y' : 'x';
-      speed = rand(...mode.speedRange);
-    } else {
-      spinAmount = mode.spin;
-      axis = mode.axis;
-      speed = mode.speed;
-    }
-
+    let spinAmount = mode.type === 'infinite' ? rand(...mode.spinRange) : mode.spin;
+    const axis = mode.type === 'infinite' ? (Math.random() < 0.35 ? 'y' : 'x') : mode.axis;
+    // Scale spin down so a slow feed isn't thrown out of reach by Magnus.
+    spinAmount = THREE.MathUtils.clamp(spinAmount * 0.35, -110, 110);
     const spin = new THREE.Vector3();
-    if (axis === 'y') {
-      spin.set(0, spinAmount, 0);
-    } else {
-      spin.set(spinAmount, 0, 0);
-    }
+    if (axis === 'y') spin.set(0, spinAmount, 0);
+    else spin.set(spinAmount, 0, 0);
 
-    const velocity = solveLaunch(origin, _target, speed * this._setting('pace'), spin);
+    // Slow enough that, after the bounce, the ball can be run down rather than
+    // zipping past — a wide timing window for 2D input.
+    const speed = rand(2.9, 3.5) * pace;
+    const velocity = solveLaunch(origin, target, speed, spin);
+    this.aim.copy(target);
     ball.serve(origin, velocity, spin);
+    ball.isFeed = false; // a real rally feed: it must bounce before you hit it
   }
 
-  // Target mode: lob the ball gently upward just in front of the player so
-  // they can take a full swing at it. A near-vertical toss gives a wide
-  // timing window, which is what makes this a placement drill rather than a
+  // Target mode: a gentle, spin-free lob into the same reachable window, so
+  // the player can take a full, unhurried swing and drive it at the pad. A
+  // wide timing window is what makes this a placement drill rather than a
   // reaction one.
   _feedToPlayer(ball) {
-    const mode = this.mode;
+    this._lobToPlayer(ball, {
+      sideX: rand(-0.12, 0.12),
+      spinAmount: 0,
+      axis: 'x',
+      up: 3.0,
+      forward: 1.15,
+    });
+    ball.isFeed = true;
+  }
+
+  // Shared lob generator. The ball starts low over the middle of the player's
+  // half and arcs up so that, on the way DOWN, it crosses the fixed paddle
+  // plane (world z ≈ 1.05) at roughly y ≈ 1.0–1.15 — inside the reachable box.
+  // If the player whiffs it, it lands (bounces once) on their half, satisfying
+  // the double-bounce rule downstream.
+  _lobToPlayer(ball, { sideX, spinAmount, axis, up, forward }) {
     const origin = new THREE.Vector3(
-      rand(-0.28, 0.28),
+      THREE.MathUtils.clamp(sideX * 0.5, -0.3, 0.3),
       TABLE.HEIGHT + 0.06,
-      PLAY_AREA.PLAYER_Z - 0.62
+      0.5 // mid player-half; ~0.5 m of forward travel reaches the strike plane
     );
 
-    // Toss height sets the hang time: v = sqrt(2·g·h)
-    const up = Math.sqrt(2 * 9.81 * mode.feedHeight);
-    const velocity = new THREE.Vector3(rand(-0.06, 0.06), up, rand(-0.12, 0.02));
+    const velocity = new THREE.Vector3(sideX, up, forward);
 
-    this.aim.copy(origin);
-    ball.serve(origin, velocity, new THREE.Vector3(0, 0, 0));
-    ball.isFeed = true;
+    const spin = new THREE.Vector3();
+    if (spinAmount) {
+      if (axis === 'y') spin.set(0, spinAmount, 0);
+      else spin.set(spinAmount, 0, 0);
+    }
+
+    // Telegraph roughly where the ball will come into reach.
+    this.aim.set(origin.x + sideX * 0.45, TABLE.HEIGHT, 1.0);
+
+    ball.serve(origin, velocity, spin);
   }
 }
 

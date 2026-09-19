@@ -110,6 +110,11 @@ canvas {
   letter-spacing: 0.14em;
   color: var(--dim);
 }
+/* Play-a-Bot settings step: the note holds the current value, so brighten it
+   on the selected row to signal it's what ← → will change. */
+.item[aria-selected='true'] .item__note {
+  color: var(--paper);
+}
 
 .hint {
   font-size: 11px;
@@ -605,3 +610,28 @@ canvas {
   font-size: 16px; letter-spacing: 0.08em;
 }
 #tourney-name:focus { outline: none; border-color: var(--red); }
+
+
+/* Desktop controls legend (bottom, above the status bar) ------------------ */
+#controls-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 46px;
+  transform: translateX(-50%);
+  z-index: 11;
+  display: flex;
+  gap: 18px;
+  padding: 6px 14px;
+  background: rgba(11, 11, 12, 0.72);
+  border: 1px solid rgba(242, 239, 230, 0.12);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  pointer-events: none;
+  white-space: nowrap;
+}
+#controls-hint b { color: var(--red); font-weight: 700; margin-right: 5px; }
+@media (max-width: 720px) { #controls-hint { display: none !important; } }

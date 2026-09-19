@@ -31,6 +31,25 @@ const _surfaceVel = new THREE.Vector3();
 const _accel = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 
+// Restitution curves per surface. See BALL in constants.js for why COR has to
+// vary with impact speed rather than being a single number.
+const TABLE_COR = {
+  base: BALL.RESTITUTION_TABLE,
+  min: BALL.RESTITUTION_TABLE_MIN,
+  ref: BALL.RESTITUTION_TABLE_REF,
+};
+const PADDLE_COR = {
+  base: BALL.RESTITUTION_PADDLE,
+  min: BALL.RESTITUTION_PADDLE_MIN,
+  ref: BALL.RESTITUTION_PADDLE_REF,
+};
+const FLOOR_COR = { base: BALL.RESTITUTION_FLOOR, min: 0.3, ref: 6 };
+
+function restitutionAt(curve, impact) {
+  const t = impact / curve.ref;
+  return curve.min + (curve.base - curve.min) / (1 + t * t);
+}
+
 export class PhysicsWorld {
   constructor() {
     this._accumulator = 0;
@@ -101,7 +120,7 @@ export class PhysicsWorld {
     if (!onTable || p.y >= surfaceY || v.y >= 0) return;
 
     p.y = surfaceY;
-    if (this._resolveContact(ball, _up, BALL.RESTITUTION_TABLE, BALL.FRICTION_TABLE, null, 'table')) {
+    if (this._resolveContact(ball, _up, TABLE_COR, BALL.FRICTION_TABLE, null, 'table')) {
       this.onBounce?.(ball, 'table');
     }
   }
@@ -112,7 +131,7 @@ export class PhysicsWorld {
     if (p.y >= BALL.RADIUS || v.y >= 0) return;
 
     p.y = BALL.RADIUS;
-    if (this._resolveContact(ball, _up, BALL.RESTITUTION_FLOOR, 0.5, null, 'floor')) {
+    if (this._resolveContact(ball, _up, FLOOR_COR, 0.5, null, 'floor')) {
       this.onBounce?.(ball, 'floor');
     }
   }
@@ -168,7 +187,7 @@ export class PhysicsWorld {
   // ball is merely resting — a naive `v.y = -v.y·e` never reaches zero, so
   // gravity would push a settled ball back through the surface every step and
   // fire contacts at the full simulation rate.
-  _resolveContact(ball, n, restitution, friction, surfaceVel, surface) {
+  _resolveContact(ball, n, curve, friction, surfaceVel, surface) {
     const v = ball.velocity;
 
     // Velocity relative to the surface
@@ -179,6 +198,7 @@ export class PhysicsWorld {
     if (vn >= 0) return false;
 
     const impact = -vn;
+    const restitution = restitutionAt(curve, impact);
     const resting = impact < PHYSICS.REST_SPEED && !surfaceVel;
 
     // Tangential part of the relative velocity
@@ -273,7 +293,7 @@ export class PhysicsWorld {
     this._resolveContact(
       ball,
       _n,
-      BALL.RESTITUTION_PADDLE,
+      PADDLE_COR,
       BALL.FRICTION_PADDLE,
       _surfaceVel,
       null
