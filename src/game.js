@@ -12,6 +12,8 @@ export class Game {
     this.streak = 0;
     this.bestStreak = 0;
     this.targetsHit = 0; // target-practice mode only
+    this.rally = 0; // exchanges in the rally currently in play
+    this.longestRally = 0;
     this.lastEvent = 'Ready';
     this.revision = 0; // bumped whenever a displayed value changes
   }
@@ -77,6 +79,19 @@ export class Game {
     this._changed('Target hit!');
   }
 
+  // One exchange: you hit it, the opponent got it back.
+  onRallyExchange() {
+    this.rally++;
+    this.longestRally = Math.max(this.longestRally, this.rally);
+    this._changed(`Rally ${this.rally}`);
+  }
+
+  endRally(reason) {
+    if (this.rally === 0) return;
+    this.rally = 0;
+    this._changed(reason);
+  }
+
   // Called once per frame so balls that sail past unhit register as misses.
   update(balls) {
     for (const ball of balls) {
@@ -98,6 +113,8 @@ export class Game {
     this.streak = 0;
     this.bestStreak = 0;
     this.targetsHit = 0;
+    this.rally = 0;
+    this.longestRally = 0;
     this._changed('Reset');
   }
 }

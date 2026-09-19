@@ -29,6 +29,18 @@ export const MODES = [
     spread: 0.62,
   },
   { name: 'Target practice', type: 'target', interval: 3.0, feedHeight: 0.55 },
+  // Rally: the machine puts one ball in play and then goes quiet. From there
+  // the opponent keeps it going, so the interval only governs how quickly a
+  // dead rally is restarted.
+  {
+    name: 'Rally',
+    type: 'rally',
+    spin: 90,
+    axis: 'x',
+    speed: 4.4,
+    interval: 2.4,
+    spread: 0.34,
+  },
 ];
 
 const MUZZLE_HEIGHT = TABLE.HEIGHT + 0.26;
@@ -85,6 +97,10 @@ export class BallMachine {
     return this.mode.type === 'target';
   }
 
+  get isRallyMode() {
+    return this.mode.type === 'rally';
+  }
+
   update(dt) {
     this._updateRoaming(dt);
 
@@ -112,6 +128,13 @@ export class BallMachine {
     }
 
     if (!this.enabled) return;
+
+    // In rally mode the opponent sustains the exchange; the machine only
+    // steps in to restart once the ball is dead.
+    if (this.isRallyMode && this.balls.some((b) => b.active)) {
+      this._timer = this._nextInterval();
+      return;
+    }
 
     this._timer -= dt;
     if (this._timer <= 0) {
@@ -147,7 +170,9 @@ export class BallMachine {
         this._roamTarget = rand(-BASELINE_TRAVEL, BASELINE_TRAVEL);
       }
       desiredX = this._roamTarget;
-    } else if (this.isTargetMode) {
+    } else if (this.isTargetMode || this.isRallyMode) {
+      // Stand aside: in target mode it is not firing down the line, and in
+      // rally mode the opponent plays from roughly where it parks.
       desiredX = BASELINE_TRAVEL + 0.45;
       desiredZ = PLAY_AREA.SERVER_Z - 0.1;
     }

@@ -18,6 +18,7 @@ import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
+import { Opponent } from './opponent.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
@@ -134,6 +135,12 @@ scene.add(targetRing);
 const targetZone = new TargetZone();
 scene.add(targetZone.mesh);
 
+// Rally opponent. Its bat is an ordinary Paddle handed to the physics
+// alongside yours, so its returns come out of the same contact model —
+// real spin, real restitution, and a net cord behaves like a net cord.
+const opponent = new Opponent();
+scene.add(opponent.mesh);
+
 // AR: transparent background, no virtual floor, dimmer fill so the real room
 // carries the lighting. VR: full venue.
 function applyMode(mode) {
@@ -177,9 +184,19 @@ xr.detectSupport().then((support) => ui.applyXRSupport(support));
 
 // --- Physics ----------------------------------------------------------------
 const physics = new PhysicsWorld();
-physics.onBounce = (ball, event) => {
-  game.onContact(ball, event);
+physics.onBounce = (ball, event, paddle) => {
   sfx.contact(event, ball.velocity.length());
+
+  // The opponent's returns arrive through the same contact path as yours,
+  // so they have to be told apart: one is an exchange in the rally, the
+  // other is a hit on your scorecard.
+  if (event === 'paddle' && paddle?.isOpponent) {
+    game.onRallyExchange();
+    opponent.onHit();
+    return;
+  }
+
+  game.onContact(ball, event);
 
   if (event === 'paddle') {
     pulse(ball);
@@ -206,6 +223,10 @@ physics.onBounce = (ball, event) => {
   // setTimeout so it can't drift when the browser throttles the frame loop.
   if (event === 'floor' && ball.retireIn === null) {
     ball.retireIn = DEAD_BALL_LINGER;
+    // A ball on the floor ends the rally, whoever put it there.
+    if (machine.isRallyMode) {
+      game.endRally(ball.touchedByPaddle ? 'Rally over' : 'Missed');
+    }
   }
 };
 
@@ -381,6 +402,7 @@ renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
 // --- Main loop --------------------------------------------------------------
 const clock = new THREE.Clock();
 let servedSeen = 0;
+const activePaddles = [];
 
 function tick(dt) {
   // Choose what drives each bat before reading its pose, so the velocity
@@ -402,6 +424,11 @@ function tick(dt) {
 
   for (const paddle of paddles) paddle.update(dt);
 
+  // The opponent only exists in rally mode. It moves before the physics
+  // step so the bat's derived velocity matches the motion this frame.
+  opponent.setActive(machine.isRallyMode && !vrMenu.open);
+  opponent.update(dt, balls);
+
   pollMenuButton();
   vrMenu.update(dt, controllers);
   for (const controller of controllers) {
@@ -422,7 +449,13 @@ function tick(dt) {
 
   if (vrMenu.open) machine.enabled = wasEnabled; // restore; the pause is momentary
 
-  physics.step(dt, balls, paddles);
+  // The opponent's bat joins the paddle list only while it is rallying, so
+  // it cannot swat balls in the other modes.
+  activePaddles.length = 0;
+  activePaddles.push(...paddles);
+  if (opponent.active) activePaddles.push(opponent.paddle);
+
+  physics.step(dt, balls, activePaddles);
   game.update(balls);
 
   // The aim ring shows where the machine is about to land a ball; in target
@@ -475,7 +508,7 @@ renderer.setAnimationLoop(() => tick(clock.getDelta()));
 if (import.meta.env.DEV) {
   window.__probe = {
     balls, machine, physics, game, paddles, targetZone,
-    settings, ui, vrMenu, scene, camera, tick,
+    settings, ui, vrMenu, opponent, scene, camera, tick,
   };
 }
 

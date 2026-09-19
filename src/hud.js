@@ -152,29 +152,43 @@ export class Scoreboard {
     // --- Primary stat -----------------------------------------------------
     // Targets in target practice, otherwise the rally streak. Big enough to
     // read peripherally, without turning to look straight at the board.
-    const targeting = machine.mode.type === 'target';
+    const kind = machine.mode.type;
+    const primary =
+      kind === 'target'
+        ? { value: game.targetsHit, label: 'TARGETS' }
+        : kind === 'rally'
+          ? { value: game.rally, label: 'RALLY' }
+          : { value: game.streak, label: 'STREAK' };
+
     ctx.fillStyle = PAPER;
     ctx.font = `700 300px ${MONO}`;
-    ctx.fillText(String(targeting ? game.targetsHit : game.streak), L, 520);
+    ctx.fillText(String(primary.value), L, 520);
 
     ctx.fillStyle = red;
     ctx.font = `700 54px ${MONO}`;
-    tracked(ctx, targeting ? 'TARGETS' : 'STREAK', L + 8, 600, 10);
+    tracked(ctx, primary.label, L + 8, 600, 10);
 
     // --- Secondary stats --------------------------------------------------
     // Three, not four: a fourth column costs every number ~25% of its width
     // and buys a figure nobody reads mid-drill.
-    const stats = targeting
-      ? [
-          ['HITS', game.hits],
-          ['MISSES', game.misses],
-          ['STREAK', game.streak],
-        ]
-      : [
-          ['RETURNS', game.returns],
-          ['MISSES', game.misses],
-          ['BEST', game.bestStreak],
-        ];
+    const stats =
+      kind === 'target'
+        ? [
+            ['HITS', game.hits],
+            ['MISSES', game.misses],
+            ['STREAK', game.streak],
+          ]
+        : kind === 'rally'
+          ? [
+              ['BEST', game.longestRally],
+              ['HITS', game.hits],
+              ['MISSES', game.misses],
+            ]
+          : [
+              ['RETURNS', game.returns],
+              ['MISSES', game.misses],
+              ['BEST', game.bestStreak],
+            ];
 
     const colW = 320;
     let x = W - R - colW * stats.length + 40;

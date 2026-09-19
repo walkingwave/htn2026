@@ -300,7 +300,10 @@ export class PhysicsWorld {
     );
 
     ball.touchedByPaddle = true;
+    ball.lastHitBy = paddle;
     ball.retireIn = null;
-    this.onBounce?.(ball, 'paddle');
+    // Pass the bat along: the game has to tell your hits from the
+    // opponent's, and they arrive through the same contact path.
+    this.onBounce?.(ball, 'paddle', paddle);
   }
 }

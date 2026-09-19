@@ -28,6 +28,9 @@ export class Paddle {
     // Whether this hand is actually holding the bat (see handedness setting).
     this.enabled = true;
 
+    // Set on the rally opponent's bat so the game can tell whose hit it was.
+    this.isOpponent = false;
+
     this._blade = this.mesh.getObjectByName('blade');
     this._prevPos = new THREE.Vector3();
     this._prevQuat = new THREE.Quaternion();
