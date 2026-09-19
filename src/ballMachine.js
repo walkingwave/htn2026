@@ -376,59 +376,145 @@ function solveLaunch(origin, target, speed, spin) {
   return velocity.set(ux * horizontalSpeed, vy, uz * horizontalSpeed);
 }
 
+
+// The machine, built to read as a piece of sports equipment rather than a
+// box on a post. What sells it is the mechanism being legible: a tripod you
+// could actually stand up, a hopper that feeds into something, a turret that
+// visibly aims, and the two friction wheels the ball is squeezed between.
+//
+// Named parts the game animates: `head` (pitches toward the aim point),
+// `wheel-l` / `wheel-r` (spin up), `lamp` (armed indicator).
+
+const COLUMN_TOP = MUZZLE_HEIGHT - 0.1;
+
 function buildMachineMesh() {
   const group = new THREE.Group();
 
   const shell = new THREE.MeshStandardMaterial({
-    color: 0x2a2f38,
-    roughness: 0.45,
-    metalness: 0.35,
+    color: 0x2b2f36,
+    roughness: 0.42,
+    metalness: 0.45,
   });
   const dark = new THREE.MeshStandardMaterial({
-    color: 0x14171c,
-    roughness: 0.7,
+    color: 0x111318,
+    roughness: 0.66,
+    metalness: 0.25,
+  });
+  const rubber = new THREE.MeshStandardMaterial({
+    color: 0x0c0d10,
+    roughness: 0.95,
   });
   const accent = new THREE.MeshStandardMaterial({
     color: COLORS.ACCENT,
-    roughness: 0.4,
-    metalness: 0.2,
+    roughness: 0.35,
+    metalness: 0.25,
+  });
+  const steel = new THREE.MeshStandardMaterial({
+    color: 0x7d858f,
+    roughness: 0.3,
+    metalness: 0.8,
   });
 
-  // Tripod base
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.2, 0.26, 0.035, 20),
-    dark
-  );
-  base.position.y = 0.018;
-  base.castShadow = true;
-  group.add(base);
-
-  const column = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.065, TABLE.HEIGHT + 0.1, 16),
+  // --- Tripod -------------------------------------------------------------
+  // Three splayed legs read as something that stands up on its own; the
+  // single post it replaces looked like a signpost.
+  const hub = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.055, 0.065, 0.05, 16),
     shell
   );
-  column.position.y = (TABLE.HEIGHT + 0.1) / 2;
-  column.castShadow = true;
-  group.add(column);
+  hub.position.y = 0.30;
+  hub.castShadow = true;
+  group.add(hub);
 
-  // Body
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.32, 0.3), shell);
+  const legGeo = new THREE.CylinderGeometry(0.014, 0.018, 0.42, 10);
+  const footGeo = new THREE.CylinderGeometry(0.026, 0.03, 0.016, 12);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + Math.PI / 6;
+    const spread = 0.26;
+
+    const leg = new THREE.Mesh(legGeo, steel);
+    leg.position.set(Math.cos(a) * spread * 0.5, 0.15, Math.sin(a) * spread * 0.5);
+    // Splay outward: tilt away from the column by a fixed angle
+    leg.rotation.z = -Math.cos(a) * 0.5;
+    leg.rotation.x = Math.sin(a) * 0.5;
+    leg.castShadow = true;
+    group.add(leg);
+
+    const foot = new THREE.Mesh(footGeo, rubber);
+    foot.position.set(Math.cos(a) * spread, 0.008, Math.sin(a) * spread);
+    group.add(foot);
+  }
+
+  // --- Column, in two stages with a clamp, like a real stand --------------
+  const lower = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.036, 0.042, 0.26, 16),
+    shell
+  );
+  lower.position.y = 0.42;
+  lower.castShadow = true;
+  group.add(lower);
+
+  const clamp = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.044, 0.044, 0.035, 16),
+    dark
+  );
+  clamp.position.y = 0.55;
+  group.add(clamp);
+
+  const clampLever = new THREE.Mesh(
+    new THREE.BoxGeometry(0.055, 0.012, 0.014),
+    accent
+  );
+  clampLever.position.set(0.05, 0.55, 0);
+  group.add(clampLever);
+
+  const upper = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.028, 0.028, COLUMN_TOP - 0.55, 16),
+    steel
+  );
+  upper.position.y = 0.55 + (COLUMN_TOP - 0.55) / 2;
+  upper.castShadow = true;
+  group.add(upper);
+
+  // --- Body shell ---------------------------------------------------------
+  const body = new THREE.Mesh(
+    roundedBox(0.34, 0.28, 0.26, 0.035),
+    shell
+  );
   body.position.y = MUZZLE_HEIGHT;
   body.castShadow = true;
   group.add(body);
 
-  // Chamfer plate across the front so it isn't a plain cube
-  const facePlate = new THREE.Mesh(new THREE.BoxGeometry(0.33, 0.22, 0.02), dark);
-  facePlate.position.set(0, MUZZLE_HEIGHT - 0.02, 0.152);
-  group.add(facePlate);
+  // Panel line and accent band, so the shell isn't one undifferentiated mass
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.352, 0.018, 0.272), accent);
+  band.position.y = MUZZLE_HEIGHT + 0.088;
+  group.add(band);
 
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.39, 0.024, 0.014), accent);
-  stripe.position.set(0, MUZZLE_HEIGHT + 0.1, 0.152);
-  group.add(stripe);
+  const vent = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.09, 0.14), dark);
+  for (const sx of [-1, 1]) {
+    const v = vent.clone();
+    v.position.set(sx * 0.172, MUZZLE_HEIGHT - 0.02, 0);
+    group.add(v);
+  }
 
-  // Status lamp
+  // Control panel on the back, angled up toward whoever is loading it
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.02, 0.1), dark);
+  panel.position.set(0, MUZZLE_HEIGHT + 0.03, -0.15);
+  panel.rotation.x = -0.5;
+  group.add(panel);
+
+  for (let i = 0; i < 3; i++) {
+    const btn = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.006, 10),
+      i === 0 ? accent : steel
+    );
+    btn.position.set(-0.04 + i * 0.04, MUZZLE_HEIGHT + 0.045, -0.163);
+    btn.rotation.x = -0.5 + Math.PI / 2;
+    group.add(btn);
+  }
+
   const lamp = new THREE.Mesh(
-    new THREE.SphereGeometry(0.016, 14, 10),
+    new THREE.SphereGeometry(0.014, 14, 10),
     new THREE.MeshStandardMaterial({
       color: 0x0a0a0a,
       emissive: new THREE.Color(COLORS.ACCENT),
@@ -437,90 +523,202 @@ function buildMachineMesh() {
     })
   );
   lamp.name = 'lamp';
-  lamp.position.set(0.14, MUZZLE_HEIGHT + 0.1, 0.152);
+  lamp.position.set(0.12, MUZZLE_HEIGHT + 0.088, 0.1);
   group.add(lamp);
 
-  // Hopper of spare balls on top
-  const hopper = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.15, 0.1, 0.18, 20, 1, true),
+  // --- Hopper -------------------------------------------------------------
+  // A funnel on a collar, with a rim and struts, so it reads as mounted
+  // plumbing rather than a cup left on top of the box.
+  const collar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.085, 0.03, 20),
+    dark
+  );
+  collar.position.y = MUZZLE_HEIGHT + 0.115;
+  group.add(collar);
+
+  const funnel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.155, 0.07, 0.17, 24, 1, true),
     new THREE.MeshStandardMaterial({
       color: 0x9aa4b2,
       transparent: true,
-      opacity: 0.32,
-      roughness: 0.25,
+      opacity: 0.22,
+      roughness: 0.2,
+      metalness: 0.1,
       side: THREE.DoubleSide,
     })
   );
-  hopper.position.y = MUZZLE_HEIGHT + 0.25;
-  group.add(hopper);
+  funnel.position.y = MUZZLE_HEIGHT + 0.215;
+  group.add(funnel);
 
-  const hopperLip = new THREE.Mesh(
-    new THREE.TorusGeometry(0.15, 0.007, 8, 24),
-    shell
-  );
-  hopperLip.rotation.x = Math.PI / 2;
-  hopperLip.position.y = MUZZLE_HEIGHT + 0.34;
-  group.add(hopperLip);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.008, 8, 28), steel);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = MUZZLE_HEIGHT + 0.3;
+  group.add(rim);
+
+  // Struts from the rim down to the collar
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const strut = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.004, 0.004, 0.18, 6),
+      steel
+    );
+    strut.position.set(
+      Math.cos(a) * 0.112,
+      MUZZLE_HEIGHT + 0.215,
+      Math.sin(a) * 0.112
+    );
+    strut.rotation.z = Math.cos(a) * 0.26;
+    strut.rotation.x = -Math.sin(a) * 0.26;
+    group.add(strut);
+  }
 
   const spareGeo = new THREE.SphereGeometry(BALL.RADIUS, 12, 8);
   const spareMat = new THREE.MeshStandardMaterial({
     color: COLORS.BALL,
     roughness: 0.5,
   });
-  // Deterministic scatter so the hopper looks packed but never re-shuffles
-  for (let i = 0; i < 14; i++) {
+  // Deterministic golden-angle scatter: packed, and never re-shuffles
+  for (let i = 0; i < 16; i++) {
     const s = new THREE.Mesh(spareGeo, spareMat);
-    const a = i * 2.399; // golden-angle spiral
-    const rad = 0.03 + (i % 4) * 0.028;
+    const a = i * 2.399;
+    const layer = Math.floor(i / 6);
+    const rad = 0.03 + (i % 6) * 0.016 + layer * 0.008;
     s.position.set(
       Math.cos(a) * rad,
-      MUZZLE_HEIGHT + 0.19 + (i % 5) * 0.02,
+      MUZZLE_HEIGHT + 0.175 + layer * 0.032,
       Math.sin(a) * rad
     );
     group.add(s);
   }
 
-  // Aiming head with the launch wheels
+  // --- Turret -------------------------------------------------------------
+  // The head pitches to aim. Object3D.lookAt aims an object's +Z at the
+  // target — three swaps the arguments for non-cameras, so it is the
+  // opposite of the camera convention — which means everything in here is
+  // built along +Z. Built along −Z, as it was, the barrel pointed away from
+  // the table and sat buried inside the body.
   const head = new THREE.Group();
   head.name = 'head';
-  head.position.set(0, MUZZLE_HEIGHT - 0.02, 0.17);
+  head.position.set(0, MUZZLE_HEIGHT - 0.005, 0.1);
   group.add(head);
 
-  const barrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.045, 0.055, 0.14, 18, 1, true),
-    dark
-  );
-  // lookAt() aims an object's −Z axis, so lay the barrel along −Z
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.z = -0.07;
-  head.add(barrel);
+  // Yoke cheeks, so the barrel visibly hangs in a mount rather than being a
+  // hole in the shell.
+  for (const sx of [-1, 1]) {
+    const cheek = new THREE.Mesh(roundedBox(0.02, 0.15, 0.1, 0.028), shell);
+    cheek.position.set(sx * 0.082, 0, -0.005);
+    cheek.castShadow = true;
+    head.add(cheek);
 
-  const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.007, 8, 20), accent);
-  muzzle.position.z = -0.14;
-  head.add(muzzle);
+    const pivot = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.014, 0.014, 0.012, 12),
+      steel
+    );
+    pivot.rotation.z = Math.PI / 2;
+    pivot.position.set(sx * 0.094, 0, -0.005);
+    head.add(pivot);
+  }
 
-  const wheelGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.018, 18);
-  const wheelMat = new THREE.MeshStandardMaterial({
-    color: 0x3c4450,
-    roughness: 0.5,
-    metalness: 0.4,
-  });
-  for (const [name, sx] of [
-    ['wheel-l', -1],
-    ['wheel-r', 1],
+  // The friction wheels sit proud of the barrel, between the cheeks, where
+  // you can actually see them turn. Tucked inside the tube — which is where
+  // a real one hides them — the machine loses the one detail that explains
+  // how it throws a ball.
+  const wheelGeo = new THREE.CylinderGeometry(0.052, 0.052, 0.022, 22);
+  const treadGeo = new THREE.TorusGeometry(0.052, 0.007, 8, 24);
+  for (const [name, sy] of [
+    ['wheel-l', 1],
+    ['wheel-r', -1],
   ]) {
-    // The wheel spins on its own axis, so it sits inside a holder that does
-    // the tilting. Putting both rotations on one object would make it wobble
-    // about the parent's axis instead of turning in place.
+    // Holder does the tilting; the wheel spins on its own axis inside it, so
+    // the two rotations cannot fight each other.
     const holder = new THREE.Group();
     holder.rotation.z = Math.PI / 2;
-    holder.position.set(sx * 0.055, 0, -0.03);
+    holder.position.set(0, sy * 0.056, -0.01);
 
-    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    const wheel = new THREE.Mesh(wheelGeo, steel);
     wheel.name = name;
+    wheel.castShadow = true;
+
+    const tread = new THREE.Mesh(treadGeo, rubber);
+    tread.rotation.x = Math.PI / 2;
+    wheel.add(tread);
+
+    // Spokes, so the spin is legible instead of a smooth grey disc
+    for (let i = 0; i < 3; i++) {
+      const spoke = new THREE.Mesh(
+        new THREE.BoxGeometry(0.09, 0.024, 0.008),
+        dark
+      );
+      spoke.rotation.y = (i / 3) * Math.PI;
+      wheel.add(spoke);
+    }
+
     holder.add(wheel);
     head.add(holder);
   }
 
+  // Short barrel ahead of the wheels, in shell grey so it reads against the
+  // dark body instead of disappearing into it.
+  const barrel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.048, 0.055, 0.1, 22, 1, true),
+    shell
+  );
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.z = 0.065;
+  barrel.castShadow = true;
+  head.add(barrel);
+
+  const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.0105, 12, 26), accent);
+  muzzle.position.z = 0.115;
+  head.add(muzzle);
+
+  // Dark throat inside the muzzle, so it reads as an opening
+  const throat = new THREE.Mesh(
+    new THREE.CircleGeometry(0.044, 22),
+    new THREE.MeshBasicMaterial({ color: 0x05060a })
+  );
+  throat.position.z = 0.112;
+  head.add(throat);
+
+  // Feed tube from the hopper collar into the back of the turret
+  const feed = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.026, 0.026, 0.12, 12),
+    dark
+  );
+  feed.position.set(0, MUZZLE_HEIGHT + 0.07, 0.07);
+  feed.rotation.x = 0.5;
+  group.add(feed);
+
   return group;
+}
+
+// A box with softened edges. Plain BoxGeometry catches light along a hard
+// seam that reads as untextured geometry; a small bevel is most of what
+// makes a shell look moulded.
+function roundedBox(width, height, depth, radius) {
+  const shape = new THREE.Shape();
+  const w = width / 2 - radius;
+  const h = height / 2 - radius;
+  shape.moveTo(-w, -height / 2);
+  shape.lineTo(w, -height / 2);
+  shape.quadraticCurveTo(width / 2, -height / 2, width / 2, -h);
+  shape.lineTo(width / 2, h);
+  shape.quadraticCurveTo(width / 2, height / 2, w, height / 2);
+  shape.lineTo(-w, height / 2);
+  shape.quadraticCurveTo(-width / 2, height / 2, -width / 2, h);
+  shape.lineTo(-width / 2, -h);
+  shape.quadraticCurveTo(-width / 2, -height / 2, -w, -height / 2);
+  shape.closePath();
+
+  const bevel = Math.min(radius * 0.6, depth * 0.22);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: depth - bevel * 2,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 3,
+    curveSegments: 8,
+  });
+  geo.translate(0, 0, -(depth - bevel * 2) / 2);
+  return geo;
 }
