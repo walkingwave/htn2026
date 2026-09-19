@@ -854,6 +854,7 @@ export class UI {
     // Reset to the lobby (waiting) view.
     this.versusLobby.hidden = false;
     this.versusScoreboard.hidden = true;
+    this.versusEl.classList.remove('versus--playing');
     if (this.vsThemName) this.vsThemName.textContent = 'OPPONENT';
 
     const isGuest = role === 'guest';
@@ -896,6 +897,7 @@ export class UI {
     // Only the scoreboard — hide the lobby (code/share/waiting) section.
     this.versusLobby.hidden = true;
     this.versusScoreboard.hidden = false;
+    this.versusEl.classList.add('versus--playing');
     if (this.vsThemName) this.vsThemName.textContent = String(opponentName || 'Bot').toUpperCase();
     this.sfx?.ui?.();
   }
@@ -904,10 +906,12 @@ export class UI {
     if (present) {
       this.versusLobby.hidden = true;
       this.versusScoreboard.hidden = false;
+      this.versusEl.classList.add('versus--playing');
       this.toast('Opponent connected');
     } else {
       this.versusScoreboard.hidden = true;
       this.versusLobby.hidden = false;
+      this.versusEl.classList.remove('versus--playing');
       this.versusStatus.textContent = 'Waiting for opponent…';
     }
   }
@@ -944,7 +948,7 @@ export class UI {
   }
 
   closeVersus() {
-    if (this.versusEl) this.versusEl.hidden = true;
+    if (this.versusEl) { this.versusEl.hidden = true; this.versusEl.classList.remove('versus--playing'); }
     if (this.versusWinEl) this.versusWinEl.hidden = true;
     if (this.versusScoreboard) this.versusScoreboard.hidden = true;
     if (this.versusLobby) this.versusLobby.hidden = false;

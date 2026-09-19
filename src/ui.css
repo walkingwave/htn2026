@@ -635,3 +635,37 @@ canvas {
 }
 #controls-hint b { color: var(--red); font-weight: 700; margin-right: 5px; }
 @media (max-width: 720px) { #controls-hint { display: none !important; } }
+
+
+
+/* Live-match HUD: during a rally the versus panel must NOT cover the 3D game.
+   Make it transparent, click-through, and shrink the scoreboard to a small bar
+   pinned at the top (clear of the centered 3-2-1 countdown). */
+#versus.versus--playing {
+  background: none;
+  pointer-events: none;
+  justify-content: flex-start;
+  padding: 14px;
+  overflow: visible;
+}
+#versus.versus--playing .versus-head,
+#versus.versus--playing .hint { display: none; }
+#versus.versus--playing .versus-scoreboard {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px 18px;
+  width: auto;
+  padding: 8px 20px;
+  background: rgba(11, 11, 12, 0.72);
+  border: 1px solid rgba(242, 239, 230, 0.15);
+  border-radius: 12px;
+}
+#versus.versus--playing .vs-grid { gap: 14px; }
+#versus.versus--playing .vs-side { min-width: 52px; gap: 1px; }
+#versus.versus--playing .vs-name { font-size: 9px; letter-spacing: 0.16em; }
+#versus.versus--playing .vs-score { font-size: 34px; }
+#versus.versus--playing .vs-dash { font-size: 22px; }
+#versus.versus--playing .versus-status,
+#versus.versus--playing .versus-note { margin: 0; font-size: 10px; }
