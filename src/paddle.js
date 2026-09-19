@@ -62,8 +62,8 @@ function buildPaddleMesh(color, vertical) {
   const group = new THREE.Group();
   const woodMat = new THREE.MeshStandardMaterial({ color: 0xc8945b, roughness: 0.72 });
   const edgeMat = new THREE.MeshStandardMaterial({ color: 0x5b3423, roughness: 0.82 });
-  const rubberFront = new THREE.MeshStandardMaterial({ color, roughness: 0.82 });
-  const rubberBack = new THREE.MeshStandardMaterial({ color: 0x17191d, roughness: 0.78 });
+  const rubberFront = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthTest: false, toneMapped: false });
+  const rubberBack = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(0.68), side: THREE.DoubleSide, depthTest: false, toneMapped: false });
   const shape = createBladeShape();
 
   const handle = new THREE.Mesh(
@@ -94,10 +94,14 @@ function buildPaddleMesh(color, vertical) {
   }), woodMat);
   core.position.z = -PADDLE.HEAD_THICKNESS / 2;
   core.name = 'wood-core';
+  core.renderOrder = 0;
   blade.add(core);
 
-  blade.add(createFaceMesh(shape, rubberFront, PADDLE.HEAD_THICKNESS / 2 + 0.0015));
-  blade.add(createFaceMesh(shape, rubberBack, -PADDLE.HEAD_THICKNESS / 2 - 0.0015));
+  const frontFace = createFaceMesh(shape, rubberFront, PADDLE.HEAD_THICKNESS / 2 + 0.004);
+  const backFace = createFaceMesh(shape, rubberBack, -PADDLE.HEAD_THICKNESS / 2 - 0.004);
+  frontFace.renderOrder = 2;
+  backFace.renderOrder = 2;
+  blade.add(frontFace, backFace);
 
   // A thin contrasting edge tape makes the blade readable from the side.
   const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(shape.getPoints(32).map((point) => new THREE.Vector3(point.x, point.y, PADDLE.HEAD_THICKNESS / 2 + 0.002))), new THREE.LineBasicMaterial({ color: 0xf1c27d }));
