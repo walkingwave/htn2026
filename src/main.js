@@ -182,6 +182,14 @@ const coach = new Coach({
 scene.add(coach.group);
 scoreboard.coach = coach; // the board shows the lesson's guidance line
 
+// Picking a scenario off the in-world board is the same action as picking
+// it in the menu, so the setting follows along.
+coach.onScenarioPicked = (scenario) => {
+  settings.set('scenario', scenario.id);
+  ui.toast(scenario.name);
+  game.revision++;
+};
+
 // The bottom bar names the running scenario without needing the coach
 Object.defineProperty(machine, 'coachName', {
   get: () => coach.scenario.name,
@@ -497,6 +505,7 @@ renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
 const clock = new THREE.Clock();
 let servedSeen = 0;
 const activePaddles = [];
+const ZERO = new THREE.Vector3();
 let lastCoachLine = '';
 
 function tick(dt) {
@@ -528,17 +537,16 @@ function tick(dt) {
   const guide = coach.update(
     dt,
     paddles.find((p) => p.enabled) ?? paddles[0],
-    // The scenario puts its own ball in play, identically every attempt.
-    (position, velocity, spin) => {
+    // Park a ball, held still, where the stroke should meet it.
+    (position, spin) => {
       const ball = balls.find((b) => !b.active);
-      if (ball) ball.serve(position, velocity, spin);
+      if (!ball) return;
+      ball.serve(position, ZERO, spin);
+      ball.frozen = true;
     },
-    () => balls.find((b) => b.active) ?? null
+    () => balls.find((b) => b.active && b.frozen) ?? null
   );
-  // Steady guidance rather than one-off taps: the buzz strengthens the
-  // further the bat drifts off the taught line, so it reads as a nudge back
-  // toward it. Pulses are short and re-issued each frame because WebXR has
-  // no sustained-rumble primitive.
+
   if (guide > 0.08) hapticGuide(guide);
 
   pollMenuButton(dt);

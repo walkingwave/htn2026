@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TABLE, BALL, PLAY_AREA, COLORS } from './constants.js';
-import { solveLaunchTo, solveContact, advanceToPlane } from './ballistics.js';
+import { solveLaunchTo, solveContact } from './ballistics.js';
 
 // Coach mode: a scenario is a fixed situation, and the stroke that answers
 // it is worked out rather than drawn by hand.
@@ -20,8 +20,6 @@ import { solveLaunchTo, solveContact, advanceToPlane } from './ballistics.js';
 // So the ribbon is a promise: trace it at the right pace and the ball lands
 // where the scenario says it will.
 
-const CONTACT_PLANE_Z = PLAY_AREA.PLAYER_Z - 0.45;
-
 // How long the bat travels before and after the strike. Real strokes are
 // longer, but a short path is easier to trace accurately and the contact is
 // the part being taught.
@@ -32,37 +30,35 @@ export const SCENARIOS = [
   {
     id: 'serve',
     name: 'Serve',
-    brief: 'Ball drops in the same spot each time — brush it deep crosscourt',
-    // A serve has no incoming ball: it is tossed and struck as it falls.
-    toss: { x: 0.18, height: 1.35 },
+    brief: 'Brush up the back of the ball and land it deep crosscourt',
+    contact: [0.16, TABLE.HEIGHT + 0.2, PLAY_AREA.PLAYER_Z - 0.34],
+    spin: [0, 0, 0],
     land: { x: -0.42, z: -1.0 },
     pace: 4.4,
   },
   {
     id: 'drive',
     name: 'Drive a topspin ball',
-    brief: 'Same ball, same angle, every time — drive it deep',
-    feed: {
-      from: [-0.35, TABLE.HEIGHT + 0.26, -(TABLE.LENGTH / 2 + 0.2)],
-      aimAt: [0.2, 0.85],
-      speed: 4.6,
-      spin: [150, 0, 0],
-    },
-    land: { x: -0.3, z: -1.05 },
-    pace: 5.0,
+    brief: 'Topspin on the ball — close the face and drive it deep',
+    contact: [0.3, TABLE.HEIGHT + 0.26, PLAY_AREA.PLAYER_Z - 0.5],
+    spin: [150, 0, 0],
+    land: { x: -0.3, z: -0.95 },
+    pace: 4.3,
   },
   {
     id: 'push',
     name: 'Push a backspin ball',
-    brief: 'Heavy backspin arrives the same way each time — push it low',
-    feed: {
-      from: [0.3, TABLE.HEIGHT + 0.26, -(TABLE.LENGTH / 2 + 0.2)],
-      aimAt: [-0.15, 0.7],
-      speed: 3.9,
-      spin: [-170, 0, 0],
-    },
-    land: { x: 0.25, z: -0.5 },
-    pace: 3.4,
+    brief: 'Heavy backspin — open the face and push it low over the net',
+    // Backspin is kept moderate. The stroke solve only models the impulse
+    // along the face, so the tangential drag a spinning ball adds is
+    // unaccounted for — and it scales with the spin. At championship
+    // backspin the solved push died in the net every time; this is heavy
+    // enough to demand an open face and light enough that the taught stroke
+    // actually clears.
+    contact: [-0.26, TABLE.HEIGHT + 0.24, PLAY_AREA.PLAYER_Z - 0.5],
+    spin: [-70, 0, 0],
+    land: { x: 0.25, z: -0.8 },
+    pace: 4.6,
   },
 ];
 
@@ -111,11 +107,10 @@ export class Coach {
     this._elapsed = 0;
     this._ghostT = 0;
     this._armCooldown = 0;
-    this._ballDue = null;
-    this._leadIn = 0;
 
     this._buildGhost();
     this.setScenario(0);
+    this.group.add(this._buildScenarioBoard());
   }
 
   get scenario() {
@@ -152,8 +147,6 @@ export class Coach {
     this._ghostT = 0;
     this.progress = 0;
     this.deviation = 0;
-    this._ballDue = null;
-    this._leadIn = 0;
     this._paintProgress(0);
   }
 
@@ -172,39 +165,37 @@ export class Coach {
     let contactPoint;
     let inVel;
 
-    if (scenario.toss) {
-      // A serve: the ball is dropped from a fixed spot and struck on the way
-      // down, so by contact its velocity is just what gravity has given it.
-      contactPoint = new THREE.Vector3(
-        scenario.toss.x,
-        TABLE.HEIGHT + 0.22,
-        PLAY_AREA.PLAYER_Z - 0.3
-      );
-      const fall = Math.max(scenario.toss.height - contactPoint.y, 0.05);
-      inVel = new THREE.Vector3(0, -Math.sqrt(2 * 9.81 * fall), 0);
-      this.feedState = null;
-    } else {
-      // A fed ball: fly the feed forward to the plane where it is met.
-      const from = new THREE.Vector3(...scenario.feed.from);
-      const aim = new THREE.Vector3(
-        scenario.feed.aimAt[0],
-        TABLE.HEIGHT + BALL.RADIUS,
-        scenario.feed.aimAt[1]
-      );
-      const spin = new THREE.Vector3(...scenario.feed.spin);
-      const feedVel = solveLaunchTo(from, aim, scenario.feed.speed, spin);
+    // The ball waits, held still, at the point the stroke should meet it.
+    //
+    // Timing a moving feed to a player's swing is a problem with no good
+    // answer — the feed cannot know when you will go, and a swing that
+    // arrives early or late teaches nothing about the stroke. Holding the
+    // ball removes the question: the contact happens where the lesson says
+    // it does, whenever you get there, and what is being graded is the
+    // shape of the swing.
+    contactPoint = new THREE.Vector3(
+      scenario.contact[0],
+      scenario.contact[1],
+      scenario.contact[2]
+    );
+    inVel = new THREE.Vector3(0, 0, 0);
 
-      const met = advanceToPlane(from, feedVel, spin, CONTACT_PLANE_Z, 0.55);
-      this.feedState = { from, velocity: feedVel, spin, flight: met?.time ?? 1 };
-
-      contactPoint = met
-        ? met.position.clone()
-        : new THREE.Vector3(0, 1.0, CONTACT_PLANE_Z);
-      inVel = met ? met.velocity.clone() : new THREE.Vector3(0, -1, 3);
-    }
+    // It still carries the scenario's spin, so a backspin ball genuinely
+    // needs an open face to lift — the spin is what the lesson is about,
+    // and it survives the ball being stationary.
+    this.ballSpin = new THREE.Vector3(...(scenario.spin ?? [0, 0, 0]));
 
     // What the ball must do next, and therefore what the bat must do.
-    const outVel = solveLaunchTo(contactPoint, target, scenario.pace, null, 0.16);
+    // The ball's spin carries through the contact and bends the flight, so
+    // the outgoing solve has to know about it. Solved without, the topspin
+    // drive was lifted straight past the end of the table.
+    const outVel = solveLaunchTo(
+      contactPoint,
+      target,
+      scenario.pace,
+      this.ballSpin,
+      0.16
+    );
     const { normal, speed } = solveContact(inVel, outVel);
 
     this.contactPoint = contactPoint;
@@ -214,13 +205,18 @@ export class Coach {
 
     // Lay the path along the swing: back along the face normal before
     // contact, on through it after.
+    // Path length has to equal speed x time, or tracing it at the
+    // demonstrated pace delivers the wrong speed at contact. Shortening the
+    // limbs "for feel" meant the bat arrived at about three quarters of the
+    // solved speed, which the shots with margin survived and the delicate
+    // push did not — it died in the net every time.
     const dir = normal.clone().multiplyScalar(Math.sign(speed) || 1);
-    const back = this.contactSpeed * BACKSWING_TIME * 0.62;
-    const through = this.contactSpeed * FOLLOW_TIME * 0.85;
+    const back = this.contactSpeed * BACKSWING_TIME;
+    const through = this.contactSpeed * FOLLOW_TIME;
 
     const start = contactPoint.clone().addScaledVector(dir, -back);
-    const mid = contactPoint.clone().addScaledVector(dir, -back * 0.38);
-    const after = contactPoint.clone().addScaledVector(dir, through * 0.45);
+    const mid = contactPoint.clone().addScaledVector(dir, -back * 0.42);
+    const after = contactPoint.clone().addScaledVector(dir, through * 0.5);
     const end = contactPoint.clone().addScaledVector(dir, through);
 
     // Real strokes rise through the ball rather than running dead straight,
@@ -247,6 +243,8 @@ export class Coach {
     this.group.add(this._buildStartMarker());
     this.group.add(this._buildLandingMarker(target));
     this.group.add(this.ghost);
+    if (this._board) this.group.add(this._board); // survives a path rebuild
+    this._drawBoard();
     this._paintProgress(0);
   }
 
@@ -353,6 +351,107 @@ export class Coach {
     return pad;
   }
 
+  // A board listing the scenarios, standing beside the lesson. Switching
+  // drill is the thing you do most often in this mode, and making it the
+  // one action that needs the pause menu was backwards.
+  _buildScenarioBoard() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 320;
+    const ctx = canvas.getContext('2d');
+    this._boardCtx = ctx;
+    this._boardTexture = new THREE.CanvasTexture(canvas);
+    this._boardTexture.colorSpace = THREE.SRGBColorSpace;
+    this._boardTexture.anisotropy = 8;
+
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.5, 0.3125),
+      new THREE.MeshBasicMaterial({
+        map: this._boardTexture,
+        transparent: true,
+        toneMapped: false,
+      })
+    );
+    const board = new THREE.Group();
+    board.add(panel);
+    // Off to the player's left at chest height, angled inward, clear of the
+    // stroke itself.
+    board.position.set(-0.62, TABLE.HEIGHT + 0.42, PLAY_AREA.PLAYER_Z - 0.5);
+    board.rotation.y = 0.5;
+    this._board = board;
+    this._drawBoard();
+    return board;
+  }
+
+  _drawBoard() {
+    const ctx = this._boardCtx;
+    if (!ctx) return;
+    const W = 512;
+    const H = 320;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(11,11,12,0.94)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#e2231a';
+    ctx.fillRect(0, 0, 8, H);
+
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#e2231a';
+    ctx.font = '600 22px ui-monospace, monospace';
+    ctx.fillText('SCENARIO', 34, 46);
+
+    ctx.strokeStyle = 'rgba(242,239,230,0.18)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(34, 62);
+    ctx.lineTo(W - 28, 62);
+    ctx.stroke();
+
+    SCENARIOS.forEach((scenario, i) => {
+      const y = 108 + i * 52;
+      const current = i === this.scenarioIndex;
+      if (current) {
+        ctx.fillStyle = 'rgba(226,35,26,0.2)';
+        ctx.fillRect(22, y - 32, W - 50, 44);
+      }
+      ctx.fillStyle = current ? '#e2231a' : 'rgba(242,239,230,0.55)';
+      ctx.font = `${current ? 700 : 500} 26px ui-monospace, monospace`;
+      ctx.fillText(current ? '▸' : ' ', 34, y);
+      ctx.fillText(scenario.name.toUpperCase(), 72, y);
+    });
+
+    ctx.fillStyle = 'rgba(242,239,230,0.4)';
+    ctx.font = '500 18px ui-monospace, monospace';
+    ctx.fillText('TAP WITH YOUR BAT TO SWITCH', 34, H - 28);
+
+    this._boardTexture.needsUpdate = true;
+  }
+
+  // Touching a row with the bat switches drill, so the common action needs
+  // no menu at all.
+  _checkBoardTap(blade) {
+    if (!this._board) return;
+    const local = this._board.worldToLocal(blade.clone());
+    const onPanel =
+      Math.abs(local.x) < 0.28 && Math.abs(local.y) < 0.18 && Math.abs(local.z) < 0.1;
+
+    if (!onPanel) {
+      this._boardTouch = false;
+      return;
+    }
+    if (this._boardTouch) return; // one switch per touch, not one per frame
+    this._boardTouch = true;
+
+    // Panel space runs +y up; rows run down the board from the top.
+    const rowsTop = 0.082;
+    const rowHeight = 0.052;
+    const index = Math.floor((rowsTop - local.y) / rowHeight);
+    if (index >= 0 && index < SCENARIOS.length && index !== this.scenarioIndex) {
+      this.setScenario(index);
+      this.onScenarioPicked?.(SCENARIOS[index]);
+      this.sfx?.ui(true);
+    }
+  }
+
   _buildGhost() {
     this.ghost = new THREE.Mesh(
       new THREE.SphereGeometry(0.03, 16, 12),
@@ -377,8 +476,7 @@ export class Coach {
 
   // Returns the haptic strength to apply this frame. `serveBall` puts the
   // scenario's ball in play.
-  update(dt, paddle, serveBall, liveBall) {
-    this._liveBall = liveBall;
+  update(dt, paddle, placeBall, heldBall) {
     if (!this.active || !paddle?.tracking) return 0;
 
     const blade = paddle.bladeCenter;
@@ -386,12 +484,11 @@ export class Coach {
     this.deviation = near.distance;
 
     if (this._armCooldown > 0) this._armCooldown -= dt;
-    if (this._ballDue !== null) {
-      this._ballDue -= dt;
-      if (this._ballDue <= 0) {
-        this._ballDue = null;
-        this._releaseBall(serveBall);
-      }
+    if (this.state !== COACH_STATE.TRACING) this._checkBoardTap(blade);
+
+    // Keep a ball waiting whenever we are not mid-stroke.
+    if (this.state !== COACH_STATE.TRACING && !heldBall?.()) {
+      this._placeHeldBall(placeBall);
     }
 
     switch (this.state) {
@@ -409,47 +506,12 @@ export class Coach {
           this.progress = 0;
           this._paintProgress(0);
 
-          // The ball has to be in the air before the stroke starts whenever
-          // its flight is longer than the backswing — a fed ball takes some
-          // 0.6 s to arrive and the bat reaches contact in 0.34 s, so
-          // releasing it with the swing meant the bat was long past by the
-          // time it got there. Release immediately, then hold the stroke at
-          // the ring for the difference so contact still coincides.
-          const flight = this.feedState?.flight ?? this._tossFlight();
-          const toContact = this.contactAt * this.duration;
-          this._leadIn = Math.max(flight - toContact, 0);
-          this._ballDue = Math.max(toContact - flight, 0);
           this.sfx?.ui(true);
         }
         break;
       }
 
       case COACH_STATE.TRACING: {
-        // Waiting at the ring for the ball to come to us. Rather than trust
-        // a precomputed flight time — which drifts from the real one, since
-        // the live ball bounces through the full physics — watch the actual
-        // ball and start the stroke when it is exactly a backswing away.
-        // Self-correcting, so the bat and ball meet whatever the feed does.
-        if (this._leadIn > 0) {
-          this._leadIn -= dt;
-          this.ghost.position.copy(this.curve.getPointAt(0));
-
-          const live = this._liveBall?.();
-          if (live) {
-            const met = advanceToPlane(
-              live.mesh.position,
-              live.velocity,
-              live.spin,
-              this.contactPoint.z,
-              0.2
-            );
-            if (met && met.time <= this.contactAt * this.duration) {
-              this._leadIn = 0; // it is a backswing away: go now
-            }
-          }
-          break;
-        }
-
         this._elapsed += dt;
         this._ghostT = Math.min(this._elapsed / this.duration, 1);
         this.ghost.position.copy(this.curve.getPointAt(this._ghostT));
@@ -481,37 +543,12 @@ export class Coach {
     return 0;
   }
 
-  // How long the tossed ball takes to fall from release to contact.
-  _tossFlight() {
-    const scenario = this.scenario;
-    if (!scenario.toss) return 0.35;
-    const fall = Math.max(scenario.toss.height - this.contactPoint.y, 0.05);
-    return Math.sqrt((2 * fall) / 9.81);
-  }
-
-  // Puts the scenario's ball in play. Identical every attempt, which is the
-  // point — you are practising one situation, not reacting to a new one.
-  _releaseBall(serveBall) {
-    if (!serveBall) return;
-    const scenario = this.scenario;
-
-    if (scenario.toss) {
-      serveBall(
-        new THREE.Vector3(
-          scenario.toss.x,
-          scenario.toss.height,
-          PLAY_AREA.PLAYER_Z - 0.3
-        ),
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(0, 0, 0)
-      );
-    } else if (this.feedState) {
-      serveBall(
-        this.feedState.from.clone(),
-        this.feedState.velocity.clone(),
-        this.feedState.spin.clone()
-      );
-    }
+  // Parks a ball, held still, at the point the stroke meets it. Called
+  // whenever there isn't one waiting, so a fresh ball appears after every
+  // attempt without the player doing anything.
+  _placeHeldBall(placeBall) {
+    if (!placeBall) return;
+    placeBall(this.contactPoint.clone(), this.ballSpin.clone());
   }
 
   _finish(completed) {

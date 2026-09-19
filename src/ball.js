@@ -36,6 +36,11 @@ export class Ball {
     this.touchedByPaddle = false; // did the player actually hit this one?
     this.isFeed = false; // tossed up for the player rather than launched at them
 
+    // Held still in mid-air, waiting to be struck. Coach uses this to park
+    // the ball exactly where the stroke should meet it, which removes the
+    // question of timing a moving feed to a swing entirely.
+    this.frozen = false;
+
     // Scoring bookkeeping, owned here so that serving a ball is the single
     // point where a ball's life resets. Hanging these off the retire path
     // instead would mean any other route back into the pool leaves a ball
@@ -58,6 +63,7 @@ export class Ball {
     this.retireIn = null;
     this.touchedByPaddle = false;
     this.isFeed = false;
+    this.frozen = false;
     this.scoredTarget = false;
     this.awaitingOutcome = false; // struck, but not yet landed anywhere
     this.countedHit = false;
