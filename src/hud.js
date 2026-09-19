@@ -14,9 +14,37 @@ const H = 512;
 
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
 
+// Same three inks and single monospace face as the flat shell (ui.css) and the
+// in-VR menu, so the board reads as part of the same retro terminal.
 const PAPER = '#f2efe6';
-const MONO = 'ui-monospace, "SF Mono", Menlo, monospace';
-const SANS = 'Inter, "Helvetica Neue", Helvetica, Arial, sans-serif';
+const DIM = 'rgba(242,239,230,0.45)';
+const FAINT = 'rgba(242,239,230,0.22)';
+const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+
+const L = 56; // left margin, clear of the register bar
+const R = 56; // right margin
+
+// Canvas has no letter-spacing everywhere we run (ctx.letterSpacing is
+// Chromium-only), and the wide tracking is the whole look of the flat menu —
+// so lay the glyphs out by hand. Only runs when a value changes, never per
+// frame, so the per-character cost is irrelevant.
+function trackedWidth(ctx, text, spacing) {
+  let w = 0;
+  for (const ch of text) w += ctx.measureText(ch).width + spacing;
+  return text.length ? w - spacing : 0;
+}
+
+// Draws `text` with `spacing` px between glyphs. `align` is 'left' or 'right';
+// for 'right', `x` is the right edge. Returns the left edge used.
+function tracked(ctx, text, x, y, spacing, align = 'left') {
+  let cx = align === 'right' ? x - trackedWidth(ctx, text, spacing) : x;
+  const left = cx;
+  for (const ch of text) {
+    ctx.fillText(ch, cx, y);
+    cx += ctx.measureText(ch).width + spacing;
+  }
+  return left;
+}
 
 export class Scoreboard {
   constructor(game, machine) {
@@ -79,61 +107,50 @@ export class Scoreboard {
     const red = hex(COLORS.ACCENT);
 
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#0a0a0b';
+    ctx.fillStyle = '#0b0b0c';
     ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+
+    // CRT scanlines — the one piece of texture the flat shell can't do in CSS
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 2);
 
     // Red register bar down the left edge, echoing the start menu
     ctx.fillStyle = red;
-    ctx.fillRect(0, 0, 14, H);
+    ctx.fillRect(0, 0, 10, H);
 
-    ctx.strokeStyle = 'rgba(242,239,230,0.16)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, W - 2, H - 2);
+    // Corner brackets instead of a full frame: the menu has no boxes
+    this._brackets();
 
-    const L = 52; // left margin, clear of the register bar
-
-    // Header: mode name and armed state
-    ctx.textBaseline = 'alphabetic';
+    // Header: caret + mode name, same row shape as a menu item
+    const title = machine.drill.name.toUpperCase();
+    ctx.font = `700 36px ${MONO}`;
+    ctx.fillStyle = red;
+    ctx.fillText('▸', L, 78);
     ctx.fillStyle = PAPER;
-    ctx.font = `700 40px ${SANS}`;
-    ctx.fillText(machine.drill.name.toUpperCase(), L, 76);
+    tracked(ctx, title, L + 42, 78, 5.8);
 
+    // Armed state is a line of text, not a badge
     const armed = machine.enabled;
-    ctx.font = `500 22px ${MONO}`;
-    const stateLabel = armed ? 'ARMED' : 'PAUSED';
-    const labelWidth = ctx.measureText(stateLabel).width;
-    if (armed) {
-      ctx.fillStyle = red;
-      ctx.fillRect(W - 48 - labelWidth - 20, 50, labelWidth + 20, 32);
-      ctx.fillStyle = PAPER;
-    } else {
-      ctx.strokeStyle = 'rgba(242,239,230,0.3)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(W - 48 - labelWidth - 20, 50, labelWidth + 20, 32);
-      ctx.fillStyle = 'rgba(242,239,230,0.5)';
-    }
-    ctx.textAlign = 'right';
-    ctx.fillText(stateLabel, W - 58, 74);
-    ctx.textAlign = 'left';
+    ctx.font = `500 24px ${MONO}`;
+    ctx.fillStyle = armed ? red : DIM;
+    tracked(ctx, armed ? 'ARMED' : 'PAUSED', W - R, 76, 5, 'right');
 
-    ctx.strokeStyle = 'rgba(242,239,230,0.16)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(L, 104);
-    ctx.lineTo(W - 48, 104);
-    ctx.stroke();
+    this._rule(104);
 
     // Primary stat: targets in target practice, otherwise the rally streak
     const targeting = machine.mode.type === 'target';
     ctx.fillStyle = PAPER;
     ctx.font = `700 150px ${MONO}`;
-    ctx.fillText(String(targeting ? game.targetsHit : game.streak), L, 258);
+    const big = String(targeting ? game.targetsHit : game.streak);
+    ctx.fillText(big, L, 252);
 
     ctx.fillStyle = red;
-    ctx.font = `500 26px ${MONO}`;
-    ctx.fillText(targeting ? 'TARGETS' : 'STREAK', L + 4, 300);
+    ctx.font = `500 24px ${MONO}`;
+    tracked(ctx, targeting ? 'TARGETS' : 'STREAK', L + 4, 296, 4.6);
 
-    // Secondary stats
+    // Secondary stats, laid out as a tracked column list
     const stats = targeting
       ? [
           ['RETURNS', game.returns],
@@ -147,43 +164,108 @@ export class Scoreboard {
           ['MISSES', game.misses],
           ['BEST', game.bestStreak],
         ];
-    let x = 420;
+    let x = 430;
     for (const [label, value] of stats) {
       ctx.fillStyle = PAPER;
-      ctx.font = `700 60px ${MONO}`;
-      ctx.fillText(String(value), x, 226);
-      ctx.fillStyle = 'rgba(242,239,230,0.42)';
-      ctx.font = `500 21px ${MONO}`;
-      ctx.fillText(label, x, 266);
-      x += 152;
+      ctx.font = `700 58px ${MONO}`;
+      ctx.fillText(String(value), x, 222);
+      ctx.fillStyle = DIM;
+      ctx.font = `500 19px ${MONO}`;
+      tracked(ctx, label, x, 264, 3.2);
+      x += 150;
     }
 
-    // Accuracy bar — square, drawn as a ruled track with a solid red fill
-    const barY = 344;
-    const barW = W - L - 48;
-    ctx.strokeStyle = 'rgba(242,239,230,0.22)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(L, barY, barW, 22);
-    ctx.fillStyle = red;
-    ctx.fillRect(L, barY, (barW * game.accuracy) / 100, 22);
+    this._rule(322);
 
-    ctx.fillStyle = 'rgba(242,239,230,0.62)';
-    ctx.font = `500 24px ${MONO}`;
-    ctx.fillText(`ON-TABLE ${String(game.accuracy).padStart(3, ' ')}%`, L, 414);
+    // Accuracy as a block meter — the retro stand-in for a progress bar
+    const CELLS = 28;
+    const filled = Math.round((CELLS * game.accuracy) / 100);
+    ctx.font = `500 30px ${MONO}`;
+    const cellW = ctx.measureText('█').width + 3;
+    for (let i = 0; i < CELLS; i++) {
+      ctx.fillStyle = i < filled ? red : FAINT;
+      ctx.fillText('█', L + i * cellW, 382);
+    }
 
-    ctx.fillStyle = 'rgba(242,239,230,0.4)';
-    ctx.textAlign = 'right';
-    ctx.fillText(
-      `SERVED ${machine.servedCount} / ${game.lastEvent.toUpperCase()}`,
-      W - 48,
-      414
+    ctx.fillStyle = PAPER;
+    ctx.font = `500 23px ${MONO}`;
+    tracked(
+      ctx,
+      `${String(game.accuracy).padStart(3, ' ')}% ON-TABLE`,
+      W - R,
+      380,
+      3.4,
+      'right'
     );
 
-    ctx.textAlign = 'left';
-    ctx.fillStyle = 'rgba(242,239,230,0.26)';
-    ctx.font = `500 21px ${MONO}`;
-    ctx.fillText('TRIGGER PAUSE   ·   GRIP NEXT MODE', L, 462);
+    // Status line: last event on the left, serve count on the right
+    ctx.fillStyle = DIM;
+    ctx.font = `500 20px ${MONO}`;
+    tracked(ctx, game.lastEvent.toUpperCase(), L, 428, 3.2);
+    tracked(ctx, `SERVED ${machine.servedCount}`, W - R, 428, 3.2, 'right');
+
+    // Key hints, styled like the flat shell's bottom bar: bold key, dim action
+    this._keys(
+      [
+        ['TRIGGER', 'PAUSE'],
+        ['GRIP', 'NEXT MODE'],
+        ['A/B', 'MENU'],
+      ],
+      466
+    );
 
     this.texture.needsUpdate = true;
+  }
+
+  _rule(y) {
+    const { ctx } = this;
+    ctx.strokeStyle = FAINT;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(L, y);
+    ctx.lineTo(W - R, y);
+    ctx.stroke();
+  }
+
+  _brackets() {
+    const { ctx } = this;
+    const m = 20; // inset from the panel edge
+    const len = 46;
+    ctx.strokeStyle = FAINT;
+    ctx.lineWidth = 3;
+    for (const [cx, cy, sx, sy] of [
+      [m, m, 1, 1],
+      [W - m, m, -1, 1],
+      [m, H - m, 1, -1],
+      [W - m, H - m, -1, -1],
+    ]) {
+      ctx.beginPath();
+      ctx.moveTo(cx + sx * len, cy);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx, cy + sy * len);
+      ctx.stroke();
+    }
+  }
+
+  _keys(pairs, y) {
+    const { ctx } = this;
+    let x = L;
+    pairs.forEach(([key, action], i) => {
+      if (i > 0) {
+        ctx.fillStyle = FAINT;
+        ctx.font = `500 19px ${MONO}`;
+        ctx.fillText('·', x, y);
+        x += 26;
+      }
+      ctx.fillStyle = PAPER;
+      ctx.font = `700 19px ${MONO}`;
+      tracked(ctx, key, x, y, 3);
+      x += trackedWidth(ctx, key, 3) + 12;
+
+      ctx.fillStyle = DIM;
+      ctx.font = `500 19px ${MONO}`;
+      tracked(ctx, action, x, y, 3);
+      x += trackedWidth(ctx, action, 3) + 26;
+    });
   }
 }
