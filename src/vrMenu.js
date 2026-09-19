@@ -24,6 +24,10 @@ const ROW_TOP = 176;
 const ROW_BOTTOM = 700; // rows must finish above the footer
 const ROW_H_MAX = 52;
 
+// Fallback pointer split, used only before a row has been drawn once. The
+// real split is measured per row at draw time from the value's width.
+const CHEVRON_U = (W - 380) / W;
+
 // Row height adapts to how many entries there are. Twice now a new setting
 // has pushed the last rows off the bottom of the panel, so the layout
 // derives from the list rather than being a constant to remember to update.
@@ -47,8 +51,8 @@ const _camDir = new THREE.Vector3();
 const _matrix = new THREE.Matrix4();
 
 export class VRMenu {
-  constructor({ camera, machine, game, settings, sfx, onExit }) {
-    Object.assign(this, { camera, machine, game, settings, sfx, onExit });
+  constructor({ camera, machine, game, settings, sfx, onExit, onRecenter }) {
+    Object.assign(this, { camera, machine, game, settings, sfx, onExit, onRecenter });
 
     this.open = false;
     this.items = [];
@@ -138,6 +142,10 @@ export class VRMenu {
       game: this.game,
       settings: this.settings,
       onResume: () => this.toggle(false),
+      onRecenter: () => {
+        this.onRecenter?.();
+        this.toggle(false); // the panel was placed for the old pose
+      },
       onExit: () => {
         this.toggle(false);
         this.onExit?.();
@@ -241,16 +249,79 @@ export class VRMenu {
     return i >= 0 && i < this.items.length ? i : -1;
   }
 
+  // --- Thumbstick navigation --------------------------------------------
+  //
+  // Pointing is the nicer interaction when it works, but it depends on the
+  // ray, the panel's placement and which hand you happen to raise. The stick
+  // needs none of that: up and down move the caret, left and right change
+  // the value under it. It is the path that cannot fail to reach a setting.
+
+  moveSelection(delta) {
+    if (!this.items.length) return;
+    const n = this.items.length;
+    const from = this.hovered < 0 ? (delta > 0 ? -1 : 0) : this.hovered;
+    this.hovered = (from + delta + n) % n;
+    this._dwell = 0;
+    this._dwellStep = -1;
+    this._dwellSpent = true; // stick is driving; don't let gaze also fire
+    this._dirty = true;
+    this.sfx.ui();
+    this.draw();
+  }
+
+  // Change the highlighted row without needing to aim at a chevron.
+  step(delta) {
+    if (this.hovered < 0) return;
+    const item = this.items[this.hovered];
+    if (item.kind === 'action') {
+      if (delta > 0) item.activate?.();
+    } else {
+      item.step(delta);
+      this.items = this._buildItems();
+    }
+    this.sfx.ui();
+    this._dirty = true;
+    if (this.open) this.draw();
+  }
+
+  // `x` and `y` are raw thumbstick axes; `y` is negative when pushed up.
+  handleStick(x, y, dt) {
+    this._stickCooldown = Math.max(0, (this._stickCooldown ?? 0) - dt);
+
+    const idle = Math.abs(x) < 0.35 && Math.abs(y) < 0.35;
+    if (idle) {
+      this._stickCooldown = 0; // let the next deliberate push act at once
+      return;
+    }
+    if (this._stickCooldown > 0) return;
+
+    if (Math.abs(y) >= Math.abs(x)) {
+      this.moveSelection(y < 0 ? -1 : 1);
+      this._stickCooldown = 0.22;
+    } else {
+      this.step(x > 0 ? 1 : -1);
+      this._stickCooldown = 0.28;
+    }
+  }
+
   // Trigger press, or a completed dwell.
   activate() {
-    if (this.hovered < 0) return;
+    // Nothing highlighted yet — a trigger pull should still do something
+    // useful, so take the first row rather than silently ignoring it.
+    if (this.hovered < 0) {
+      if (!this.items.length) return;
+      this.moveSelection(1);
+      return;
+    }
     const item = this.items[this.hovered];
 
     if (item.kind === 'action') {
       item.activate?.();
     } else {
-      // Pointing at the left chevron steps backwards; anywhere else forwards.
-      const backwards = this._hitU > 0.6 && this._hitU < 0.72;
+      // Pointing at the left chevron steps backwards; anywhere else, and any
+      // press that didn't come from the ray, steps forwards.
+      const split = this._rowSplitU?.[this.hovered] ?? CHEVRON_U;
+      const backwards = this._hitU < split;
       item.step(backwards ? -1 : 1);
       this.items = this._buildItems(); // values changed; re-read labels
     }
@@ -297,6 +368,7 @@ export class VRMenu {
 
     const rowH = rowHeight(this.items.length);
     const fontSize = Math.min(25, Math.round(rowH * 0.5));
+    this._rowSplitU = this._rowSplitU ?? [];
     this.items.forEach((item, i) => {
       const y = ROW_TOP + i * rowH;
       const selected = i === this.hovered;
@@ -315,9 +387,16 @@ export class VRMenu {
       if (item.kind !== 'action') {
         ctx.fillStyle = selected ? PAPER : DIM;
         ctx.textAlign = 'right';
-        ctx.fillText('‹', W - 260, baseline);
-        ctx.fillText(String(item.value).toUpperCase(), W - 110, baseline);
+        // Place the decrement chevron against the measured width of the
+        // value, so a long one like TOPSPIN DRIVE can't run over it. The
+        // pointer split is recorded from the same number, so what you aim
+        // at and what it does cannot drift apart.
+        const text = String(item.value).toUpperCase();
+        const valueLeft = W - 110 - ctx.measureText(text).width;
+        ctx.fillText('‹', valueLeft - 34, baseline);
+        ctx.fillText(text, W - 110, baseline);
         ctx.fillText('›', W - 70, baseline);
+        this._rowSplitU[i] = (valueLeft - 14) / W;
         ctx.textAlign = 'left';
       }
     });
@@ -326,7 +405,7 @@ export class VRMenu {
     ctx.fillStyle = DIM;
     ctx.font = `500 20px ${MONO}`;
     ctx.fillText(
-      this.usingGaze ? 'LOOK AND HOLD TO SELECT' : 'POINT AND PULL TRIGGER',
+      'STICK MOVE  ·  TRIGGER SELECT  ·  OR LOOK AND HOLD',
       60,
       H - 42
     );

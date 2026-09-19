@@ -10,7 +10,7 @@ import { MODES } from './ballMachine.js';
 //   cycle  — a value with ‹ › affordances, stepped by `step(delta)`
 //   toggle — an on/off value, flipped by `step()`
 
-export function buildPauseMenu({ machine, settings, game, onExit, onResume }) {
+export function buildPauseMenu({ machine, settings, game, onExit, onResume, onRecenter }) {
   const cycle = (key) => {
     const choices = OPTIONS[key];
     const index = Math.max(
@@ -62,6 +62,12 @@ export function buildPauseMenu({ machine, settings, game, onExit, onResume }) {
       label: 'Aim marker',
       value: settings.get('aimMarker') ? 'On' : 'Off',
       step: () => settings.set('aimMarker', !settings.get('aimMarker')),
+    },
+    {
+      id: 'recenter',
+      kind: 'action',
+      label: 'Recentre table',
+      activate: () => onRecenter?.(),
     },
     {
       id: 'reset',

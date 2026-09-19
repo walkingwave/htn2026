@@ -105,6 +105,33 @@ const machine = new BallMachine(balls, settings);
 machine.enabled = false; // stays idle behind the start menu until a mode is picked
 scene.add(machine.mesh);
 
+// Puts the table in front of you, wherever you happen to be standing and
+// whichever way you are facing.
+//
+// The floor-level origin a headset hands back is wherever the guardian was
+// drawn, which is rarely where you want to stand to play. Rather than ask
+// the player to walk to the right spot, move the world: rotate the rig so
+// the head faces down the table, then slide it so the head lands at the
+// player's end.
+const UP = new THREE.Vector3(0, 1, 0);
+const _headLocal = new THREE.Vector3();
+const _headEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+function recenter() {
+  // Head pose relative to the rig is exactly what the headset reports
+  _headEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+  playerRig.rotation.y = -_headEuler.y;
+
+  _headLocal.copy(camera.position).applyAxisAngle(UP, playerRig.rotation.y);
+  playerRig.position.set(
+    -_headLocal.x,
+    0,
+    PLAY_AREA.PLAYER_Z - _headLocal.z
+  );
+  playerRig.updateMatrixWorld(true);
+  ui.toast('Table recentred');
+}
+
 // Sweep every ball back into the pool. Without this, balls still in flight
 // when you quit stay airborne behind the menu and are still hanging there
 // when the next session starts.
@@ -179,6 +206,7 @@ const ui = new UI({
     clearBalls();
   },
   isInputBlocked: () => vrMenu.open,
+  onRecenter: () => recenter(),
 });
 
 xr.detectSupport().then((support) => ui.applyXRSupport(support));
@@ -331,6 +359,7 @@ const vrMenu = new VRMenu({
   game,
   settings,
   sfx,
+  onRecenter: () => recenter(),
   onExit: () => {
     xr.end();
     machine.enabled = false;
@@ -347,12 +376,29 @@ scene.add(vrMenu.group);
 const MENU_BUTTONS = [4, 5]; // A/X and B/Y
 let menuButtonWasDown = false;
 
-function pollMenuButton() {
+function pollMenuButton(dt) {
   const down = inputSources.some((source) =>
     MENU_BUTTONS.some((b) => source?.gamepad?.buttons?.[b]?.pressed)
   );
   if (down && !menuButtonWasDown) vrMenu.toggle();
   menuButtonWasDown = down;
+
+  if (!vrMenu.open) return;
+
+  // Thumbstick drives the menu too, so reaching a setting never depends on
+  // getting a ray onto the panel. Take whichever stick is pushed furthest.
+  let x = 0;
+  let y = 0;
+  for (const source of inputSources) {
+    const axes = source?.gamepad?.axes;
+    if (!axes) continue;
+    // Quest reports the stick on axes 2 and 3; some runtimes use 0 and 1.
+    const sx = Math.abs(axes[2] ?? 0) > Math.abs(axes[0] ?? 0) ? axes[2] : axes[0];
+    const sy = Math.abs(axes[3] ?? 0) > Math.abs(axes[1] ?? 0) ? axes[3] : axes[1];
+    if (Math.abs(sx ?? 0) > Math.abs(x)) x = sx ?? 0;
+    if (Math.abs(sy ?? 0) > Math.abs(y)) y = sy ?? 0;
+  }
+  vrMenu.handleStick(x, y, dt);
 }
 
 // You hold one bat, not two. The off hand keeps its controller model so you
@@ -432,7 +478,7 @@ function tick(dt) {
   opponent.setActive(machine.isRallyMode && !vrMenu.open);
   opponent.update(dt, balls);
 
-  pollMenuButton();
+  pollMenuButton(dt);
   vrMenu.update(dt, controllers);
   for (const controller of controllers) {
     if (controller.userData.ray) controller.userData.ray.visible = vrMenu.open;

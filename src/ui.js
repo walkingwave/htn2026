@@ -13,8 +13,8 @@ export class UI {
   // `isInputBlocked` lets the caller veto keyboard commands — the in-headset
   // menu uses it so a keypress can't drive the game from behind an open
   // pause screen.
-  constructor({ xr, machine, game, settings, sfx, onStart, onExit, isInputBlocked }) {
-    Object.assign(this, { xr, machine, game, settings, sfx, onStart, onExit });
+  constructor({ xr, machine, game, settings, sfx, onStart, onExit, isInputBlocked, onRecenter }) {
+    Object.assign(this, { xr, machine, game, settings, sfx, onStart, onExit, onRecenter });
     this.isInputBlocked = isInputBlocked ?? (() => false);
 
     this._selected = 0;
@@ -229,6 +229,7 @@ export class UI {
       game: this.game,
       settings: this.settings,
       onResume: () => this.toggleSettings(false),
+      onRecenter: () => this.onRecenter?.(),
       onExit: () => this.quitToMenu(),
     });
   }
@@ -294,6 +295,8 @@ export class UI {
     } else if (e.code === 'KeyR') {
       this.game.reset();
       this.toast('Score reset');
+    } else if (e.code === 'KeyC') {
+      this.onRecenter?.();
     }
   }
 
