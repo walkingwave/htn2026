@@ -1,0 +1,287 @@
+/* Retro indie-game shell: one monospace face, three colours, no boxes.
+   Everything is a line of text — menus are lists you move a caret down. */
+:root {
+  --ink: #0b0b0c;
+  --paper: #f2efe6;
+  --dim: rgba(242, 239, 230, 0.45);
+  --red: #e2231a;
+  --mono: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+canvas {
+  display: block;
+}
+
+/* Start menu ------------------------------------------------------------- */
+
+#menu {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  padding: 24px;
+  background: var(--ink);
+  text-align: center;
+}
+#menu[hidden] {
+  display: none;
+}
+
+.title {
+  font-size: clamp(28px, 6vw, 52px);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  line-height: 1.25;
+  margin: 0;
+  text-transform: uppercase;
+}
+.title span {
+  color: var(--red);
+}
+
+.tagline {
+  margin: 12px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.item {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--paper);
+  font: inherit;
+  font-size: clamp(15px, 2.4vw, 19px);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 7px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.item__caret {
+  color: var(--red);
+  visibility: hidden;
+}
+.item[aria-selected='true'] .item__caret {
+  visibility: visible;
+}
+.item[aria-selected='true'] {
+  color: var(--red);
+}
+.item:disabled {
+  color: rgba(242, 239, 230, 0.22);
+  cursor: not-allowed;
+}
+.item:disabled[aria-selected='true'] {
+  color: rgba(242, 239, 230, 0.35);
+}
+.item__note {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
+.hint {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+  line-height: 2;
+}
+
+/* Blinking caret on the title, pure retro affectation */
+.blink {
+  animation: blink 1.1s steps(1, end) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Bottom status line ----------------------------------------------------- */
+
+#bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 11px 16px;
+  background: var(--ink);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+#bar[hidden] {
+  display: none;
+}
+
+.bar__mode {
+  color: var(--red);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.bar__stats {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.bar__spacer {
+  flex: 1;
+}
+
+.key {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 3px 0;
+  white-space: nowrap;
+}
+.key:hover {
+  color: var(--paper);
+}
+.key b {
+  color: var(--paper);
+  font-weight: 700;
+  margin-right: 6px;
+}
+.key:hover b {
+  color: var(--red);
+}
+
+/* Settings --------------------------------------------------------------- */
+
+#settings {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  background: rgba(11, 11, 12, 0.97);
+}
+#settings[hidden] {
+  display: none;
+}
+
+.settings__title {
+  font-size: 13px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--red);
+}
+
+.settings__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: min(400px, calc(100vw - 48px));
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 9px 10px;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.row__label {
+  color: var(--dim);
+}
+
+.row__value {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.arrow {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.arrow:hover {
+  color: var(--red);
+}
+
+.row__current {
+  min-width: 9ch;
+  text-align: center;
+  color: var(--paper);
+}
+
+/* Toast ------------------------------------------------------------------ */
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 54px;
+  transform: translateX(-50%);
+  z-index: 9;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--red);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s linear;
+}
+#toast.is-visible {
+  opacity: 1;
+}
+
+@media (max-width: 640px) {
+  .bar__stats {
+    display: none;
+  }
+}
