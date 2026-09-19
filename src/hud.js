@@ -133,7 +133,11 @@ export class Scoreboard {
     this._brackets();
 
     // --- Header: mode name, and whether the machine is firing -------------
-    const title = machine.drill.name.toUpperCase();
+    const title = (
+      machine.isCoachMode && this.coach
+        ? this.coach.scenario.name
+        : machine.drill.name
+    ).toUpperCase();
     ctx.font = `700 84px ${MONO}`;
     ctx.fillStyle = red;
     ctx.fillText('▸', L, 136);
@@ -144,15 +148,23 @@ export class Scoreboard {
     // weight as the title rather than caption size.
     const armed = machine.enabled;
     ctx.font = `700 60px ${MONO}`;
-    ctx.fillStyle = armed ? red : DIM;
-    tracked(ctx, armed ? 'ARMED' : 'PAUSED', W - R, 132, 10, 'right');
+    if (machine.isCoachMode) {
+      ctx.fillStyle = red;
+      tracked(ctx, 'COACH', W - R, 132, 10, 'right');
+    } else {
+      ctx.fillStyle = armed ? red : DIM;
+      tracked(ctx, armed ? 'ARMED' : 'PAUSED', W - R, 132, 10, 'right');
+    }
 
     this._rule(186);
 
     // --- Primary stat -----------------------------------------------------
     // Targets in target practice, otherwise the rally streak. Big enough to
     // read peripherally, without turning to look straight at the board.
-    const kind = machine.mode.type;
+    // Coach is its own game, not one of the rotating modes, so the board
+    // asks the machine whether a lesson is running rather than reading a
+    // mode type that no longer exists.
+    const kind = machine.isCoachMode ? 'coach' : machine.mode.type;
     const primary =
       kind === 'target'
         ? { value: game.targetsHit, label: 'TARGETS' }
@@ -243,7 +255,7 @@ export class Scoreboard {
     // or what the last few attempts say you should work on. That is the
     // whole point of the mode, so it gets the status slot rather than a
     // ball-by-ball event nobody is watching for.
-    const coaching = machine.mode.type === 'coach' && this.coach;
+    const coaching = machine.isCoachMode && this.coach;
     const event = (coaching ? this.coach.instruction : game.lastEvent).toUpperCase();
     const fault = !coaching && event.startsWith('MISS');
     ctx.fillStyle = fault ? red : DIM;

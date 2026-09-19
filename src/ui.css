@@ -129,6 +129,24 @@ canvas {
   }
 }
 
+.game-pick {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.game-pick__label {
+  color: var(--dim);
+}
+.game-pick .key[aria-pressed='true'] {
+  color: var(--red);
+}
+.game-pick .key[aria-pressed='true'] b {
+  color: var(--red);
+}
+
 /* Bottom status line ----------------------------------------------------- */
 
 #bar {

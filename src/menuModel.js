@@ -30,22 +30,29 @@ export function buildPauseMenu({ machine, settings, game, onExit, onResume, onRe
 
   const modeIndex = machine.modeIndex;
 
+  // Coach and Arcade want different second rows: one picks a situation to
+  // drill, the other picks which drill is running.
+  const coaching = settings.get('game') === 'coach';
+  const modeRow = coaching
+    ? { ...cycle('scenario'), label: 'Scenario' }
+    : {
+        id: 'mode',
+        kind: 'cycle',
+        label: 'Mode',
+        value: MODES[modeIndex].name,
+        step: (delta) => {
+          machine.modeIndex = (modeIndex + delta + MODES.length) % MODES.length;
+          game.revision++;
+        },
+      };
+
   return [
     { id: 'resume', kind: 'action', label: 'Resume', activate: onResume },
-    {
-      id: 'mode',
-      kind: 'cycle',
-      label: 'Mode',
-      value: MODES[modeIndex].name,
-      step: (delta) => {
-        machine.modeIndex =
-          (modeIndex + delta + MODES.length) % MODES.length;
-        game.revision++;
-      },
-    },
+    modeRow,
+    { ...cycle('game'), label: 'Game' },
     { ...cycle('paddleSource'), label: 'Bat follows' },
     { ...cycle('difficulty'), label: 'Opponent' },
-    { ...cycle('lesson'), label: 'Lesson' },
+
     { ...cycle('hand'), label: 'Paddle hand' },
     { ...cycle('pace'), label: 'Ball pace' },
     { ...cycle('feedRate'), label: 'Feed rate' },

@@ -31,8 +31,13 @@ export const OPTIONS = {
     { label: 'Controller', value: 'controller' },
     { label: 'Real paddle', value: 'hand' },
   ],
-  // Which stroke Coach mode teaches.
-  lesson: [
+  // Arcade is the drills and rally; Coach teaches strokes one at a time.
+  game: [
+    { label: 'Arcade', value: 'arcade' },
+    { label: 'Coach', value: 'coach' },
+  ],
+  // Which situation Coach drills.
+  scenario: [
     { label: 'Serve', value: 'serve' },
     { label: 'Drive', value: 'drive' },
     { label: 'Push', value: 'push' },
@@ -52,7 +57,8 @@ const DEFAULTS = {
   hand: 'right',
   paddleSource: 'controller',
   difficulty: 'normal',
-  lesson: 'serve',
+  scenario: 'serve',
+  game: 'arcade', // 'arcade' | 'coach'
   sound: true,
   aimMarker: true,
 };

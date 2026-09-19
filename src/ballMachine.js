@@ -32,8 +32,6 @@ export const MODES = [
   // Rally: the machine puts one ball in play and then goes quiet. From there
   // the opponent keeps it going, so the interval only governs how quickly a
   // dead rally is restarted.
-  // Coach hands ball control to the lesson, so the machine stays quiet.
-  { name: 'Coach', type: 'coach', interval: 3.0 },
   {
     name: 'Rally',
     type: 'rally',
@@ -58,6 +56,7 @@ export class BallMachine {
     this.balls = balls; // pooled Ball instances
     this.settings = settings;
     this.server = null; // set to the opponent, who serves in rally mode
+    this.coachActive = false; // true while the Coach game is running
     this.enabled = true;
     this.spread = 0.5; // lateral spread of the target point (m)
     this.modeIndex = 0;
@@ -104,8 +103,10 @@ export class BallMachine {
     return this.mode.type === 'rally';
   }
 
+  // Coach is a separate game rather than one of the rotating arcade modes,
+  // so the machine is told to stand down from outside.
   get isCoachMode() {
-    return this.mode.type === 'coach';
+    return this.coachActive === true;
   }
 
   update(dt) {

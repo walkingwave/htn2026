@@ -42,6 +42,11 @@ export class UI {
         <p class="tagline">Hack the North 2026</p>
       </div>
       <div class="menu-list" data-list></div>
+      <div class="game-pick">
+        <span class="game-pick__label">Game</span>
+        <button class="key" data-game="arcade"><b>1</b>Arcade</button>
+        <button class="key" data-game="coach"><b>2</b>Coach</button>
+      </div>
       <div class="hint">
         ↑ ↓ select &nbsp;·&nbsp; enter start<br />
         <span data-menu-note></span>
@@ -51,12 +56,33 @@ export class UI {
     this.menu = el;
     this.list = el.querySelector('[data-list]');
 
+    for (const btn of el.querySelectorAll('[data-game]')) {
+      btn.onclick = () => this.setGame(btn.dataset.game);
+    }
+
     this._entries = [
       { id: 'ar', label: 'Enter passthrough', note: '', disabled: true },
       { id: 'vr', label: 'Enter full VR', note: '', disabled: true },
       { id: 'desktop', label: 'Computer', note: 'preview', disabled: false },
     ];
     this._renderMenu();
+    this._syncGamePick();
+  }
+
+  // Arcade is the drills and rally; Coach teaches one stroke at a time. It
+  // is a separate game rather than another drill in the rotation, so it is
+  // chosen here before you enter rather than cycled into by accident.
+  setGame(value) {
+    this.settings.set('game', value);
+    this._syncGamePick();
+    this.sfx.ui();
+  }
+
+  _syncGamePick() {
+    const current = this.settings.get('game');
+    for (const btn of this.menu.querySelectorAll('[data-game]')) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.game === current));
+    }
   }
 
   _renderMenu() {
@@ -268,7 +294,9 @@ export class UI {
 
   _onKey(e) {
     if (!this.menu.hidden) {
-      if (e.code === 'ArrowUp') this._moveMenu(-1);
+      if (e.code === 'Digit1') this.setGame('arcade');
+      else if (e.code === 'Digit2') this.setGame('coach');
+      else if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);
       else if (e.code === 'Enter' || e.code === 'Space') {
         e.preventDefault();
@@ -325,7 +353,10 @@ export class UI {
     this._lastRevision = this.game.revision;
 
     const { game, machine } = this;
-    this.bar.querySelector('[data-bar-mode]').textContent = machine.mode.name;
+    this.bar.querySelector('[data-bar-mode]').textContent =
+      this.settings.get('game') === 'coach'
+        ? `Coach · ${this.machine.coachName ?? ''}`.trim()
+        : machine.mode.name;
     this.bar.querySelector('[data-bar-stats]').textContent = machine.isTargetMode
       ? `${game.targetsHit} targets · ${game.returns} on table`
       : `streak ${game.streak} · ${game.returns}/${game.hits + game.misses} on table`;

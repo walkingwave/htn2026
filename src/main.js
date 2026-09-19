@@ -19,7 +19,7 @@ import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
 import { Opponent } from './opponent.js';
-import { Coach, LESSONS } from './coach.js';
+import { Coach, SCENARIOS } from './coach.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
@@ -181,6 +181,11 @@ const coach = new Coach({
 });
 scene.add(coach.group);
 scoreboard.coach = coach; // the board shows the lesson's guidance line
+
+// The bottom bar names the running scenario without needing the coach
+Object.defineProperty(machine, 'coachName', {
+  get: () => coach.scenario.name,
+});
 
 // AR: transparent background, no virtual floor, dimmer fill so the real room
 // carries the lighting. VR: full venue.
@@ -432,20 +437,31 @@ function applyHandedness() {
   });
 }
 
-function applyLesson() {
-  const index = LESSONS.findIndex((l) => l.id === settings.get('lesson'));
-  coach.setLesson(index < 0 ? 0 : index);
+function applyScenario() {
+  const index = SCENARIOS.findIndex((s) => s.id === settings.get('scenario'));
+  coach.setScenario(index < 0 ? 0 : index);
+}
+
+// Coach is a separate game, so the machine and the rally opponent stand
+// down for it rather than it being one more drill in the rotation.
+function applyGame() {
+  const coaching = settings.get('game') === 'coach';
+  machine.coachActive = coaching;
+  if (coaching) clearBalls();
+  game.revision++;
 }
 
 settings.onChange((key) => {
   if (key === 'hand') applyHandedness();
   if (key === 'difficulty') opponent.setSkill(settings.get('difficulty'));
-  if (key === 'lesson') applyLesson();
+  if (key === 'scenario') applyScenario();
+  if (key === 'game') applyGame();
 });
 
 applyHandedness();
 opponent.setSkill(settings.get('difficulty'));
-applyLesson();
+applyScenario();
+applyGame();
 
 // Guidance buzz while tracing a lesson, on whichever hand holds the bat.
 function hapticGuide(strength) {
@@ -509,7 +525,16 @@ function tick(dt) {
   opponent.update(dt, balls);
 
   coach.setActive(machine.isCoachMode && !vrMenu.open);
-  const guide = coach.update(dt, paddles.find((p) => p.enabled) ?? paddles[0]);
+  const guide = coach.update(
+    dt,
+    paddles.find((p) => p.enabled) ?? paddles[0],
+    // The scenario puts its own ball in play, identically every attempt.
+    (position, velocity, spin) => {
+      const ball = balls.find((b) => !b.active);
+      if (ball) ball.serve(position, velocity, spin);
+    },
+    () => balls.find((b) => b.active) ?? null
+  );
   // Steady guidance rather than one-off taps: the buzz strengthens the
   // further the bat drifts off the taught line, so it reads as a nudge back
   // toward it. Pulses are short and re-issued each frame because WebXR has
