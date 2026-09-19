@@ -12,7 +12,9 @@ const demo = [
 
 export function scoreFor(summary, category) {
   if (category === 'boss') return Math.round(summary.survivalSeconds * 20 + summary.longestRally * 25 + summary.accuracy * 5 + summary.bossLevel * 100);
-  return Math.round(summary.returns * 12 + summary.longestRally * 30 + summary.accuracy * 8 - summary.netErrors * 10 - summary.misses * 15);
+  const fundamentals = summary.returns * 12 + summary.longestRally * 30 + summary.accuracy * 8 - summary.netErrors * 10 - summary.misses * 15;
+  const targetBonus = (summary.targetHits ?? 0) * 18 + (summary.completedMoves ?? 0) * 100;
+  return Math.max(0, Math.round(fundamentals + targetBonus));
 }
 
 export async function submitScore(playerName, summary, category = 'fundamentals') {

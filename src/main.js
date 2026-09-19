@@ -25,10 +25,21 @@ const table = createTable(); scene.add(table); const vrEnvironment = table.getOb
 function applyMode(mode) { const isAR = mode === 'immersive-ar'; scene.background = isAR ? null : VR_BACKGROUND; if (vrEnvironment) vrEnvironment.visible = !isAR; }
 createXRButtons(renderer, { onModeChange: applyMode }); renderer.xr.addEventListener('sessionend', () => applyMode(null));
 
-const targetMarker = new THREE.Mesh(new THREE.CylinderGeometry(.32, .32, .008, 32), new THREE.MeshBasicMaterial({ color: 0xffc857, transparent: true, opacity: .8 }));
-targetMarker.rotation.x = Math.PI / 2; targetMarker.position.set(0, TABLE.HEIGHT + .006, -.7); targetMarker.visible = false; scene.add(targetMarker);
-const targetRing = new THREE.Mesh(new THREE.RingGeometry(.32, .36, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: .9 }));
-targetRing.rotation.x = -Math.PI / 2; targetRing.position.set(0, TABLE.HEIGHT + .01, -.7); targetRing.visible = false; scene.add(targetRing);
+const targetMarker = new THREE.Mesh(new THREE.CircleGeometry(1, 32), new THREE.MeshBasicMaterial({ color: 0xffc857, transparent: true, opacity: .72, side: THREE.DoubleSide }));
+targetMarker.rotation.x = -Math.PI / 2; targetMarker.visible = false; scene.add(targetMarker);
+const targetRing = new THREE.Mesh(new THREE.RingGeometry(.9, 1, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: .95 }));
+targetRing.rotation.x = -Math.PI / 2; targetRing.visible = false; scene.add(targetRing);
+
+function updateTargetMarker(move) {
+  const visible = Boolean(move);
+  targetMarker.visible = visible;
+  targetRing.visible = visible;
+  if (!visible) return;
+  targetMarker.position.set(move.x, TABLE.HEIGHT + .006, move.z);
+  targetRing.position.set(move.x, TABLE.HEIGHT + .01, move.z);
+  targetMarker.scale.setScalar(move.radius);
+  targetRing.scale.setScalar(move.radius);
+}
 
 function buildHands() {
   const group = new THREE.Group(); const skin = new THREE.MeshStandardMaterial({ color: 0xe0a078, roughness: .8 }); const sleeve = new THREE.MeshStandardMaterial({ color: 0xef5b45, roughness: .7 });
@@ -59,9 +70,9 @@ renderer.domElement.addEventListener('pointermove', (event) => setPointerPose(ev
 renderer.domElement.addEventListener('pointerdown', (event) => setPointerPose(event.clientX, event.clientY));
 
 const ui = createTrainerUI({
-  onStart(difficulty, drill) { const profile = DIFFICULTIES[difficulty]; session.reset(difficulty, drill); session.start(); training = true; paused = false; targetMarker.visible = drill === 'target'; targetRing.visible = drill === 'target'; machine.interval = profile.interval; machine.speed = profile.speed; machine.spread = profile.spread; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
+  onStart(difficulty, drill) { const profile = DIFFICULTIES[difficulty]; session.reset(difficulty, drill); session.start(); training = true; paused = false; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
   onPause() { paused = !paused; machine.enabled = training && !paused; ui.feedback(paused ? 'Training paused.' : 'Rally live.', paused ? '' : 'success'); },
-  onReset() { training = false; paused = false; machine.enabled = false; targetMarker.visible = false; targetRing.visible = false; balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.update(session.summary(), 'READY'); },
+  onReset() { training = false; paused = false; machine.enabled = false; updateTargetMarker(null); balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.update(session.summary(), 'READY'); },
   onMachineToggle() { machine.enabled = !machine.enabled; return machine.enabled; },
   onEnableCV() { if (cvStop) { cvStop(); cvStop = null; cvActive = false; cvRig.visible = true; return; } cvActive = true; startHandTracking((pose) => { cvRig.visible = true; cvRig.position.set((pose.x - .5) * 1.4, 1.65 + (.5 - pose.y) * 1.1, .35); cvRig.rotation.set(0, 0, -pose.angle); }, (message) => ui.feedback(message, 'success')).then((stop) => { cvStop = stop; }).catch((error) => { cvActive = false; ui.feedback(error.message, 'error'); }); },
 });
@@ -69,12 +80,29 @@ const ui = createTrainerUI({
 machine.onServe = () => { session.serve(); ui.update(session.summary(), 'SERVE'); };
 physics.onBounce = (ball, event) => {
   if (!training || paused) return;
-  const beforeTargetHits = session.targetHits; session.record(event, { position: ball.mesh.position });
+  const result = session.record(event, { position: ball.mesh.position });
   if (event === 'paddle') ui.feedback(session.drill === 'fly' ? 'Fly read — early preparation.' : 'Nice return', 'success');
-  if (event === 'table' && session.targetHits > beforeTargetHits) ui.feedback('Target found — hold that finish.', 'success');
+  if (event === 'table' && result.targetHit) {
+    ui.feedback(`${result.move.shortLabel}: clean target · ${result.moveSuccesses}/5`, 'success');
+  }
+  if (event === 'table' && result.targetMiss) {
+    ui.feedback(`Missed ${result.move.shortLabel} — ${result.moveSuccesses}/5. ${result.move.cue}`, 'error');
+  }
+  if (event === 'table' && result.moveAdvanced) {
+    updateTargetMarker(result.nextMove);
+    if (result.drillComplete) {
+      training = false;
+      machine.enabled = false;
+      updateTargetMarker(null);
+      ui.feedback('Full target sequence complete!', 'success');
+      ui.showSummary(session.finish());
+      return;
+    }
+    ui.feedback(`Move complete — ${result.nextMove.shortLabel} is next.`, 'success');
+  }
   if (event === 'table') ui.update(session.summary(), 'RALLY');
   if (event === 'net') ui.feedback('Net error — close the racket angle.', 'error');
-  if (event === 'floor') { ui.feedback('Rally ended — reset your feet.', 'error'); setTimeout(() => ball.deactivate(), 700); if (session.misses >= 5) { training = false; machine.enabled = false; targetMarker.visible = false; targetRing.visible = false; ui.showSummary(session.finish()); } }
+  if (event === 'floor') { ui.feedback('Rally ended — reset your feet.', 'error'); setTimeout(() => ball.deactivate(), 700); if (session.misses >= 5) { training = false; machine.enabled = false; updateTargetMarker(null); ui.showSummary(session.finish()); } }
   ui.update(session.summary(), 'TRAINING');
 };
 

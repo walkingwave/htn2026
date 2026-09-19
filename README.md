@@ -16,8 +16,10 @@ The Vite server uses HTTPS because WebXR requires a secure context. Open the pri
 - **Foundation** — slower, wider serves for learning contact.
 - **Standard** — balanced fundamentals training.
 - **Boss run** — faster, tighter serves; survive as long as possible.
+- **Hit the zone** — a six-move coaching sequence: forehand/backhand cross-court, down-the-line, short touch, and deep drive. Each move requires five successful target bounces before the next move unlocks.
+- Every target move displays a live target, technique cue, repetition counter, and move-completion feedback. A miss keeps the current move active rather than silently advancing.
 
-The HUD tracks score, current and best rally, accuracy, table bounces, boss level, misses, net errors, survival time, and estimated reaction timing. Sessions finish after five missed balls and can be submitted to the fundamentals or boss leaderboard.
+The HUD tracks score, current and best rally, accuracy, table bounces, boss level, misses, net errors, survival time, estimated reaction timing, and target-sequence progress. Target sessions finish when all six moves are complete or after five missed balls; other sessions finish after five missed balls. Results can be submitted to the fundamentals or boss leaderboard.
 
 ## Input modes
 
