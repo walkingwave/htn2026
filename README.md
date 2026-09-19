@@ -19,7 +19,7 @@ The app opens on a product landing page inspired by the editorial feel of `../sp
 Landing page → drill selection → desktop/CV training → coaching results → leaderboard
 ```
 
-The landing page highlights skill-building, playing against the fly, and the pro Versus progression. It explains pointer and webcam input and links to the live rankings. Use **Start training** to enter the trainer lobby, or choose a drill card to enter with that drill selected. Versus is currently represented as the competitive product direction; the playable modes today are target, rally, and fly training.
+The landing page highlights skill-building, playing against the fly, and the pro Versus progression. Use **Start training** to choose **Casual Drills** or **Ranked Drills**, then select a session landscape: Classic Arena, Sunset Court, or Neon Night. The arena setup keeps a rotating table visible behind the selection panel. Once inside, the coaching controls live in a collapsible sidebar and the arrows at the top switch drills without returning home. Versus is currently represented as the competitive product direction; the playable modes today are target, rally, and fly training.
 
 ## Training modes
 

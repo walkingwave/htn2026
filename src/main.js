@@ -17,12 +17,17 @@ const BALL_POOL_SIZE = 8;
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local-floor'); document.body.appendChild(renderer.domElement);
-const scene = new THREE.Scene(); const VR_BACKGROUND = new THREE.Color(0x101018); scene.background = VR_BACKGROUND;
+const scene = new THREE.Scene();
+const VR_BACKGROUND = new THREE.Color(0x101018);
+const LANDSCAPES = { classic: 0x101018, sunset: 0x3b1f2b, neon: 0x071d2c };
+let landscapeBackground = VR_BACKGROUND;
+scene.background = landscapeBackground;
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
 const playerRig = new THREE.Group(); playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z); playerRig.add(camera); scene.add(playerRig); camera.position.set(0, 1.6, 0);
 scene.add(new THREE.HemisphereLight(0xbbccff, 0x334422, 0.9)); const keyLight = new THREE.DirectionalLight(0xfff1d0, 1.5); keyLight.position.set(3, 6, 2); scene.add(keyLight);
 const table = createTable(); scene.add(table); const vrEnvironment = table.getObjectByName('vr-environment');
-function applyMode(mode) { const isAR = mode === 'immersive-ar'; scene.background = isAR ? null : VR_BACKGROUND; if (vrEnvironment) vrEnvironment.visible = !isAR; }
+function applyLandscape(name = 'classic') { landscapeBackground = new THREE.Color(LANDSCAPES[name] ?? LANDSCAPES.classic); if (!renderer.xr.isPresenting) scene.background = landscapeBackground; }
+function applyMode(mode) { const isAR = mode === 'immersive-ar'; scene.background = isAR ? null : landscapeBackground; if (vrEnvironment) vrEnvironment.visible = !isAR; }
 createXRButtons(renderer, { onModeChange: applyMode }); renderer.xr.addEventListener('sessionend', () => applyMode(null));
 
 const targetMarker = new THREE.Mesh(new THREE.CircleGeometry(1, 32), new THREE.MeshBasicMaterial({ color: 0xffc857, transparent: true, opacity: .72, side: THREE.DoubleSide }));
@@ -92,7 +97,9 @@ renderer.domElement.addEventListener('pointermove', (event) => setPointerPose(ev
 renderer.domElement.addEventListener('pointerdown', (event) => setPointerPose(event.clientX, event.clientY));
 
 const ui = createTrainerUI({
-  onStart(difficulty, drill) { const profile = DIFFICULTIES[difficulty]; session.reset(difficulty, drill); session.start(); training = true; paused = false; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
+  onStart(difficulty, drill, mode, landscape) { const profile = DIFFICULTIES[difficulty]; applyLandscape(landscape); session.reset(difficulty, drill); session.mode = mode; session.landscape = landscape; session.start(); training = true; paused = false; table.rotation.y = 0; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.update(session.summary(), 'TRAINING'); },
+  onLandscapeChange(name) { applyLandscape(name); },
+  onDrillChange(nextDrill) { const difficulty = ui.getDifficulty(); const profile = DIFFICULTIES[difficulty]; balls.forEach((ball) => ball.deactivate()); session.reset(difficulty, nextDrill); if (training) { session.start(); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; } flyPaddle.enabled = training && nextDrill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); ui.update(session.summary(), training ? 'TRAINING' : 'READY'); },
   onPause() { paused = !paused; machine.enabled = training && !paused; ui.feedback(paused ? 'Training paused.' : 'Rally live.', paused ? '' : 'success'); },
   onReset() { training = false; paused = false; machine.enabled = false; flyPaddle.enabled = false; updateTargetMarker(null); balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.update(session.summary(), 'READY'); },
   onMachineToggle() { machine.enabled = !machine.enabled; return machine.enabled; },
@@ -149,5 +156,5 @@ function updateFlyAI() {
   flyAnchor.position.x += (predictedX - flyAnchor.position.x) * .18;
   flyAnchor.position.y += (predictedY - flyAnchor.position.y) * .18;
 }
-renderer.setAnimationLoop(() => { const dt = clock.getDelta(); if (!paused) { paddles.forEach((paddle) => paddle.update(dt)); if (training) machine.update(dt); updateFlyAI(); physics.step(dt, balls, paddles); session.update(); if (training) ui.update(session.summary(), 'TRAINING'); } balls.forEach((ball) => { if (ball.active && ball.mesh.position.length() > 12) ball.deactivate(); }); const t = clock.elapsedTime; flyOpponent.position.x = flyAnchor.position.x; flyOpponent.position.y = 1.55 + Math.sin(t * 2.1) * .05; renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { const dt = clock.getDelta(); if (ui.isModeSelecting?.()) table.rotation.y += dt * .22; else if (!renderer.xr.isPresenting) table.rotation.y = THREE.MathUtils.damp(table.rotation.y, 0, 8, dt); if (!paused) { paddles.forEach((paddle) => paddle.update(dt)); if (training) machine.update(dt); updateFlyAI(); physics.step(dt, balls, paddles); session.update(); if (training) ui.update(session.summary(), 'TRAINING'); } balls.forEach((ball) => { if (ball.active && ball.mesh.position.length() > 12) ball.deactivate(); }); const t = clock.elapsedTime; flyOpponent.position.x = flyAnchor.position.x; flyOpponent.position.y = 1.55 + Math.sin(t * 2.1) * .05; renderer.render(scene, camera); });
 window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });

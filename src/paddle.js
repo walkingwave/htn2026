@@ -5,7 +5,7 @@ import { PADDLE } from './constants.js';
 // Vertical paddles are used by desktop/CV and the fly; XR keeps its controller
 // grip orientation so existing headset input remains compatible.
 export class Paddle {
-  constructor({ owner = 'player', vertical = false, color = 0xcc2222 } = {}) {
+  constructor({ owner = 'player', vertical = false, color = 0xe53935 } = {}) {
     this.owner = owner;
     this.enabled = true;
     this.mesh = buildPaddleMesh(color, vertical);
@@ -40,15 +40,15 @@ function createBladeShape() {
   const shape = new THREE.Shape();
   // A slightly tapered, rounded ITTF-style blade: broad at the shoulder,
   // rounded across the top, and narrower where it meets the handle.
-  shape.moveTo(-0.052, -0.012);
-  shape.lineTo(-0.074, 0.026);
-  shape.quadraticCurveTo(-0.082, 0.052, -0.071, 0.078);
-  shape.quadraticCurveTo(-0.045, 0.105, 0, 0.108);
-  shape.quadraticCurveTo(0.045, 0.105, 0.071, 0.078);
-  shape.quadraticCurveTo(0.082, 0.052, 0.074, 0.026);
-  shape.lineTo(0.052, -0.012);
-  shape.quadraticCurveTo(0.025, -0.025, 0, -0.026);
-  shape.quadraticCurveTo(-0.025, -0.025, -0.052, -0.012);
+  shape.moveTo(-0.042, -0.044);
+  shape.lineTo(-0.068, 0.018);
+  shape.quadraticCurveTo(-0.078, 0.054, -0.066, 0.092);
+  shape.quadraticCurveTo(-0.041, 0.128, 0, 0.135);
+  shape.quadraticCurveTo(0.041, 0.128, 0.066, 0.092);
+  shape.quadraticCurveTo(0.078, 0.054, 0.068, 0.018);
+  shape.lineTo(0.042, -0.044);
+  shape.quadraticCurveTo(0.022, -0.057, 0, -0.058);
+  shape.quadraticCurveTo(-0.022, -0.057, -0.042, -0.044);
   return shape;
 }
 
