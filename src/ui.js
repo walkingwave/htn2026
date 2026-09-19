@@ -1,261 +1,868 @@
-import { DIFFICULTIES, DRILLS } from './session.js';
-import { getLeaderboard, submitScore, scoreFor } from './leaderboard.js';
+import './ui.css';
+import { buildPauseMenu } from './menuModel.js';
+import { createTournament, reportResult, currentMatches, isComplete, renderBracketLines } from './tournament.js';
 
-const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+// Escape user-supplied text (player names) before it goes into innerHTML.
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, onEnableCV, onDrillChange, onLandscapeChange, onVersusCreate, onVersusLeave }) {
-  const root = document.createElement('section');
-  root.className = 'trainer-ui landing-active';
-  root.innerHTML = `<section class="landing-screen" id="landing-screen" aria-label="Flyball ping pong trainer introduction">
-    <nav class="landing-nav"><a class="landing-brand" href="#top" aria-label="flyball home"><span class="brand-emoji" aria-hidden="true">🏓</span><span>flyball<span class="accent">.</span></span></a><div class="landing-nav-links"><a href="#how-it-works">How it works</a><a href="#drills">Drills</a><a href="#leaderboard-preview">Leaderboard</a></div><button class="landing-nav-cta" id="landing-nav-start">Start training <span>↗</span></button></nav>
-    <div class="landing-hero" id="top"><div class="hero-copy"><div class="hero-kicker"><span class="hero-kicker-dot"></span> DESKTOP-FIRST PING PONG COACH</div><h1>Hone your skills.<br><em>Play to win.</em></h1><p class="hero-lede">Train every return, play against a fly that refuses to give you easy points, then step into Versus when you feel like a pro.</p><div class="hero-actions"><button class="landing-primary" id="landing-start">Start your first drill <span>→</span></button><button class="landing-ghost" id="landing-versus"><span class="camera-icon">⚔</span> Play a friend</button><button class="landing-ghost" id="landing-camera"><span class="camera-icon">◉</span> Play with your camera</button></div><div class="hero-note"><span>NO VR REQUIRED</span><span class="note-line"></span><span>POINTER · WEBCAM · XR</span></div></div><div class="hero-arena" aria-label="Player view across a ping pong table"><div class="hero-glow"></div><div class="hero-grid"></div><div class="hero-view-label"><span></span> PLAYER VIEW / POINT 08</div><div class="hero-table"><div class="hero-net"></div><div class="hero-target"></div><div class="hero-paddle hero-paddle-player"></div><div class="hero-paddle hero-paddle-fly"></div><div class="hero-ball"></div></div><div class="hero-fly"><span class="fly-eye fly-eye-left"></span><span class="fly-eye fly-eye-right"></span><span class="fly-wing fly-wing-left"></span><span class="fly-wing fly-wing-right"></span></div><div class="hero-stat hero-stat-one"><b>06</b><span>coaching moves</span></div><div class="hero-stat hero-stat-two"><b>05×</b><span>clean reps to advance</span></div><div class="hero-caption"><span class="caption-dot"></span> LIVE TRAINING SIMULATION</div></div></div>
-    <div class="landing-strip" id="how-it-works"><div><span class="strip-number">01</span><strong>Hone it.</strong><small>Build the fundamentals that make every shot cleaner.</small></div><div><span class="strip-number">02</span><strong>Play the fly.</strong><small>Read a moving opponent and stay composed under pressure.</small></div><div><span class="strip-number">03</span><strong>Go Versus.</strong><small>Feeling like a pro? Crush others on the leaderboard.</small></div></div>
-    <section class="landing-section" id="drills"><div class="section-heading"><div><span class="landing-eyebrow">YOUR TRAINING ROOM</span><h2>Every point has a purpose.</h2></div><p>Choose the skill you want to sharpen. The coach tracks the details that matter after the rally is over.</p></div><div class="landing-drill-grid"><button class="landing-drill-card landing-drill-target" data-landing-drill="target"><span class="drill-card-top"><span class="card-icon">◎</span><span class="card-arrow">↗</span></span><strong>Hone your skills</strong><p>Six progressive moves. Five successful shots per target. No skipping the fundamentals.</p><span class="card-meta">FOREHAND · BACKHAND · PLACEMENT</span></button><button class="landing-drill-card landing-drill-fly" data-landing-drill="fly"><span class="drill-card-top"><span class="card-icon">✦</span><span class="card-arrow">↗</span></span><strong>Play against a fly</strong><p>Read an opponent that moves, returns, and makes you earn every clean point.</p><span class="card-meta">REACTION · PRESSURE · SURVIVAL</span></button><button class="landing-drill-card landing-drill-rally" data-landing-drill="rally"><span class="drill-card-top"><span class="card-icon">↗</span><span class="card-arrow">↗</span></span><strong>Feeling like a pro?</strong><p>Crush others in Versus. First, build the consistency that makes a champion hard to beat.</p><span class="card-meta">TIMING · CONTROL · CONSISTENCY</span></button></div></section>
-    <section class="landing-coach-section"><div class="coach-quote"><span class="landing-eyebrow">THE COACH IN THE LOOP</span><blockquote>“Good hands are a start.<br><em>Good decisions win points.</em>”</blockquote><p>Flyball turns every return into a piece of feedback: racket angle, preparation, placement, and pressure.</p></div><div class="coach-list"><div><span>↗</span><b>Pointer fallback</b><small>Start playing immediately with your mouse.</small></div><div><span>◉</span><b>Camera paddle</b><small>Use your webcam to make your hands the controller.</small></div><div><span>✦</span><b>Global rankings</b><small>Save your fundamentals and boss-run scores.</small></div></div></section>
-    <section class="landing-leaderboard" id="leaderboard-preview"><div><span class="landing-eyebrow">THE ARENA / LIVE RANKINGS</span><h2>Train with a score to settle.</h2><p>Compete on fundamentals or see how long you can last against the fly.</p></div><button class="landing-outline" id="landing-leaderboard">View leaderboard <span>↗</span></button></section>
-    <footer class="landing-footer"><span>flyball<span class="accent">.</span> / ping pong trainer</span><span>Made for better fundamentals.</span></footer>
-  </section>
-  <section class="mode-panel" id="mode-panel" aria-label="Choose training mode"><div class="mode-panel-inner"><div class="mode-choice" id="mode-choice"><span class="landing-eyebrow">WELCOME TO THE ARENA</span><h2>How do you want to train?</h2><p>Choose your lane. You can switch drills at any time from the top of the arena.</p><div class="mode-options"><button class="mode-option" data-mode="casual"><span class="mode-icon">◎</span><span><strong>Casual Drills</strong><small>Practice freely. Misses reset the rally, never the session.</small></span><span class="mode-arrow">→</span></button><button class="mode-option ranked" data-mode="ranked"><span class="mode-icon">✦</span><span><strong>Ranked Drills</strong><small>Put your fundamentals on the board and chase a personal best.</small></span><span class="mode-arrow">→</span></button></div></div><div class="landscape-choice hidden" id="landscape-choice"><span class="landing-eyebrow">SET THE SCENE</span><h2>Where do you want to play?</h2><p>Pick the atmosphere for this session. You can change it before your next drill.</p><div class="landscape-options"><button class="landscape-option selected" data-landscape="classic"><span class="landscape-preview classic-preview"></span><strong>Classic Arena</strong><small>Clean table, focused mind.</small></button><button class="landscape-option" data-landscape="sunset"><span class="landscape-preview sunset-preview"></span><strong>Sunset Court</strong><small>Warm light, loose hands.</small></button><button class="landscape-option" data-landscape="neon"><span class="landscape-preview neon-preview"></span><strong>Neon Night</strong><small>Pressure looks good on you.</small></button><button class="landscape-option" data-landscape="disco"><span class="landscape-preview disco-preview"></span><strong>Disco Floor</strong><small>If you’d rather dance on it.</small></button></div><button class="landscape-start" id="landscape-start">Enter the arena <span>→</span></button></div><button class="mode-back" id="mode-back">← Back to home</button></div></section>
-  <header class="topbar"><button type="button" class="brand" id="topbar-brand" aria-label="Back to home"><span class="brand-emoji" aria-hidden="true">🏓</span><span>flyball<span class="accent">.</span></span></button><div class="session-pill"><span class="live-dot"></span><span id="session-status">READY</span></div><div class="topbar-actions"><div class="drill-switcher"><button class="drill-arrow" id="previous-drill" aria-label="Previous drill">←</button><span id="active-drill">Rally builder</span><button class="drill-arrow" id="next-drill" aria-label="Next drill">→</button></div><button class="sidebar-toggle" id="sidebar-toggle"><span>☰</span> Coach</button><button class="text-button" id="landing-return">Home</button><button class="text-button" id="leaderboard-button">Leaderboard ↗</button><div class="lives hidden" id="lives" role="status" aria-label="Lives remaining"></div></div></header>
-  <div class="hud-grid"><div class="hud-card score-card"><span class="eyebrow">YOUR SCORE</span><strong id="score">0</strong><small><span id="rally">0</span> hit rally</small></div><div class="hud-card"><span class="eyebrow">BEST RALLY</span><strong id="best-rally">0</strong><small>clean returns</small></div><div class="hud-card"><span class="eyebrow">DRILL PROGRESS</span><strong id="accuracy">—</strong><small id="progress-label">returns / attempts</small></div><div class="hud-card boss-card"><span class="eyebrow">BOSS LEVEL</span><strong id="boss-level">01</strong><small id="difficulty-label">Standard drill</small></div></div>
-  <div class="feedback" id="feedback">Choose a drill to begin.</div>
-  <div class="countdown hidden" id="countdown" aria-live="assertive" aria-label="Serve countdown"></div>
-  <aside class="control-panel"><div><span class="eyebrow">COACHING PLAN</span><h1 id="panel-title">Build your fundamentals.</h1><p id="panel-copy">Pick a drill, then use your paddle to return the simulated ball.</p></div><div class="target-stage" id="target-stage"><div><span class="eyebrow">CURRENT MOVE</span><strong id="target-move">Ready to train</strong></div><span class="target-count" id="target-count">0 / 5</span><p id="target-cue">Every target move requires five clean repetitions before the next one unlocks.</p></div><div class="drill-list">${Object.entries(DRILLS).map(([key, value]) => `<button class="drill-option ${key === 'rally' ? 'selected' : ''}" data-drill="${key}"><span class="difficulty-icon">${key === 'fly' ? '✦' : key === 'target' ? '◎' : '↗'}</span><span><b>${value.label}</b><small>${value.detail}</small></span></button>`).join('')}</div><div class="difficulty-list">${Object.entries(DIFFICULTIES).map(([key, value]) => `<button class="difficulty-option ${key === 'standard' ? 'selected' : ''}" data-difficulty="${key}"><span><b>${value.label}</b><small>${value.detail}</small></span></button>`).join('')}</div><div class="control-actions"><button class="primary-button" id="start-button">Start drill →</button><button class="secondary-button" id="pause-button">Pause</button><button class="secondary-button" id="reset-button">Reset</button></div><div class="control-actions secondary-actions"><button class="secondary-button" id="machine-button">Pause ball machine</button><button class="secondary-button" id="cv-button">Use camera paddle</button></div><p class="control-hint">No VR required: move the on-screen paddle with your pointer, or enable camera CV. XR remains available when you have it.</p></aside>
-  <div class="leaderboard-panel hidden" id="leaderboard-panel"><div class="panel-heading"><div><span class="eyebrow">THE ARENA / LIVE RANKINGS</span><h2>Fundamentals under pressure.</h2></div><button class="text-button" id="close-leaderboard">Close</button></div><div class="leader-tabs"><button class="leader-tab selected" data-category="fundamentals">Fundamentals</button><button class="leader-tab" data-category="boss">Boss survival</button></div><div id="leaderboard-list"></div></div>
-  <div class="summary-panel hidden" id="summary-panel"><span class="eyebrow">SESSION COMPLETE</span><h2 id="summary-title">Good work.</h2><p id="summary-coach" class="summary-coach"></p><div class="summary-verdict hidden" id="summary-verdict"></div><div class="summary-grid" id="summary-grid"></div><div class="save-row"><input id="player-name" maxlength="32" placeholder="your name" aria-label="Player name"/><button class="primary-button" id="save-score">Save score</button></div><p class="save-status" id="save-status"></p><button class="secondary-button" id="summary-close">Back to drills</button></div>
-  <div class="versus-panel hidden" id="versus-panel"><div class="panel-heading"><div><span class="eyebrow">ONLINE VERSUS / 1V1</span><h2 id="versus-title">Play a friend</h2></div><button class="text-button" id="versus-close">Leave</button></div><p class="versus-sub" id="versus-sub">Share the link below. First to 7 points wins.</p><div class="versus-code-row"><span class="eyebrow">ROOM CODE</span><strong id="versus-code">------</strong></div><div class="versus-link-row"><input id="versus-link" readonly aria-label="Shareable game link" /><button class="primary-button" id="versus-copy">Copy link</button></div><p class="versus-status" id="versus-lobby-status">Waiting for your opponent to join…</p><p class="versus-note" id="versus-note"></p></div>
-  <div class="versus-score hidden" id="versus-score"><div class="vs-side"><small id="vs-you-label">YOU</small><strong id="vs-you">0</strong></div><div class="vs-mid"><span id="vs-serve">YOUR SERVE</span><small>FIRST TO <b id="vs-target">7</b></small></div><div class="vs-side"><small>OPPONENT</small><strong id="vs-them">0</strong></div></div>
-  <div class="versus-win hidden" id="versus-win"><div class="versus-win-card"><span class="eyebrow" id="versus-win-eyebrow">MATCH COMPLETE</span><h2 id="versus-win-title">You win!</h2><p id="versus-win-score">0 – 0</p><div class="versus-win-actions"><button class="primary-button" id="versus-win-leave">Back to home</button></div></div></div>`;
-  document.body.appendChild(root);
+// The flat-screen shell: a retro start menu, a one-line status bar, and a
+// settings screen built from the shared menu model.
+//
+// None of this exists inside a headset — the immersive session only renders
+// the 3D scene — so the same menu model is drawn again in world space by
+// vrMenu.js. This file is what you use before putting the headset on, and
+// what the on-screen preview runs on.
 
-  let difficulty = 'standard';
-  let drill = 'rally';
-  let category = 'fundamentals';
-  let mode = 'casual';
-  let landscape = 'classic';
-  let pendingDrill = drill;
-  let lastSummary = null;
-  const $ = (id) => root.querySelector(`#${id}`);
-  const navigate = (path) => window.location.assign(path);
-  const enterTrainer = () => { root.classList.remove('landing-active', 'mode-select-active'); root.classList.add('sidebar-closed'); window.scrollTo(0, 0); };
-  const showModeSelect = (nextDrill = drill) => { pendingDrill = nextDrill; root.classList.remove('landing-active'); root.classList.add('mode-select-active'); $('mode-choice').classList.remove('hidden'); $('landscape-choice').classList.add('hidden'); };
-  const enterLanding = () => { if (root.classList.contains('versus-active')) { onVersusLeave?.(); } root.classList.remove('mode-select-active', 'sidebar-closed', 'versus-active'); root.classList.add('landing-active'); $('leaderboard-panel').classList.add('hidden'); $('summary-panel').classList.add('hidden'); $('lives').classList.add('hidden'); $('countdown').classList.add('hidden'); $('versus-panel').classList.add('hidden'); $('versus-score').classList.add('hidden'); $('versus-win').classList.add('hidden'); };
-  const startMode = (selectedMode) => { mode = selectedMode; $('mode-choice').classList.add('hidden'); $('landscape-choice').classList.remove('hidden'); onLandscapeChange?.(landscape); };
-  const chooseDrill = (nextDrill) => {
-    drill = nextDrill;
-    root.querySelectorAll('[data-drill]').forEach((item) => item.classList.toggle('selected', item.dataset.drill === drill));
-    $('panel-title').textContent = DRILLS[drill].label;
-    $('panel-copy').textContent = DRILLS[drill].detail;
-    $('active-drill').textContent = DRILLS[drill].label;
-  };
+export class UI {
+  constructor({ xr, machine, game, settings, sfx, onStart, onExit, onVersusCreate, onVersusJoin, onVersusLeave, onTourneyCreate, onTourneyJoin, onTourneySend, onTourneyLeave }) {
+    Object.assign(this, {
+      xr, machine, game, settings, sfx, onStart, onExit,
+      onVersusCreate, onVersusJoin, onVersusLeave,
+      onTourneyCreate, onTourneyJoin, onTourneySend, onTourneyLeave,
+    });
 
-  const update = (summary, status = 'TRAINING') => {
-    if (!summary) return;
-    $('score').textContent = summary.score;
-    $('rally').textContent = summary.rally;
-    $('best-rally').textContent = summary.longestRally;
-    $('accuracy').textContent = drill === 'target' ? `${summary.targetAccuracy}%` : `${summary.accuracy}%`;
-    $('progress-label').textContent = drill === 'target' ? `${summary.completedMoves}/${summary.totalMoves} moves · ${summary.targetHits} hits` : 'returns / attempts';
-    $('boss-level').textContent = String(summary.bossLevel).padStart(2, '0');
-    $('difficulty-label').textContent = `${DRILLS[summary.drill].label} · ${DIFFICULTIES[summary.difficulty].label}`;
-    $('session-status').textContent = status;
-    $('target-stage').classList.toggle('active', drill === 'target');
-    if (drill === 'target') {
-      $('target-move').textContent = `${summary.currentMoveNumber}. ${summary.currentMoveLabel}`;
-      $('target-count').textContent = `${summary.moveSuccesses} / ${summary.moveRequired}`;
-      $('target-cue').textContent = summary.currentMoveCue;
-    } else {
-      $('target-move').textContent = 'Target sequence offline';
-      $('target-count').textContent = '—';
-      $('target-cue').textContent = DRILLS[drill].coach;
+    this._selected = 0;
+    this._entries = [];
+    this._toastTimer = null;
+    this._lastRevision = -1;
+
+    this._buildMenu();
+    this._buildBar();
+    this._buildSettings();
+    this._buildToast();
+    this._buildCountdown();
+    this._buildTournament();
+    this._buildVersus();
+    this._versusRole = 'host';
+
+    window.addEventListener('keydown', (e) => this._onKey(e));
+    this.showMenu();
+  }
+
+  // --- Start menu -------------------------------------------------------
+
+  _buildMenu() {
+    const el = document.createElement('div');
+    el.id = 'menu';
+    el.innerHTML = `
+      <div>
+        <h1 class="title">Fly<span>·</span>Ball<span class="blink">_</span></h1>
+        <p class="tagline" data-prompt>Select a mode</p>
+      </div>
+      <div class="menu-list" data-list></div>
+      <div class="hint">
+        ↑ ↓ select &nbsp;·&nbsp; enter continue &nbsp;·&nbsp; esc back<br />
+        <span data-menu-note></span>
+      </div>
+    `;
+    document.body.appendChild(el);
+    this.menu = el;
+    this.list = el.querySelector('[data-list]');
+    this.prompt = el.querySelector('[data-prompt]');
+    this.note = el.querySelector('[data-menu-note]');
+
+    this._xrSupport = { 'immersive-ar': false, 'immersive-vr': false };
+    this._flow = { step: 'mode', mode: null, input: null, background: null };
+    this._gotoStep('mode');
+  }
+
+  // Each wizard step is just a fresh set of menu entries + a prompt. The
+  // shared renderer/keyboard nav below don't care which step is showing.
+  _stepConfig(step) {
+    if (step === 'mode') {
+      return {
+        prompt: 'Select a mode',
+        note: 'What do you want to play?',
+        entries: [
+          { id: 'tournament', label: 'Create a Tournament', note: 'beta' },
+          { id: 'friend', label: 'Play a Friend', note: 'beta' },
+          { id: 'bot', label: 'Play a Bot' },
+          { id: 'drills', label: 'Drills' },
+        ],
+      };
     }
-  };
-
-  const feedback = (message, kind = '') => {
-    const node = $('feedback'); node.textContent = message; node.className = `feedback ${kind}`; window.clearTimeout(feedback.timer); feedback.timer = window.setTimeout(() => node.className = 'feedback', 1800);
-  };
-
-  // Ranked lives, rendered as ping-pong balls that shatter like glass on a drop.
-  let livesRemaining = 0;
-  const SHARD_DIRS = [[-19, -13, -150], [17, -17, 130], [21, 9, 95], [-15, 17, -95], [3, -23, 30], [-5, 22, 205], [12, 20, -60], [-22, -4, 60]];
-  const shardMarkup = () => SHARD_DIRS.map(([tx, ty, rot]) => `<i class="shard" style="--tx:${tx}px;--ty:${ty}px;--rot:${rot}deg"></i>`).join('');
-  const setLives = (total) => {
-    const el = $('lives');
-    livesRemaining = total;
-    if (!total) { el.classList.add('hidden'); el.innerHTML = ''; return; }
-    el.classList.remove('hidden');
-    el.innerHTML = Array.from({ length: total }, (_, i) => `<span class="life" data-life="${i}"><span class="pong"><span class="glint"></span></span>${shardMarkup()}</span>`).join('');
-  };
-  const loseLife = () => {
-    if (livesRemaining <= 0) return;
-    livesRemaining -= 1;
-    const life = $('lives').querySelector(`.life[data-life="${livesRemaining}"]`);
-    if (life && !life.classList.contains('breaking')) life.classList.add('breaking');
-  };
-
-  // Big 3-2-1 overlay shown before each serve. Re-triggering the pop animation
-  // on every number gives each count its own beat.
-  const showCountdown = (n) => {
-    const el = $('countdown');
-    el.textContent = n;
-    el.classList.remove('hidden', 'pop');
-    void el.offsetWidth;
-    el.classList.add('pop');
-  };
-  const hideCountdown = () => { const el = $('countdown'); el.classList.add('hidden'); el.classList.remove('pop'); };
-
-  // Online versus lobby + scoreboard.
-  let versusRole = 'host';
-  const openVersus = (role, info) => {
-    versusRole = role;
-    root.classList.remove('landing-active', 'mode-select-active');
-    root.classList.add('sidebar-closed', 'versus-active');
-    $('versus-panel').classList.remove('hidden');
-    $('versus-win').classList.add('hidden');
-    $('versus-score').classList.add('hidden');
-    $('versus-title').textContent = role === 'host' ? 'Your game is ready' : 'Joining game';
-    $('versus-code').textContent = info.code ?? '------';
-    $('versus-link').value = info.link ?? window.location.href;
-    $('versus-note').textContent = info.kind === 'local'
-      ? 'Local mode: open this link in another tab/window on this device. Add Supabase keys for cross-device play.'
-      : 'Online: send this link to anyone, anywhere.';
-    $('versus-lobby-status').textContent = role === 'host' ? 'Waiting for your opponent to join…' : 'Connecting to the host…';
-  };
-  const setVersusOpponent = (present) => {
-    if (!root.classList.contains('versus-active')) return;
-    if (present) {
-      $('versus-panel').classList.add('hidden');
-      $('versus-score').classList.remove('hidden');
-      feedback('Opponent connected — game on!', 'success');
-    } else {
-      $('versus-score').classList.add('hidden');
-      $('versus-win').classList.add('hidden');
-      $('versus-panel').classList.remove('hidden');
-      $('versus-lobby-status').textContent = 'Waiting for your opponent…';
+    if (step === 'input') {
+      const vrOk = this._xrSupport['immersive-vr'] || this._xrSupport['immersive-ar'];
+      return {
+        prompt: 'What do you have?',
+        note: 'Choose how you control the paddle',
+        entries: [
+          { id: 'vr', label: 'A VR Headset', note: vrOk ? '' : 'no headset', disabled: !vrOk },
+          { id: 'paddle', label: 'A Ping Pong Paddle', note: 'webcam' },
+          { id: 'phone', label: 'A Phone', note: 'beta' },
+          { id: 'mouse', label: 'Nothing — just the mouse' },
+        ],
+      };
     }
-  };
-  const versusScores = (snap) => versusRole === 'host'
-    ? { you: snap.scoreHost, them: snap.scoreGuest }
-    : { you: snap.scoreGuest, them: snap.scoreHost };
-  const updateVersusScore = (snap, myRole) => {
-    if (myRole) versusRole = myRole;
-    const { you, them } = versusScores(snap);
-    $('vs-you').textContent = you;
-    $('vs-them').textContent = them;
-    $('vs-target').textContent = snap.target;
-    $('vs-serve').textContent = snap.server === versusRole ? 'YOUR SERVE' : 'THEIR SERVE';
-  };
-  const showVersusWin = (didWin, snap) => {
-    const { you, them } = versusScores(snap);
-    $('versus-win').classList.remove('hidden');
-    $('versus-win-eyebrow').textContent = didWin ? 'GG — YOU TOOK IT' : 'GG — RUN IT BACK';
-    $('versus-win-title').textContent = didWin ? 'You win! 🏓' : 'You lost.';
-    $('versus-win-score').textContent = `${you} – ${them}`;
-  };
+    return {
+      prompt: 'Choose your court',
+      note: 'Set the scene, then play',
+      entries: [
+        { id: 'arena', label: 'Charcoal Arena' },
+        { id: 'sunset', label: 'Sunset Court' },
+        { id: 'neon', label: 'Neon Night' },
+        { id: 'void', label: 'Blackout' },
+      ],
+    };
+  }
 
-  const showSummary = async (summary) => {
-    lastSummary = summary; update(summary, 'COMPLETE');
-    const verdict = $('summary-verdict');
-    verdict.className = 'summary-verdict hidden';
-    verdict.textContent = '';
-    const ranked = summary.mode === 'ranked';
-    if (ranked) {
-      $('summary-title').textContent = 'Ranked run over.';
-      $('summary-coach').textContent = `Three balls down. Final score ${summary.score}. Here's where you'd land:`;
-    } else {
-      $('summary-title').textContent = summary.drill === 'fly' ? 'You read the fly.' : summary.drill === 'target' ? (summary.targetComplete ? 'Target sequence complete.' : `${summary.completedMoves} moves completed.`) : 'You found your rhythm.';
-      $('summary-coach').textContent = summary.drill === 'target' ? `${summary.completedMoves}/${summary.totalMoves} moves complete. ${summary.targetComplete ? 'Excellent control—repeat the sequence at the next speed.' : DRILLS.target.coach}` : summary.drill === 'fly' ? `${summary.flyReturns} fly returns and ${summary.flyMisses} fly misses. ${DRILLS.fly.coach}` : summary.accuracy >= 70 ? 'Good consistency. Next, reduce swing size and challenge the next speed.' : DRILLS[summary.drill].coach;
+  _gotoStep(step) {
+    this._flow.step = step;
+    const cfg = this._stepConfig(step);
+    this._entries = cfg.entries;
+    if (this.prompt) this.prompt.textContent = cfg.prompt;
+    if (this.note) this.note.textContent = cfg.note;
+    this._selected = this._entries.findIndex((e) => !e.disabled);
+    if (this._selected < 0) this._selected = 0;
+    this._renderMenu();
+  }
+
+  _renderMenu() {
+    this.list.innerHTML = '';
+    this._entries.forEach((entry, i) => {
+      const b = document.createElement('button');
+      b.className = 'item';
+      b.disabled = entry.disabled;
+      b.setAttribute('aria-selected', String(i === this._selected));
+      b.innerHTML =
+        `<span class="item__caret">▸</span><span>${entry.label}</span>` +
+        (entry.note ? `<span class="item__note">${entry.note}</span>` : '');
+      b.onmouseenter = () => {
+        this._selected = i;
+        this._syncMenuSelection();
+      };
+      b.onclick = () => this._activateMenu(i);
+      this.list.appendChild(b);
+    });
+  }
+
+  _syncMenuSelection() {
+    [...this.list.children].forEach((child, i) =>
+      child.setAttribute('aria-selected', String(i === this._selected))
+    );
+  }
+
+  _moveMenu(delta) {
+    const n = this._entries.length;
+    let next = this._selected;
+    // Skip over unavailable entries so the caret never parks on a dead line
+    for (let i = 0; i < n; i++) {
+      next = (next + delta + n) % n;
+      if (!this._entries[next].disabled) break;
     }
-    $('summary-grid').innerHTML = [['Score', summary.score], ['Moves complete', `${summary.completedMoves}/${summary.totalMoves}`], ['Longest rally', `${summary.longestRally} hits`], ['Accuracy', `${summary.accuracy}%`], ['Target hits', `${summary.targetHits}`], ['Fly returns', `${summary.flyReturns ?? 0}`], ['Fly misses', `${summary.flyMisses ?? 0}`], ['Survival', `${summary.survivalSeconds}s`], ['Reaction', summary.reactionMs ? `${summary.reactionMs}ms` : '—']].map(([label, value]) => `<div><small>${label}</small><strong>${value}</strong></div>`).join('');
-    $('summary-panel').classList.remove('hidden');
-    if (ranked) {
-      const rankedCategory = summary.difficulty === 'boss' ? 'boss' : 'fundamentals';
-      const points = scoreFor(summary, rankedCategory);
-      verdict.classList.remove('hidden');
-      verdict.textContent = 'Checking the leaderboard…';
-      try {
-        const rows = await getLeaderboard(rankedCategory);
-        const higher = rows.filter((row) => row.score > points).length;
-        const rank = higher + 1;
-        const beyondTop = rows.length >= 25 && rank > rows.length;
-        if (rank === 1) {
-          verdict.className = 'summary-verdict goat';
-          verdict.innerHTML = `<strong>🐐 GOAT STATUS</strong><span>#1 on the ${rankedCategory} board with ${points.toLocaleString()} pts. Save it and defend your throne.</span>`;
-        } else {
-          verdict.className = 'summary-verdict chase';
-          verdict.innerHTML = `<strong>#${rank}${beyondTop ? '+' : ''} · ${points.toLocaleString()} pts</strong><span>Can you reach the top? Save your score, then run it back.</span>`;
-        }
-      } catch {
-        verdict.className = 'summary-verdict chase';
-        verdict.innerHTML = `<strong>${points.toLocaleString()} pts</strong><span>Couldn't reach the leaderboard — save your score to lock in your rank.</span>`;
+    this._selected = next;
+    this._syncMenuSelection();
+    this.sfx.ui();
+  }
+
+  async _activateMenu(index) {
+    const entry = this._entries[index];
+    if (!entry || entry.disabled) return;
+    this.sfx.ui();
+    const step = this._flow.step;
+    if (step === 'mode') {
+      if (entry.id === 'tournament') { this.openTournament(); return; }
+      if (entry.id === 'friend') {
+        const info = await this.onVersusCreate?.();
+        if (info) this.openVersusLobby(info);
+        return;
+      }
+      this._flow.mode = entry.id;
+      this._gotoStep('input');
+    } else if (step === 'input') {
+      this._flow.input = entry.id;
+      this._gotoStep('background');
+    } else {
+      this._flow.background = entry.id;
+      this._launchFlow();
+    }
+  }
+
+  _stepBack() {
+    const step = this._flow.step;
+    if (step === 'input') this._gotoStep('mode');
+    else if (step === 'background') this._gotoStep('input');
+    else return;
+    this.sfx.ui();
+  }
+
+  applyXRSupport(support) {
+    this._xrSupport = support;
+    const anyXR = support['immersive-ar'] || support['immersive-vr'];
+    // Refresh whichever step is showing so the VR line enables/greys out.
+    if (this.menu && !this.menu.hidden) {
+      if (this._flow.step === 'input') this._gotoStep('input');
+      else if (this._flow.step === 'mode' && this.note) {
+        this.note.textContent = anyXR ? 'Headset ready · pick a mode' : 'What do you want to play?';
       }
     }
-  };
+  }
 
-  const loadLeaderboard = async () => {
-    const list = $('leaderboard-list'); list.innerHTML = '<p class="muted">Loading rankings…</p>'; const rows = await getLeaderboard(category);
-    list.innerHTML = rows.length ? rows.map((row, index) => `<div class="leader-row"><span class="rank">${String(index + 1).padStart(2, '0')}</span><span><b>${escapeHtml(row.player_name)}</b><small>${row.max_rally} hit rally · ${row.difficulty}</small></span><strong>${row.score.toLocaleString()} pts</strong></div>`).join('') : '<p class="muted">No scores yet. Be first.</p>';
-  };
+  async _launchFlow() {
+    const { mode, input, background } = this._flow;
+    // A VR headset starts an immersive session (his XR path); every other
+    // input runs the on-screen desktop/pointer build.
+    const xrMode = input === 'vr'
+      ? (this._xrSupport['immersive-vr'] ? 'immersive-vr' : 'immersive-ar')
+      : null;
 
-  root.querySelectorAll('[data-drill]').forEach((button) => button.addEventListener('click', () => { chooseDrill(button.dataset.drill); update({ drill, difficulty, completedMoves: 0, totalMoves: 6, targetHits: 0, targetAccuracy: 0, accuracy: 0, score: 0, rally: 0, longestRally: 0, bossLevel: DIFFICULTIES[difficulty].bossLevel, currentMoveNumber: 1, currentMoveLabel: 'Ready to train', currentMoveCue: DRILLS[drill].coach, moveSuccesses: 0, moveRequired: 5 }, 'READY'); }));
-  root.querySelectorAll('[data-difficulty]').forEach((button) => button.addEventListener('click', () => { difficulty = button.dataset.difficulty; root.querySelectorAll('[data-difficulty]').forEach((item) => item.classList.toggle('selected', item === button)); }));
-  root.querySelectorAll('[data-landing-drill]').forEach((button) => button.addEventListener('click', () => navigate(`/training?drill=${button.dataset.landingDrill}`)));
-  $('landing-start').addEventListener('click', () => navigate('/training'));
-  $('landing-nav-start').addEventListener('click', () => navigate('/training'));
-  $('landing-camera').addEventListener('click', () => navigate('/training'));
-  root.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => startMode(button.dataset.mode)));
-  $('mode-back').addEventListener('click', () => navigate('/'));
-  root.querySelectorAll('[data-landscape]').forEach((button) => button.addEventListener('click', () => { landscape = button.dataset.landscape; root.querySelectorAll('[data-landscape]').forEach((item) => item.classList.toggle('selected', item === button)); onLandscapeChange?.(landscape); }));
-  $('landscape-start').addEventListener('click', () => { chooseDrill(pendingDrill); enterTrainer(); onStart(difficulty, drill, mode, landscape); feedback(mode === 'ranked' ? 'Ranked run live — 3 balls to drop. Make every return count.' : 'Casual drill live — build your rhythm.', 'success'); });
-  $('sidebar-toggle').addEventListener('click', () => root.classList.toggle('sidebar-closed'));
-  const switchDrill = (direction) => { const keys = Object.keys(DRILLS); const next = (keys.indexOf(drill) + direction + keys.length) % keys.length; chooseDrill(keys[next]); onDrillChange?.(drill, mode); feedback(`Switched to ${DRILLS[drill].label}.`, 'success'); };
-  $('previous-drill').addEventListener('click', () => switchDrill(-1));
-  $('next-drill').addEventListener('click', () => switchDrill(1));
-  $('landing-return').addEventListener('click', () => navigate('/'));
-  $('topbar-brand').addEventListener('click', () => navigate('/'));
-  $('landing-versus').addEventListener('click', () => navigate('/live-game'));
-  $('versus-copy').addEventListener('click', async () => {
-    const link = $('versus-link').value;
-    try { await navigator.clipboard.writeText(link); $('versus-copy').textContent = 'Copied!'; setTimeout(() => { $('versus-copy').textContent = 'Copy link'; }, 1500); }
-    catch { $('versus-link').select(); feedback('Press Ctrl/Cmd+C to copy the link.', ''); }
-  });
-  $('versus-close').addEventListener('click', () => navigate('/'));
-  $('versus-win-leave').addEventListener('click', () => navigate('/'));
-  $('landing-leaderboard').addEventListener('click', () => navigate('/tournament'));
-  $('start-button').addEventListener('click', () => { $('summary-panel').classList.add('hidden'); onStart(difficulty, drill, mode, landscape); feedback(drill === 'target' ? 'Move 1 live — land five clean shots.' : mode === 'ranked' ? 'Ranked run live — you have 3 balls to drop.' : 'Rally live — watch the serve.', 'success'); });
-  $('pause-button').addEventListener('click', () => onPause());
-  $('reset-button').addEventListener('click', () => onReset());
-  $('machine-button').addEventListener('click', () => { const enabled = onMachineToggle(); $('machine-button').textContent = enabled ? 'Pause ball machine' : 'Resume ball machine'; });
-  $('cv-button').addEventListener('click', () => { onEnableCV(); $('cv-button').textContent = 'Camera loading…'; });
-  $('leaderboard-button').addEventListener('click', () => navigate('/tournament'));
-  $('close-leaderboard').addEventListener('click', () => $('leaderboard-panel').classList.add('hidden'));
-  $('summary-close').addEventListener('click', () => $('summary-panel').classList.add('hidden'));
-  root.querySelectorAll('.leader-tab').forEach((button) => button.addEventListener('click', () => { category = button.dataset.category; root.querySelectorAll('.leader-tab').forEach((item) => item.classList.toggle('selected', item === button)); loadLeaderboard(); }));
-  $('save-score').addEventListener('click', async () => {
-    const name = $('player-name').value.trim();
-    if (!name || !lastSummary) { $('save-status').textContent = 'Add your name first.'; return; }
-    $('save-status').textContent = 'Saving…';
-    const saveCategory = lastSummary.mode === 'ranked' ? (lastSummary.difficulty === 'boss' ? 'boss' : 'fundamentals') : category;
-    try { const result = await submitScore(name, lastSummary, saveCategory); $('save-status').textContent = result.storage === 'local' ? `Saved on this device. Configure Supabase to publish globally. (${scoreFor(lastSummary, saveCategory)} pts)` : 'Score saved to the arena.'; } catch { $('save-status').textContent = 'Could not reach the leaderboard. Your session is still safe.'; }
-  });
+    this.sfx.unlock(); // first user gesture — the only moment audio can start
+    this.sfx.ui();
+    this.menu.hidden = true;
+    this.bar.hidden = false;
 
-  const openTraining = (requestedDrill) => {
-    if (requestedDrill && DRILLS[requestedDrill]) chooseDrill(requestedDrill);
-    showModeSelect(requestedDrill ?? drill);
-  };
-  const openTournament = () => {
-    enterTrainer();
-    $('leaderboard-panel').classList.remove('hidden');
-    loadLeaderboard();
-  };
-  const startLiveGame = async () => {
-    try {
-      const info = await onVersusCreate?.();
-      if (info) openVersus('host', info);
-    } catch (error) {
-      feedback(`Couldn't start a game: ${error.message}`, 'error');
+    this.onStart?.({ mode, input, background, xrMode });
+
+    if (xrMode) {
+      try {
+        await this.xr.start(xrMode);
+      } catch (err) {
+        console.error('Failed to start XR session', err);
+        this.toast('Headset session failed');
+        this.showMenu();
+      }
     }
-  };
+  }
 
-  return { update, feedback, showSummary, setLives, loseLife, showCountdown, hideCountdown, openVersus, setVersusOpponent, updateVersusScore, showVersusWin, openTraining, openTournament, startLiveGame, getDifficulty: () => difficulty, getDrill: () => drill, isModeSelecting: () => root.classList.contains('mode-select-active') };
+  showMenu() {
+    // If a tournament lobby is still open when we bail to the menu, tear down
+    // its room so we don't leak the channel.
+    if (this._tourney) { this.onTourneyLeave?.(); this._tourney = null; }
+    this.menu.hidden = false;
+    if (this.bar) this.bar.hidden = true;
+    if (this.settingsEl) this.settingsEl.hidden = true;
+    if (this.tournamentEl) this.tournamentEl.hidden = true;
+    if (this.versusEl) this.versusEl.hidden = true;
+    if (this.versusWinEl) this.versusWinEl.hidden = true;
+    this.hideCountdown?.();
+    this._gotoStep?.('mode');
+  }
+
+  // --- Bottom status line ----------------------------------------------
+
+  _buildBar() {
+    const el = document.createElement('div');
+    el.id = 'bar';
+    el.innerHTML = `
+      <span class="bar__mode" data-bar-mode>—</span>
+      <span class="bar__stats" data-bar-stats>—</span>
+      <span class="bar__spacer"></span>
+      <button class="key" data-act="toggle"><b>Space</b><span data-toggle-label>Pause</span></button>
+      <button class="key" data-act="mode"><b>D</b>Mode</button>
+      <button class="key" data-act="serve"><b>S</b>Serve</button>
+      <button class="key" data-act="settings"><b>Tab</b>Settings</button>
+      <button class="key" data-act="exit"><b>Esc</b>Menu</button>
+    `;
+    document.body.appendChild(el);
+    this.bar = el;
+
+    el.querySelector('[data-act="toggle"]').onclick = () => this.togglePause();
+    el.querySelector('[data-act="mode"]').onclick = () => this.nextMode();
+    el.querySelector('[data-act="serve"]').onclick = () => this.machine.serve();
+    el.querySelector('[data-act="settings"]').onclick = () => this.toggleSettings();
+    el.querySelector('[data-act="exit"]').onclick = () => this.quitToMenu();
+  }
+
+  // --- Settings ---------------------------------------------------------
+
+  _buildSettings() {
+    const el = document.createElement('div');
+    el.id = 'settings';
+    el.hidden = true;
+    el.innerHTML = `
+      <div class="settings__title">Settings</div>
+      <div class="settings__list" data-rows></div>
+      <div class="hint">Tab / Esc to close</div>
+    `;
+    document.body.appendChild(el);
+    this.settingsEl = el;
+    this.rows = el.querySelector('[data-rows]');
+  }
+
+  _renderSettings() {
+    const items = this._menuItems().filter(
+      (i) => i.kind !== 'action' || i.id === 'reset'
+    );
+    this.rows.innerHTML = '';
+
+    for (const item of items) {
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      if (item.kind === 'action') {
+        row.innerHTML = `<button class="key"><b>▸</b>${item.label}</button><span></span>`;
+        row.querySelector('button').onclick = () => {
+          item.activate();
+          this.sfx.ui();
+          this.toast(item.label);
+        };
+      } else {
+        row.innerHTML = `
+          <span class="row__label">${item.label}</span>
+          <span class="row__value">
+            <button class="arrow" data-d="-1">‹</button>
+            <span class="row__current">${item.value}</span>
+            <button class="arrow" data-d="1">›</button>
+          </span>
+        `;
+        row.querySelectorAll('.arrow').forEach((b) => {
+          b.onclick = () => {
+            item.step(Number(b.dataset.d));
+            this.sfx.ui();
+            this._renderSettings();
+          };
+        });
+      }
+      this.rows.appendChild(row);
+    }
+  }
+
+  _menuItems() {
+    return buildPauseMenu({
+      machine: this.machine,
+      game: this.game,
+      settings: this.settings,
+      onResume: () => this.toggleSettings(false),
+      onExit: () => this.quitToMenu(),
+    });
+  }
+
+  // --- Commands (shared by clicks, keys and the VR menu) ----------------
+
+  togglePause() {
+    this.machine.enabled = !this.machine.enabled;
+    this.game.revision++;
+    this.sfx.ui(this.machine.enabled);
+    this.toast(this.machine.enabled ? 'Armed' : 'Paused');
+  }
+
+  nextMode() {
+    const mode = this.machine.nextDrill();
+    this.game.revision++;
+    this.sfx.ui();
+    this.toast(mode.name);
+  }
+
+  toggleSettings(force) {
+    const open = force ?? this.settingsEl.hidden;
+    this.settingsEl.hidden = !open;
+    if (open) this._renderSettings();
+    this.sfx.ui(open);
+  }
+
+  quitToMenu() {
+    this.settingsEl.hidden = true;
+    this.xr.end();
+    this.onExit?.();
+    this.showMenu();
+  }
+
+  // --- Keyboard ---------------------------------------------------------
+
+  _onKey(e) {
+    if (this.versusEl && !this.versusEl.hidden) {
+      if (e.code === 'Escape') { this.onVersusLeave?.(); this.closeVersus(); }
+      return;
+    }
+    if (this.tournamentEl && !this.tournamentEl.hidden) {
+      if (e.code === 'Escape') { this.closeTournament(); }
+      return;
+    }
+    if (!this.menu.hidden) {
+      if (e.code === 'ArrowUp') this._moveMenu(-1);
+      else if (e.code === 'ArrowDown') this._moveMenu(1);
+      else if (e.code === 'Escape' || e.code === 'ArrowLeft') this._stepBack();
+      else if (e.code === 'Enter' || e.code === 'Space') {
+        e.preventDefault();
+        this._activateMenu(this._selected);
+      }
+      return;
+    }
+
+    if (e.code === 'Escape') {
+      if (!this.settingsEl.hidden) this.toggleSettings(false);
+      else this.quitToMenu();
+    } else if (e.code === 'Tab') {
+      e.preventDefault();
+      this.toggleSettings();
+    } else if (e.code === 'Space') {
+      e.preventDefault();
+      this.togglePause();
+    } else if (e.code === 'KeyD') {
+      this.nextMode();
+    } else if (e.code === 'KeyS') {
+      this.machine.serve();
+    } else if (e.code === 'KeyR') {
+      this.game.reset();
+      this.toast('Score reset');
+    }
+  }
+
+  // --- Toast ------------------------------------------------------------
+
+  _buildToast() {
+    this.toastEl = document.createElement('div');
+    this.toastEl.id = 'toast';
+    document.body.appendChild(this.toastEl);
+  }
+
+  toast(message) {
+    this.toastEl.textContent = message;
+    this.toastEl.classList.add('is-visible');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(
+      () => this.toastEl.classList.remove('is-visible'),
+      1300
+    );
+  }
+
+  // --- Countdown (before the first ball) --------------------------------
+
+  _buildCountdown() {
+    // Full-screen dimming overlay that centres a single big numeral. The
+    // numeral lives in its own element so the pop animation only scales the
+    // digit chip, not the backdrop.
+    this.countdownEl = document.createElement('div');
+    this.countdownEl.id = 'countdown';
+    this.countdownEl.hidden = true;
+    this.countdownNum = document.createElement('span');
+    this.countdownNum.className = 'countdown-num';
+    this.countdownEl.appendChild(this.countdownNum);
+    document.body.appendChild(this.countdownEl);
+  }
+
+  showCountdown(n) {
+    if (!this.countdownEl) return;
+    // Visibility is driven by a class so it never depends on the fragile
+    // `hidden` attribute vs `display` specificity dance; the attribute is
+    // cleared too so a stale [hidden] rule can never keep it off-screen.
+    this.countdownEl.hidden = false;
+    this.countdownEl.classList.add('is-visible');
+    this.countdownNum.textContent = n;
+    // Retrigger the pop animation on each number.
+    this.countdownNum.classList.remove('pop');
+    void this.countdownNum.offsetWidth;
+    this.countdownNum.classList.add('pop');
+    this.sfx?.ui?.();
+  }
+
+  hideCountdown() {
+    if (!this.countdownEl) return;
+    this.countdownEl.classList.remove('is-visible');
+    this.countdownEl.hidden = true;
+    this.countdownNum.classList.remove('pop');
+  }
+
+  // --- Tournament -------------------------------------------------------
+
+  _buildTournament() {
+    const el = document.createElement('div');
+    el.id = 'tournament';
+    el.hidden = true;
+    el.innerHTML = `
+      <div class="tourney-head">
+        <h1 class="title">Tournament<span class="blink">_</span></h1>
+        <p class="tagline" data-tourney-sub>Single elimination · first to 11, win by 2</p>
+      </div>
+      <div class="tourney-body" data-tourney-body></div>
+      <div class="hint">click a name to advance them &nbsp;·&nbsp; esc menu</div>
+    `;
+    document.body.appendChild(el);
+    this.tournamentEl = el;
+    this.tourneyBody = el.querySelector('[data-tourney-body]');
+    this.tourneySub = el.querySelector('[data-tourney-sub]');
+  }
+
+  openTournament() {
+    // Host path: open a lobby room, then show the join code + live roster.
+    this._tourneyMyId = this._tourneyMyId || 'p' + Math.random().toString(36).slice(2, 8);
+    this._tourney = { role: 'host', code: '------', link: '', kind: 'local', roster: [], bracket: null };
+    this.menu.hidden = true;
+    if (this.bar) this.bar.hidden = true;
+    this.tournamentEl.hidden = false;
+    this.tourneySub.textContent = 'Opening lobby…';
+    this.tourneyBody.innerHTML = '<p class="tourney-prompt">Creating lobby…</p>';
+    Promise.resolve(this.onTourneyCreate?.())
+      .then((info) => {
+        if (!info) { this.tourneyBody.innerHTML = '<p class="tourney-prompt">Could not create a lobby.</p>'; return; }
+        Object.assign(this._tourney, { code: info.code, link: info.link, kind: info.kind });
+        this._tourney.roster = [{ id: this._tourneyMyId, name: 'Host', host: true }];
+        this._renderTourneyLobby();
+      })
+      .catch((e) => { this.tourneyBody.innerHTML = `<p class="tourney-prompt">Lobby error: ${esc(e.message)}</p>`; });
+  }
+
+  // Guest path: reached from a shared ?t= link (main calls this on load).
+  openTournamentJoin(code) {
+    this._tourneyMyId = this._tourneyMyId || 'p' + Math.random().toString(36).slice(2, 8);
+    this._tourney = { role: 'guest', code, roster: [], bracket: null, joined: false };
+    this.menu.hidden = true;
+    if (this.bar) this.bar.hidden = true;
+    this.tournamentEl.hidden = false;
+    this._renderTourneyJoin();
+  }
+
+  _renderTourneyJoin() {
+    const t = this._tourney;
+    this.tourneySub.textContent = `Joining tournament ${t.code}`;
+    this.tourneyBody.innerHTML = `
+      <p class="tourney-prompt">Enter your name to join</p>
+      <div class="tourney-join">
+        <input id="tourney-name" maxlength="16" placeholder="your name" autocomplete="off" />
+        <button class="item tourney-join-go"><span class="item__caret">▸</span><span>Join</span></button>
+      </div>
+    `;
+    const input = this.tourneyBody.querySelector('#tourney-name');
+    const go = this.tourneyBody.querySelector('.tourney-join-go');
+    const submit = async () => {
+      const name = (input.value || '').trim().slice(0, 16) || 'Player';
+      t.me = { id: this._tourneyMyId, name };
+      go.disabled = true;
+      try {
+        await this.onTourneyJoin?.(t.code);
+        this.onTourneySend?.('join', t.me);
+        t.joined = true;
+        t.roster = [t.me];
+        this._renderTourneyLobby();
+      } catch (e) { go.disabled = false; this.toast?.(`Join failed: ${e.message}`); }
+    };
+    go.onclick = submit;
+    input.addEventListener('keydown', (e) => { if (e.code === 'Enter') submit(); });
+    setTimeout(() => input.focus(), 0);
+  }
+
+  _renderTourneyLobby() {
+    const t = this._tourney;
+    if (t.bracket) return this._renderBracket();
+    const isHost = t.role === 'host';
+    this.tourneySub.textContent = isHost ? 'Your lobby is open — share the code' : `In lobby ${t.code}`;
+    const rosterHtml = t.roster.length
+      ? t.roster.map((p, i) => `<li class="tourney-roster-item"><span class="roster-idx">${String(i + 1).padStart(2, '0')}</span><span>${esc(p.name)}</span>${p.bot ? '<span class="tourney-tag">bot</span>' : p.host ? '<span class="tourney-tag">host</span>' : ''}</li>`).join('')
+      : '<li class="tourney-roster-item muted">No players yet…</li>';
+    const hostControls = isHost
+      ? `<div class="tourney-lobby-actions">
+           <button class="item tourney-addbot"><span class="item__caret">▸</span><span>Add a bot</span></button>
+           <button class="item tourney-start"><span class="item__caret">▸</span><span>Start (${t.roster.length} player${t.roster.length === 1 ? '' : 's'})</span></button>
+         </div>
+         <p class="tourney-note">Byes fill empty slots automatically — add bots to reach a clean power of two.</p>`
+      : '<p class="tourney-note">Waiting for the host to start…</p>';
+    const hostBanner = isHost
+      ? `<div class="tourney-code-row"><span class="tourney-code-label">ROOM CODE</span><strong class="tourney-code">${esc(t.code)}</strong></div>
+         <div class="tourney-share"><input class="tourney-link" readonly value="${esc(t.link)}" /><button class="tourney-copy">Copy link</button></div>
+         <p class="tourney-note">${t.kind === 'local' ? 'Local mode: open this link in other tabs. Add Supabase keys for cross-device play.' : 'Online: share this link — anyone can join.'}</p>`
+      : '';
+    this.tourneyBody.innerHTML = `
+      ${hostBanner}
+      <p class="tourney-prompt">Players (${t.roster.length})</p>
+      <ul class="tourney-roster">${rosterHtml}</ul>
+      ${hostControls}
+    `;
+    if (isHost) {
+      const copy = this.tourneyBody.querySelector('.tourney-copy');
+      if (copy) copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(t.link); copy.textContent = 'Copied!'; setTimeout(() => (copy.textContent = 'Copy link'), 1400); }
+        catch { this.tourneyBody.querySelector('.tourney-link')?.select(); }
+      };
+      const addbot = this.tourneyBody.querySelector('.tourney-addbot');
+      if (addbot) addbot.onclick = () => this._addBot();
+      const start = this.tourneyBody.querySelector('.tourney-start');
+      if (start) { start.disabled = t.roster.length < 2; start.onclick = () => this._startTourney(); }
+    }
+  }
+
+  _addBot() {
+    const t = this._tourney;
+    const botCount = t.roster.filter((p) => p.bot).length + 1;
+    t.roster.push({ id: 'bot-' + Math.random().toString(36).slice(2, 7), name: `Bot ${botCount}`, bot: true });
+    this.onTourneySend?.('roster', t.roster);
+    this.sfx.ui();
+    this._renderTourneyLobby();
+  }
+
+  _startTourney() {
+    const t = this._tourney;
+    if (t.roster.length < 2) return;
+    t.bracket = createTournament(t.roster.map((p) => ({ id: p.id, name: p.name })), { name: 'Flyball Cup' });
+    this.onTourneySend?.('bracket', t.bracket);
+    this.sfx.ui();
+    this._renderBracket();
+  }
+
+  _renderBracket() {
+    const t = this._tourney;
+    const bracket = t.bracket;
+    if (!bracket) return this._renderTourneyLobby();
+    const isHost = t.role === 'host';
+    this.tourneySub.textContent = isComplete(bracket) ? 'Champion crowned' : 'Single elimination · first to 11, win by 2';
+    const rows = renderBracketLines(bracket).map((l) => {
+      if (l.type === 'round') return `<div class="tourney-round">${l.text}</div>`;
+      const canPick = isHost && l.playable;
+      const name = (side, txt, mark) => `<button class="tourney-name ${mark === '✓' ? 'is-winner' : ''}" data-match="${l.id}" data-win="${side}" ${canPick ? '' : 'disabled'}>${mark === '✓' ? '✓ ' : ''}${esc(txt)}</button>`;
+      const tag = l.score === 'bye' ? '<span class="tourney-tag">bye</span>' : '';
+      return `<div class="tourney-match ${l.playable ? 'playable' : ''}">${name('p1', l.p1, l.w1)}<span class="tourney-vs">vs</span>${name('p2', l.p2, l.w2)}${tag}</div>`;
+    }).join('');
+    let footer = '';
+    if (isComplete(bracket)) footer = `<div class="tourney-champion">🏆 CHAMPION — ${esc(bracket.champion.name)}</div>`;
+    else if (isHost) footer = '<button class="item tourney-sim"><span class="item__caret">▸</span><span>Sim the remaining matches</span></button>';
+    else footer = '<p class="tourney-note">The host is running the bracket…</p>';
+    this.tourneyBody.innerHTML = rows + footer;
+    if (!isHost) return;
+    this.tourneyBody.querySelectorAll('.tourney-name[data-match]').forEach((b) => {
+      if (b.disabled) return;
+      b.onclick = () => {
+        const m = currentMatches(bracket).find((mm) => mm.id === Number(b.dataset.match));
+        if (!m) return;
+        reportResult(bracket, m.id, (b.dataset.win === 'p1' ? m.p1 : m.p2).id);
+        this.sfx.ui();
+        this.onTourneySend?.('bracket', bracket);
+        if (isComplete(bracket)) this.toast(`${bracket.champion.name} wins the cup!`);
+        this._renderBracket();
+      };
+    });
+    const sim = this.tourneyBody.querySelector('.tourney-sim');
+    if (sim) sim.onclick = () => {
+      for (const m of currentMatches(bracket)) {
+        reportResult(bracket, m.id, (Math.random() < 0.5 ? m.p1 : m.p2).id);
+      }
+      this.onTourneySend?.('bracket', bracket);
+      this.sfx.ui();
+      if (isComplete(bracket)) this.toast(`${bracket.champion.name} wins the cup!`);
+      this._renderBracket();
+    };
+  }
+
+  // Inbound lobby messages, forwarded from main's net pipe.
+  _onTourneyMessage(type, data) {
+    const t = this._tourney;
+    if (!t) return;
+    if (type === 'join') {
+      if (t.role !== 'host') return;
+      if (!t.roster.some((p) => p.id === data.id)) {
+        t.roster.push({ id: data.id, name: String(data.name || 'Player').slice(0, 16) });
+        this.onTourneySend?.('roster', t.roster);
+        if (!t.bracket) this._renderTourneyLobby();
+      }
+      return;
+    }
+    if (type === 'roster') {
+      if (Array.isArray(data)) t.roster = data;
+      if (!t.bracket) this._renderTourneyLobby();
+      return;
+    }
+    if (type === 'bracket') {
+      t.bracket = data;
+      this._renderBracket();
+    }
+  }
+
+  _onTourneyPresence(present) {
+    // A late joiner may have missed earlier roster broadcasts; when the host
+    // sees a new peer, re-send the current roster (and bracket if started).
+    if (this._tourney?.role === 'host' && present) {
+      this.onTourneySend?.('roster', this._tourney.roster);
+      if (this._tourney.bracket) this.onTourneySend?.('bracket', this._tourney.bracket);
+    }
+  }
+
+  closeTournament() {
+    this.onTourneyLeave?.();
+    this._tourney = null;
+    if (this.tournamentEl) this.tournamentEl.hidden = true;
+    this.showMenu();
+  }
+
+  // --- Versus (play a friend) -------------------------------------------
+
+  _buildVersus() {
+    const el = document.createElement('div');
+    el.id = 'versus';
+    el.hidden = true;
+    el.innerHTML = `
+      <div class="versus-head">
+        <h1 class="title" data-versus-title>Versus<span class="blink">_</span></h1>
+        <p class="tagline" data-versus-sub>First to 11, win by 2</p>
+      </div>
+
+      <div class="versus-lobby" data-versus-lobby>
+        <p class="versus-label" data-versus-code-label>Room code</p>
+        <div class="versus-code" data-versus-code>------</div>
+        <div class="versus-share" data-versus-share>
+          <input class="versus-link" data-versus-link type="text" readonly />
+          <button class="item versus-copy" data-versus-copy><span class="item__caret">▸</span><span>Copy</span></button>
+        </div>
+        <p class="versus-status blink" data-versus-status>Waiting for opponent…</p>
+        <p class="versus-note" data-versus-note></p>
+      </div>
+
+      <div class="versus-scoreboard" data-versus-scoreboard hidden>
+        <div class="vs-grid">
+          <div class="vs-side">
+            <small class="vs-name">YOU</small>
+            <span class="vs-score" data-vs-you>0</span>
+          </div>
+          <span class="vs-dash">–</span>
+          <div class="vs-side">
+            <small class="vs-name">OPPONENT</small>
+            <span class="vs-score" data-vs-them>0</span>
+          </div>
+        </div>
+        <p class="versus-status" data-vs-serve>YOUR SERVE</p>
+        <p class="versus-note" data-vs-target>First to 11</p>
+      </div>
+
+      <div class="hint">esc leave</div>
+    `;
+    document.body.appendChild(el);
+    this.versusEl = el;
+    this.versusTitle = el.querySelector('[data-versus-title]');
+    this.versusSub = el.querySelector('[data-versus-sub]');
+    this.versusLobby = el.querySelector('[data-versus-lobby]');
+    this.versusCodeLabel = el.querySelector('[data-versus-code-label]');
+    this.versusCode = el.querySelector('[data-versus-code]');
+    this.versusShare = el.querySelector('[data-versus-share]');
+    this.versusLink = el.querySelector('[data-versus-link]');
+    this.versusStatus = el.querySelector('[data-versus-status]');
+    this.versusNote = el.querySelector('[data-versus-note]');
+    this.versusScoreboard = el.querySelector('[data-versus-scoreboard]');
+    this.vsYou = el.querySelector('[data-vs-you]');
+    this.vsThem = el.querySelector('[data-vs-them]');
+    this.vsServe = el.querySelector('[data-vs-serve]');
+    this.vsTarget = el.querySelector('[data-vs-target]');
+
+    const copyBtn = el.querySelector('[data-versus-copy]');
+    copyBtn.onclick = async () => {
+      const link = this.versusLink.value;
+      try {
+        await navigator.clipboard.writeText(link);
+        this.toast('Link copied');
+      } catch {
+        this.versusLink.select();
+        this.toast('Press Ctrl/Cmd+C to copy');
+      }
+    };
+
+    // Win overlay lives at a much higher z-index so it sits above everything.
+    const win = document.createElement('div');
+    win.id = 'versus-win';
+    win.hidden = true;
+    win.innerHTML = `
+      <div class="versus-win-card">
+        <h1 class="title" data-vw-title>You win!<span class="blink">_</span></h1>
+        <p class="versus-win-score" data-vw-score>0 – 0</p>
+        <button class="item versus-win-leave" data-vw-leave><span class="item__caret">▸</span><span>Back to menu</span></button>
+      </div>
+    `;
+    document.body.appendChild(win);
+    this.versusWinEl = win;
+    this.vwTitle = win.querySelector('[data-vw-title]');
+    this.vwScore = win.querySelector('[data-vw-score]');
+    win.querySelector('[data-vw-leave]').onclick = () => {
+      this.onVersusLeave?.();
+      this.closeVersus();
+    };
+  }
+
+  openVersusLobby({ role, code, link, kind } = {}) {
+    this._versusRole = role || 'host';
+    this.menu.hidden = true;
+    if (this.bar) this.bar.hidden = true;
+    if (this.tournamentEl) this.tournamentEl.hidden = true;
+    this.versusWinEl.hidden = true;
+    this.versusEl.hidden = false;
+
+    // Reset to the lobby (waiting) view.
+    this.versusLobby.hidden = false;
+    this.versusScoreboard.hidden = true;
+
+    const isGuest = role === 'guest';
+    this.versusTitle.innerHTML = isGuest
+      ? `Joining<span class="blink">_</span>`
+      : `Versus<span class="blink">_</span>`;
+
+    this.versusCode.textContent = code ?? '------';
+    this.versusLink.value = link ?? window.location.href;
+
+    // Guests are just connecting — de-emphasise the code/copy affordances.
+    this.versusCodeLabel.style.display = isGuest ? 'none' : '';
+    this.versusCode.style.display = isGuest ? 'none' : '';
+    this.versusShare.style.display = isGuest ? 'none' : '';
+
+    this.versusStatus.textContent = isGuest
+      ? `Joining ${code ?? ''}…`.trim()
+      : 'Waiting for opponent…';
+
+    this.versusNote.textContent = kind === 'local'
+      ? 'Local mode: open this link in another tab; add Supabase keys for cross-device play.'
+      : 'Online: send this link to anyone.';
+
+    this.sfx?.ui?.();
+  }
+
+  setVersusOpponent(present) {
+    if (!this.versusEl || this.versusEl.hidden) return;
+    if (present) {
+      this.versusLobby.hidden = true;
+      this.versusScoreboard.hidden = false;
+      this.toast('Opponent connected');
+    } else {
+      this.versusScoreboard.hidden = true;
+      this.versusLobby.hidden = false;
+      this.versusStatus.textContent = 'Waiting for opponent…';
+    }
+  }
+
+  updateVersusScore(snapshot, myRole) {
+    if (!snapshot) return;
+    if (myRole) this._versusRole = myRole;
+    const role = myRole || this._versusRole;
+    const you = role === 'guest' ? snapshot.scoreGuest : snapshot.scoreHost;
+    const them = role === 'guest' ? snapshot.scoreHost : snapshot.scoreGuest;
+    if (this.vsYou) this.vsYou.textContent = you ?? 0;
+    if (this.vsThem) this.vsThem.textContent = them ?? 0;
+    const target = snapshot.target ?? 11;
+    if (this.vsTarget) this.vsTarget.textContent = `First to ${target}`;
+    if (this.vsServe) {
+      this.vsServe.textContent = snapshot.server === role ? 'YOUR SERVE' : 'THEIR SERVE';
+    }
+  }
+
+  showVersusWin(didWin, snapshot) {
+    const role = this._versusRole;
+    let scoreLine = '';
+    if (snapshot) {
+      const you = role === 'guest' ? snapshot.scoreGuest : snapshot.scoreHost;
+      const them = role === 'guest' ? snapshot.scoreHost : snapshot.scoreGuest;
+      scoreLine = `${you ?? 0} – ${them ?? 0}`;
+    }
+    this.vwTitle.innerHTML = didWin
+      ? `You win!<span class="blink">_</span>`
+      : `You lost.<span class="blink">_</span>`;
+    this.vwScore.textContent = scoreLine;
+    this.versusWinEl.hidden = false;
+    this.sfx?.ui?.(didWin);
+  }
+
+  closeVersus() {
+    if (this.versusEl) this.versusEl.hidden = true;
+    if (this.versusWinEl) this.versusWinEl.hidden = true;
+    if (this.versusScoreboard) this.versusScoreboard.hidden = true;
+    if (this.versusLobby) this.versusLobby.hidden = false;
+    this.showMenu();
+  }
+
+  // --- Per-frame sync ---------------------------------------------------
+
+  update() {
+    if (this.game.revision === this._lastRevision) return;
+    this._lastRevision = this.game.revision;
+
+    const { game, machine } = this;
+    this.bar.querySelector('[data-bar-mode]').textContent = machine.mode.name;
+    this.bar.querySelector('[data-bar-stats]').textContent = machine.isTargetMode
+      ? `${game.targetsHit} targets · ${game.returns} on table`
+      : `streak ${game.streak} · ${game.returns}/${game.hits + game.misses} on table`;
+    this.bar.querySelector('[data-toggle-label]').textContent = machine.enabled
+      ? 'Pause'
+      : 'Arm';
+  }
 }

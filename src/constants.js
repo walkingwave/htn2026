@@ -18,7 +18,7 @@ export const NET = {
 };
 
 export const BALL = {
-  RADIUS: 0.02, // 40mm regulation ball -> 20mm radius
+  RADIUS: 0.02,
   MASS: 0.0027, // kg
   RESTITUTION_TABLE: 0.87,
   RESTITUTION_PADDLE: 0.78,
@@ -33,10 +33,7 @@ export const BALL = {
 };
 
 export const PADDLE = {
-  // Regulation blade ~150mm wide x 170mm tall. The collision disc uses the
-  // blade half-width (~78mm) so the hit area matches the rendered blade, and
-  // the width:ball-diameter ratio lands at the real ~3.75:1.
-  HEAD_RADIUS: 0.08,
+  HEAD_RADIUS: 0.085,
   HEAD_THICKNESS: 0.015,
   HANDLE_LENGTH: 0.1,
   HANDLE_RADIUS: 0.016,

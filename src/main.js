@@ -1,179 +1,407 @@
 import * as THREE from 'three';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import './styles.css';
-import { buildEnvironment, setEnvironmentPalette } from './environment.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
 import { createTable } from './table.js';
-import { createXRButtons } from './xrButtons.js';
+import { XRManager } from './xr.js';
+import { UI } from './ui.js';
+import { Settings } from './settings.js';
+import { Sfx } from './audio.js';
+import { VRMenu } from './vrMenu.js';
 import { Paddle } from './paddle.js';
 import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
-import { BallMachine } from './ballMachine.js';
-import { PLAY_AREA, TABLE } from './constants.js';
-import { DIFFICULTIES, RANKED_LIVES, TrainerSession } from './session.js';
-import { createRoom, makeRoomCode, roomLinkFor, roomFromUrl, clearRoomFromUrl, isRealtimeAvailable } from './net.js';
+import { BallMachine, MODES } from './ballMachine.js';
+import { Game } from './game.js';
+import { Scoreboard } from './hud.js';
+import { TargetZone } from './target.js';
+import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
+import {
+  createRoom,
+  makeRoomCode,
+  roomLinkFor,
+  roomFromUrl,
+  clearRoomFromUrl,
+  tourneyLinkFor,
+  tourneyFromUrl,
+  clearTourneyFromUrl,
+  isRealtimeAvailable,
+} from './net.js';
 import { VersusMatch, VERSUS_TARGET } from './versus.js';
-import { createTrainerUI } from './ui.js';
-import { startHandTracking } from './handTracking.js';
 
-const APP_ROUTES = new Set(['/', '/training', '/live-game', '/tournament']);
-const currentPath = APP_ROUTES.has(window.location.pathname) ? window.location.pathname : '/';
+const BALL_POOL_SIZE = 10;
+const DEAD_BALL_LINGER = 1.5; // seconds a dead ball stays visible before recycling
 
-// Vite can re-evaluate this module during HMR. Remove prior app generations
-// so old canvases, HUDs, and paddles cannot remain layered over the new scene.
-if (typeof window !== 'undefined') {
-  window.__flyballRenderers?.forEach((oldRenderer) => oldRenderer.setAnimationLoop(null));
-  window.__flyballRenderers = [];
-  document.querySelectorAll('canvas, .trainer-ui, [data-flyball-xr]').forEach((node) => node.remove());
-}
-
-const BALL_POOL_SIZE = 8;
+// --- Renderer / scene -------------------------------------------------------
+// alpha:true so the framebuffer is transparent in AR — the Quest compositor
+// shows camera passthrough wherever nothing is drawn.
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local-floor'); renderer.domElement.dataset.flyballRenderer = 'true'; document.body.appendChild(renderer.domElement);
-window.__flyballRenderers ??= [];
-window.__flyballRenderers.push(renderer);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
 const scene = new THREE.Scene();
-const VR_BACKGROUND = new THREE.Color(0x101018);
-const LANDSCAPES = { classic: 0x101018, sunset: 0x3b1f2b, neon: 0x071d2c, disco: 0x0b0716 };
-let landscapeBackground = VR_BACKGROUND;
-scene.background = landscapeBackground;
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
-const playerRig = new THREE.Group(); playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z); playerRig.add(camera); scene.add(playerRig); camera.position.set(0, 1.6, 0);
-scene.add(new THREE.HemisphereLight(0xbbccff, 0x334422, 0.9)); const keyLight = new THREE.DirectionalLight(0xfff1d0, 1.5); keyLight.position.set(3, 6, 2); scene.add(keyLight);
-const table = createTable(); scene.add(table);
-const landscapeEnvironment = buildEnvironment(VR_BACKGROUND.getHex());
-scene.add(landscapeEnvironment.group);
-landscapeEnvironment.gear && scene.add(landscapeEnvironment.gear);
+const VR_BACKGROUND = new THREE.Color(0x0a0a0b);
+scene.background = VR_BACKGROUND;
+
+// A baked room probe gives every material sensible reflections, which is most
+// of the difference between "untextured boxes" and "objects in a space".
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(
+  70,
+  window.innerWidth / window.innerHeight,
+  0.01,
+  60
+);
+
+// Player rig: move this group to reposition the player in the world.
+// In XR the camera is controlled by the headset relative to this rig.
+const playerRig = new THREE.Group();
+playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
+playerRig.add(camera);
+scene.add(playerRig);
+
+// Desktop fallback camera position (headset overrides this in XR)
+camera.position.set(0, 1.62, 0);
+
+// --- Lighting ---------------------------------------------------------------
+scene.add(new THREE.HemisphereLight(0xc8d6f0, 0x1d1712, 0.32));
+
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
+keyLight.position.set(2.5, 5, 1.5);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(1024, 1024);
+keyLight.shadow.camera.near = 0.5;
+keyLight.shadow.camera.far = 14;
+keyLight.shadow.camera.left = -3;
+keyLight.shadow.camera.right = 3;
+keyLight.shadow.camera.top = 4;
+keyLight.shadow.camera.bottom = -4;
+keyLight.shadow.bias = -0.0012;
+scene.add(keyLight);
+scene.add(keyLight.target);
+
+// Overhead venue light, the sort that hangs above a match table. Kept soft
+// and wide — a tight, bright cone blows the playing surface out to white and
+// destroys the depth cues you need to read the ball against it.
+const venueLight = new THREE.SpotLight(0xffffff, 9, 11, Math.PI / 3.2, 0.9, 1.4);
+venueLight.position.set(0, 3.6, 0);
+venueLight.target.position.set(0, TABLE.HEIGHT, 0);
+scene.add(venueLight);
+scene.add(venueLight.target);
+
+// --- World ------------------------------------------------------------------
+const table = createTable();
+scene.add(table);
 const vrEnvironment = table.getObjectByName('vr-environment');
-function applyLandscape(name = 'classic') {
-  const palette = LANDSCAPES[name] ?? LANDSCAPES.classic;
-  landscapeBackground = new THREE.Color(palette);
-  if (!renderer.xr.isPresenting) scene.background = landscapeBackground;
-  setEnvironmentPalette(name, landscapeEnvironment);
+
+const settings = new Settings();
+const sfx = new Sfx(settings);
+
+const balls = Array.from({ length: BALL_POOL_SIZE }, () => new Ball());
+for (const b of balls) scene.add(b.mesh);
+
+const machine = new BallMachine(balls, settings);
+machine.enabled = false; // stays idle behind the start menu until a mode is picked
+scene.add(machine.mesh);
+
+const game = new Game();
+const scoreboard = new Scoreboard(game, machine);
+scene.add(scoreboard.mesh);
+
+// Ring showing where the next ball is aimed — the trainer's single most
+// useful cue, since it tells you where to move before the ball arrives.
+const targetRing = new THREE.Mesh(
+  new THREE.RingGeometry(BALL.RADIUS * 3, BALL.RADIUS * 4.2, 32),
+  new THREE.MeshBasicMaterial({
+    color: COLORS.ACCENT,
+    transparent: true,
+    opacity: 0.55,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+);
+targetRing.rotation.x = -Math.PI / 2;
+scene.add(targetRing);
+
+// Target-practice pad on the far half
+const targetZone = new TargetZone();
+scene.add(targetZone.mesh);
+
+// AR: transparent background, no virtual floor, dimmer fill so the real room
+// carries the lighting. VR: full venue.
+function applyMode(mode) {
+  const isAR = mode === 'immersive-ar';
+  scene.background = isAR ? null : VR_BACKGROUND;
+  if (vrEnvironment) vrEnvironment.visible = !isAR;
+  venueLight.visible = !isAR;
+  keyLight.intensity = isAR ? 0.9 : 1.5;
 }
-function applyMode(mode) { const isAR = mode === 'immersive-ar'; scene.background = isAR ? null : landscapeBackground; if (vrEnvironment) vrEnvironment.visible = !isAR; }
-createXRButtons(renderer, { onModeChange: applyMode }); renderer.xr.addEventListener('sessionend', () => applyMode(null));
 
-const targetMarker = new THREE.Mesh(new THREE.CircleGeometry(1, 32), new THREE.MeshBasicMaterial({ color: 0xffc857, transparent: true, opacity: .72, side: THREE.DoubleSide }));
-targetMarker.rotation.x = -Math.PI / 2; targetMarker.visible = false; scene.add(targetMarker);
-const targetRing = new THREE.Mesh(new THREE.RingGeometry(.9, 1, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: .95 }));
-targetRing.rotation.x = -Math.PI / 2; targetRing.visible = false; scene.add(targetRing);
+const xr = new XRManager(renderer);
+xr.onModeChange = applyMode;
 
-function updateTargetMarker(move) {
-  const visible = Boolean(move);
-  targetMarker.visible = visible;
-  targetRing.visible = visible;
-  if (!visible) return;
-  targetMarker.position.set(move.x, TABLE.HEIGHT + .006, move.z);
-  targetRing.position.set(move.x, TABLE.HEIGHT + .01, move.z);
-  targetMarker.scale.setScalar(move.radius);
-  targetRing.scale.setScalar(move.radius);
+// Background choices offered by the setup wizard. Mutating VR_BACKGROUND keeps
+// applyMode() (which reuses it) in sync.
+const BACKGROUNDS = { arena: 0x0a0a0b, sunset: 0x2a1420, neon: 0x06131f, void: 0x000000 };
+function applyBackground(name) {
+  VR_BACKGROUND.setHex(BACKGROUNDS[name] ?? BACKGROUNDS.arena);
+  if (!renderer.xr.isPresenting) scene.background = VR_BACKGROUND;
 }
 
-function buildHands() {
-  const group = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: 0xe0a078, roughness: .82 });
-  const sleeve = new THREE.MeshStandardMaterial({ color: 0xef5b45, roughness: .72 });
-  for (const side of [-1, 1]) {
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(.022, .032, .22, 12), sleeve);
-    arm.rotation.z = side * .35;
-    arm.position.set(side * .14, -.13, .045);
-    group.add(arm);
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(.034, 16, 12), skin);
-    hand.scale.set(.9, 1.15, .75);
-    hand.position.set(side * .1, -.005, .03);
-    group.add(hand);
+// 3-2-1 gate: the machine stays idle until the countdown finishes.
+let launchCountdown = 0;
+function startLaunchCountdown() {
+  launchCountdown = 3;
+  ui.showCountdown(3);
+}
+
+const ui = new UI({
+  xr,
+  machine,
+  game,
+  settings,
+  sfx,
+  // `choice` = { mode, input, background, xrMode } from the setup wizard.
+  onStart: (choice = {}) => {
+    const { mode = 'bot', input = 'mouse', background = 'arena' } = choice;
+    applyBackground(background);
+    // Map the chosen endpoint onto a ball-machine mode: Drills -> target
+    // practice, everything else -> a live rally against the roaming machine.
+    machine.modeIndex = mode === 'drills'
+      ? MODES.findIndex((m) => m.type === 'target')
+      : MODES.findIndex((m) => m.type === 'infinite');
+    // Endpoints that still need the networking/CV ports fall back to the bot,
+    // with a clear note so it isn't a silent surprise.
+    if (mode === 'friend') ui.toast('Online play is in beta — playing the bot');
+    else if (mode === 'tournament') ui.toast('Tournaments are in beta — playing the bot');
+    else if (input === 'paddle') ui.toast('Paddle cam is coming — using the mouse');
+    else if (input === 'phone') ui.toast('Phone control is coming — using the mouse');
+    game.reset();
+    game.revision++;
+    // 3-2-1 before the machine sends the first ball.
+    machine.enabled = false;
+    startLaunchCountdown();
+  },
+  onExit: () => {
+    machine.enabled = false;
+    launchCountdown = 0;
+    ui.hideCountdown();
+  },
+  // Online versus lobby hooks. The lobby UI (built separately) calls these to
+  // create/join/leave a networked 1v1; the game logic lives in enterVersus /
+  // leaveVersus below. Both are hoisted function declarations, so referencing
+  // them here before their definition is safe.
+  onVersusCreate: async () => {
+    const code = makeRoomCode();
+    await enterVersus('host', code);
+    return {
+      role: 'host',
+      code,
+      link: roomLinkFor(code),
+      kind: isRealtimeAvailable() ? 'supabase' : 'local',
+    };
+  },
+  onVersusJoin: async (code) => {
+    await enterVersus('guest', code);
+  },
+  onVersusLeave: () => {
+    leaveVersus();
+  },
+  // Tournament lobby transport. main is a dumb pipe: it opens/joins a room and
+  // forwards every message + presence event to the UI, which owns the roster
+  // and bracket. Channel is namespaced ('T'+code) so it can't collide with a
+  // 1v1 versus room of the same code.
+  onTourneyCreate: async () => {
+    const code = makeRoomCode();
+    tourneyRoom = createRoom({ code: `T${code}`, role: 'host' });
+    wireTourneyRoom(tourneyRoom);
+    await tourneyRoom.connect();
+    return { code, link: tourneyLinkFor(code), kind: isRealtimeAvailable() ? 'supabase' : 'local' };
+  },
+  onTourneyJoin: async (code) => {
+    tourneyRoom = createRoom({ code: `T${code}`, role: `guest-${Math.random().toString(36).slice(2, 8)}` });
+    wireTourneyRoom(tourneyRoom);
+    await tourneyRoom.connect();
+    return { code };
+  },
+  onTourneySend: (type, data) => tourneyRoom?.send(type, data),
+  onTourneyLeave: () => {
+    tourneyRoom?.close();
+    tourneyRoom = null;
+    clearTourneyFromUrl();
+  },
+});
+
+xr.detectSupport().then((support) => ui.applyXRSupport(support));
+
+// --- Physics ----------------------------------------------------------------
+const physics = new PhysicsWorld();
+physics.onBounce = (ball, event) => {
+  // Online versus takes over scoring entirely. The host resolves floor
+  // bounces into points (handleVersusHostBounce); the guest renders only
+  // host-authoritative state, so it ignores its local physics contacts.
+  if (netMode === 'host') {
+    handleVersusHostBounce(ball, event);
+    return;
   }
-  return group;
-}
-function buildFlyOpponent() {
-  const group = new THREE.Group(); const body = new THREE.Mesh(new THREE.SphereGeometry(.13, 16, 10), new THREE.MeshStandardMaterial({ color: 0x27333c })); body.scale.set(1.5, .8, 1); group.add(body);
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xef5b45 }); for (const side of [-1, 1]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(.045, 10, 8), eyeMat); eye.position.set(side * .08, .04, .11); group.add(eye); }
-  const wingMat = new THREE.MeshBasicMaterial({ color: 0xcfe9ef, transparent: true, opacity: .35, side: THREE.DoubleSide }); for (const side of [-1, 1]) { const wing = new THREE.Mesh(new THREE.PlaneGeometry(.28, .16), wingMat); wing.position.set(side * .18, .08, 0); wing.rotation.z = side * .35; group.add(wing); }
-  group.position.set(0, 1.55, -1.75); return group;
-}
-const flyOpponent = buildFlyOpponent(); scene.add(flyOpponent);
-const flyAnchor = new THREE.Group();
-flyAnchor.position.set(0, TABLE.HEIGHT + .18, -.965);
-scene.add(flyAnchor);
-const flyPaddle = new Paddle({ owner: 'fly', vertical: true, color: 0x6b62c7 });
-flyPaddle.attachTo(flyAnchor);
+  if (netMode === 'guest') return;
 
-const balls = Array.from({ length: BALL_POOL_SIZE }, () => new Ball()); balls.forEach((ball) => scene.add(ball.mesh));
-const machine = new BallMachine(balls); scene.add(machine.mesh); const session = new TrainerSession(); const physics = new PhysicsWorld();
-let training = false; let paused = false; let cvStop = null; let cvActive = false;
-// Serving is gated behind a visible 3-2-1 countdown at the start of a run and
-// after every dropped ball. While serveCountdown > 0 the ball machine holds.
-let serveCountdown = 0;
-const SERVE_COUNTDOWN_SECONDS = 3;
-function beginServeCountdown(seconds = SERVE_COUNTDOWN_SECONDS) {
-  serveCountdown = seconds;
-  ui.showCountdown(Math.ceil(seconds));
-}
-const paddles = []; const controllerModelFactory = new XRControllerModelFactory();
-for (const index of [0, 1]) { const grip = renderer.xr.getControllerGrip(index); grip.add(controllerModelFactory.createControllerModel(grip)); playerRig.add(grip); const paddle = new Paddle(); paddle.attachTo(grip); paddles.push(paddle); const controller = renderer.xr.getController(index); controller.addEventListener('selectstart', () => { machine.enabled = !machine.enabled; }); playerRig.add(controller); }
-const cvRig = new THREE.Group();
-cvRig.visible = true;
-const cvHands = buildHands();
-cvHands.scale.setScalar(.72);
-cvRig.add(cvHands);
-playerRig.add(cvRig);
-const cvPaddle = new Paddle({ owner: 'player', vertical: true });
-cvPaddle.attachTo(cvRig);
-paddles.push(cvPaddle);
-paddles.push(flyPaddle);
+  game.onContact(ball, event);
+  sfx.contact(event, ball.velocity.length());
 
-// Opponent paddle for online versus. Driven entirely by network messages
-// (blade center/normal/velocity), so it skips the local input update path.
+  if (event === 'paddle') {
+    pulse(ball);
+    return;
+  }
+
+  // A return that lands inside the pad scores and moves the target on.
+  if (
+    event === 'table' &&
+    machine.isTargetMode &&
+    ball.touchedByPaddle &&
+    !ball.scoredTarget &&
+    ball.mesh.position.z < 0 &&
+    targetZone.contains(ball.mesh.position.x, ball.mesh.position.z)
+  ) {
+    ball.scoredTarget = true;
+    targetZone.registerHit();
+    game.onTargetHit();
+    sfx.targetHit();
+  }
+
+  // Floor contact means the rally is over for this ball; start a countdown
+  // that returns it to the pool. Timed in simulation seconds rather than via
+  // setTimeout so it can't drift when the browser throttles the frame loop.
+  if (event === 'floor' && ball.retireIn === null) {
+    ball.retireIn = DEAD_BALL_LINGER;
+  }
+};
+
+// --- Controllers + paddles --------------------------------------------------
+const controllerModelFactory = new XRControllerModelFactory();
+const paddles = [];
+const controllers = [];
+const inputSources = [];
+
+// Ray drawn from each controller, shown only while the VR menu is up
+const rayGeometry = new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(0, 0, 0),
+  new THREE.Vector3(0, 0, -1),
+]);
+
+const controllerModels = [];
+
+for (const i of [0, 1]) {
+  // Grip space is the controller's physical pose, so a mesh parented here
+  // inherits the tracked position and orientation every frame — the paddle
+  // is the controller, one to one, with no smoothing or lag of our own.
+  const grip = renderer.xr.getControllerGrip(i);
+  const model = controllerModelFactory.createControllerModel(grip);
+  grip.add(model);
+  controllerModels.push(model);
+  playerRig.add(grip);
+
+  const paddle = new Paddle();
+  paddle.attachTo(grip);
+  paddles.push(paddle);
+
+  const controller = renderer.xr.getController(i);
+  controller.addEventListener('connected', (e) => {
+    inputSources[i] = e.data;
+    applyHandedness();
+  });
+  controller.addEventListener('disconnected', () => {
+    inputSources[i] = null;
+    applyHandedness();
+  });
+
+  // Trigger: picks menu entries while the menu is up, otherwise arms or
+  // pauses the machine.
+  controller.addEventListener('selectstart', () => {
+    if (vrMenu.open) {
+      vrMenu.activate();
+    } else {
+      machine.enabled = !machine.enabled;
+      game.revision++;
+    }
+  });
+  controller.addEventListener('squeezestart', () => {
+    if (vrMenu.open) return;
+    machine.nextDrill();
+    game.revision++;
+  });
+
+  const ray = new THREE.Line(
+    rayGeometry,
+    new THREE.LineBasicMaterial({ color: COLORS.ACCENT, transparent: true, opacity: 0.6 })
+  );
+  ray.scale.z = 3;
+  ray.visible = false;
+  controller.add(ray);
+  controller.userData.ray = ray;
+
+  controllers.push(controller);
+  playerRig.add(controller);
+}
+
+// --- Desktop mouse paddle ---------------------------------------------------
+// XR gives a paddle only when a headset is attached to a grip. On desktop the
+// player drives a vertical paddle over the near half of the table with the
+// mouse. The rig is parented under playerRig (world Z = PLAYER_Z), so pointer
+// coordinates map to a small volume in front of the player, above the table.
+// The pose is written straight from the pointer event with no smoothing, so
+// the blade stays under the cursor; Paddle.update() then derives swing
+// velocity/spin from the rig's motion between frames, exactly like a grip.
+const mousePaddleRig = new THREE.Group();
+playerRig.add(mousePaddleRig);
+const mousePaddle = new Paddle({ vertical: true });
+mousePaddle.attachTo(mousePaddleRig);
+paddles.push(mousePaddle);
+
+// ---------------------------------------------------------------------------
+// Online versus (1v1). The host is authoritative for the ball and scoring;
+// each side drives its own paddle locally and syncs it to the other as blade
+// center/normal/velocity. When netMode is null everything below is dormant and
+// the single-player trainer (bot/drills/countdown/mouse paddle) is unchanged.
+// ---------------------------------------------------------------------------
+let netMode = null; // null | 'host' | 'guest'
+let room = null; // active net room handle
+// Local bot match (tournament): reuses the host loop with no network room.
+// When vsBot is true, runVersusHost drives an AI opponent paddle and the
+// match winner is resolved through endBotMatch instead of the win overlay.
+let vsBot = false;
+let botResultResolve = null; // resolve() of the current startBotMatch promise
+let botOpponentName = '';
+const match = new VersusMatch();
+let versusBall = null; // current rally ball (host authoritative)
+let versusServeTimer = 0; // countdown before the next serve (host)
+let netSendAccum = 0; // throttle for outbound network state
+let guestBallActive = false;
+const NET_TICK = 1 / 30; // ~30 Hz network send rate
+const VERSUS_SERVE_SECONDS = 3;
+const guestBallTarget = new THREE.Vector3();
+const _versusQuat = new THREE.Quaternion();
+const _versusFwd = new THREE.Vector3(0, 0, 1);
+
+// Opponent paddle: driven entirely by network packets, so it skips the local
+// input update path (see the tick paddle loop) and is flagged `networked`.
 const remoteAnchor = new THREE.Group();
 scene.add(remoteAnchor);
-const remotePaddle = new Paddle({ owner: 'remote', vertical: true, color: 0x6b62c7 });
+const remotePaddle = new Paddle({ vertical: true });
 remotePaddle.attachTo(remoteAnchor);
 remotePaddle.enabled = false;
 remotePaddle.networked = true;
 paddles.push(remotePaddle);
-
-function setPointerPose(clientX, clientY) {
-  if (cvActive || renderer.xr.isPresenting) return;
-  const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
-  const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
-  // Update the rig directly from the pointer event: no tween, no render-frame
-  // queue, so the paddle stays under the cursor even while the UI is open.
-  cvRig.position.set((x - .5) * 1.25, .95 + (.5 - y) * .7, -.72);
-  cvRig.rotation.set(0, 0, -(x - .5) * .6);
-}
-window.addEventListener('pointermove', (event) => setPointerPose(event.clientX, event.clientY), { passive: true });
-window.addEventListener('pointerrawupdate', (event) => setPointerPose(event.clientX, event.clientY), { passive: true });
-window.addEventListener('pointerdown', (event) => setPointerPose(event.clientX, event.clientY), { passive: true });
-
-const ui = createTrainerUI({
-  onStart(difficulty, drill, mode, landscape) { const profile = DIFFICULTIES[difficulty]; applyLandscape(landscape ?? 'classic'); session.reset(difficulty, drill); session.mode = mode ?? session.mode ?? 'casual'; session.landscape = landscape; session.start(); training = true; paused = false; document.body.classList.add('paddle-pointer-mode'); table.rotation.y = 0; flyPaddle.enabled = drill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; ui.setLives(session.mode === 'ranked' ? RANKED_LIVES : 0); beginServeCountdown(); ui.update(session.summary(), 'TRAINING'); },
-  onLandscapeChange(name) { applyLandscape(name ?? 'classic'); },
-  onDrillChange(nextDrill) { const difficulty = ui.getDifficulty(); const profile = DIFFICULTIES[difficulty]; balls.forEach((ball) => ball.deactivate()); session.reset(difficulty, nextDrill); if (training) { session.start(); machine.interval = profile.interval; machine.speed = profile.speed; machine.enabled = true; machine._timer = .5; beginServeCountdown(); } flyPaddle.enabled = training && nextDrill === 'fly'; updateTargetMarker(session.getCurrentTargetMove()); ui.setLives(training && session.mode === 'ranked' ? RANKED_LIVES : 0); ui.update(session.summary(), training ? 'TRAINING' : 'READY'); },
-  onPause() { paused = !paused; machine.enabled = training && !paused; ui.feedback(paused ? 'Training paused.' : 'Rally live.', paused ? '' : 'success'); },
-  onReset() { training = false; paused = false; serveCountdown = 0; ui.hideCountdown(); document.body.classList.remove('paddle-pointer-mode'); machine.enabled = false; flyPaddle.enabled = false; updateTargetMarker(null); balls.forEach((ball) => ball.deactivate()); session.reset(ui.getDifficulty(), ui.getDrill()); ui.setLives(0); ui.update(session.summary(), 'READY'); },
-  onMachineToggle() { machine.enabled = !machine.enabled; return machine.enabled; },
-  onEnableCV() { if (cvStop) { cvStop(); cvStop = null; cvActive = false; cvRig.visible = true; return; } cvActive = true; startHandTracking((pose) => { cvRig.visible = true; cvRig.position.set((pose.x - .5) * 1.25, .95 + (.5 - pose.y) * .7, -.72); cvRig.rotation.set(0, 0, -pose.angle); }, (message) => ui.feedback(message, 'success')).then((stop) => { cvStop = stop; }).catch((error) => { cvActive = false; ui.feedback(error.message, 'error'); }); },
-  async onVersusCreate() { const code = makeRoomCode(); await enterVersus('host', code); return { code, link: roomLinkFor(code), kind: isRealtimeAvailable() ? 'supabase' : 'local' }; },
-  onVersusLeave() { leaveVersus(); },
-});
-
-// ---------------------------------------------------------------------------
-// Online versus (1v1). Host is authoritative for the ball + scoring; both sides
-// control their own paddle locally and sync it as blade center/normal/velocity.
-// ---------------------------------------------------------------------------
-let netMode = null;        // null | 'host' | 'guest'
-let room = null;           // active net room handle
-const match = new VersusMatch();
-let versusBall = null;     // current rally ball (host authoritative)
-let versusServeTimer = 0;  // countdown before the next serve (host)
-let netSendAccum = 0;      // throttle for outbound network state
-let guestBallActive = false;
-const NET_TICK = 1 / 30;
-const _q = new THREE.Quaternion();
-const _fwd = new THREE.Vector3(0, 0, 1);
-const guestBallTarget = new THREE.Vector3();
 
 function bladePacket(paddle) {
   return {
@@ -186,58 +414,93 @@ function bladePacket(paddle) {
 function applyRemotePaddle(pkt) {
   if (!pkt) return;
   remotePaddle.enabled = true;
+  // The networked paddle never runs Paddle.update(), so mark it as tracking
+  // here — otherwise the swept paddle test in physics skips it and the
+  // opponent could never return a ball.
+  remotePaddle.tracking = true;
   remotePaddle.bladeCenter.set(pkt.c[0], pkt.c[1], pkt.c[2]);
   remotePaddle.bladeNormal.set(pkt.n[0], pkt.n[1], pkt.n[2]).normalize();
   remotePaddle.velocity.set(pkt.v[0], pkt.v[1], pkt.v[2]);
   remotePaddle.mesh.position.copy(remotePaddle.bladeCenter);
-  remotePaddle.mesh.quaternion.copy(_q.setFromUnitVectors(_fwd, remotePaddle.bladeNormal));
+  remotePaddle.mesh.quaternion.copy(
+    _versusQuat.setFromUnitVectors(_versusFwd, remotePaddle.bladeNormal)
+  );
+}
+
+function startVersusServe() {
+  versusServeTimer = VERSUS_SERVE_SECONDS;
+  ui.showCountdown(VERSUS_SERVE_SECONDS);
 }
 
 function serveVersusBall() {
   const ball = balls.find((b) => !b.active);
   if (!ball) return;
-  const dir = match.server === 'host' ? -1 : 1; // host serves toward -Z, guest toward +Z
+  // Server alternates ends: host serves toward -Z (the guest), guest toward +Z.
+  const dir = match.server === 'host' ? -1 : 1;
   ball.serve(
     new THREE.Vector3((Math.random() * 2 - 1) * 0.3, TABLE.HEIGHT + 0.35, -dir * 0.8),
-    new THREE.Vector3((Math.random() * 2 - 1) * 0.6, 1.4, dir * 3.4),
+    new THREE.Vector3((Math.random() * 2 - 1) * 0.6, 1.4, dir * 3.4)
   );
+  ball.floorCounted = false; // ad-hoc flag; Ball.serve() doesn't reset it
   versusBall = ball;
   broadcastHostState();
 }
 
 function broadcastHostState() {
   if (!room) return;
-  const ball = versusBall && versusBall.active
-    ? { active: true, p: [versusBall.mesh.position.x, versusBall.mesh.position.y, versusBall.mesh.position.z] }
-    : { active: false };
-  room.send('state', { match: match.snapshot(), ball, paddle: bladePacket(cvPaddle) });
+  const ball =
+    versusBall && versusBall.active
+      ? {
+          active: true,
+          p: [versusBall.mesh.position.x, versusBall.mesh.position.y, versusBall.mesh.position.z],
+        }
+      : { active: false, p: [0, 0, 0] };
+  room.send('state', { match: match.snapshot(), ball, paddle: bladePacket(mousePaddle) });
 }
 
 function handleVersusHostBounce(ball, event) {
   if (event !== 'floor' || ball !== versusBall || ball.floorCounted) return;
   ball.floorCounted = true;
-  // Landing on the host's half (z>0) means the guest scored, and vice versa.
+  // A ball landing on the host's half (z>0) means the host failed to return
+  // it, so the guest scores — and vice versa.
   const scorer = ball.mesh.position.z > 0 ? 'guest' : 'host';
   ball.deactivate();
   versusBall = null;
   const winner = match.scorePoint(scorer);
   ui.updateVersusScore(match.snapshot(), 'host');
   broadcastHostState();
-  if (winner) ui.showVersusWin(winner === 'host', match.snapshot());
-  else { versusServeTimer = SERVE_COUNTDOWN_SECONDS; ui.showCountdown(SERVE_COUNTDOWN_SECONDS); }
+  if (winner) {
+    if (vsBot) endBotMatch(winner);
+    else ui.showVersusWin(winner === 'host', match.snapshot());
+  } else startVersusServe();
 }
 
 function runVersusHost(dt) {
-  if (match.winner) return;
-  if (versusServeTimer > 0) {
+  if (!match.winner && versusServeTimer > 0) {
     const prev = Math.ceil(versusServeTimer);
     versusServeTimer -= dt;
-    if (versusServeTimer <= 0) { versusServeTimer = 0; ui.hideCountdown(); serveVersusBall(); }
-    else if (Math.ceil(versusServeTimer) !== prev) ui.showCountdown(Math.ceil(versusServeTimer));
+    if (versusServeTimer <= 0) {
+      versusServeTimer = 0;
+      ui.hideCountdown();
+      serveVersusBall();
+    } else if (Math.ceil(versusServeTimer) !== prev) {
+      ui.showCountdown(Math.ceil(versusServeTimer));
+    }
   }
+  // Local tournament match: an AI drives the opponent paddle. It must run
+  // before physics.step so the swept collision sees this frame's pose/velocity.
+  if (vsBot) updateBotPaddle(dt);
   physics.step(dt, balls, paddles);
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    ball.updateVisualSpin(dt);
+    if (ball.mesh.position.length() > 14) ball.deactivate();
+  }
   netSendAccum += dt;
-  if (netSendAccum >= NET_TICK) { netSendAccum = 0; broadcastHostState(); }
+  if (netSendAccum >= NET_TICK) {
+    netSendAccum = 0;
+    broadcastHostState();
+  }
 }
 
 function applyHostState(state) {
@@ -248,161 +511,466 @@ function applyHostState(state) {
   if (state.ball?.active) {
     guestBallActive = true;
     guestBallTarget.set(state.ball.p[0], state.ball.p[1], state.ball.p[2]);
-    if (!versusBall) { versusBall = balls[0]; }
-    versusBall.active = true; versusBall.mesh.visible = true;
+    if (!versusBall) versusBall = balls[0];
+    // The guest renders the ball but never simulates it: keep it inactive so
+    // physics.step ignores it, and drive its mesh purely from network state.
+    versusBall.active = false;
+    versusBall.mesh.visible = true;
   } else {
     guestBallActive = false;
-    if (versusBall) { versusBall.deactivate(); versusBall = null; }
+    if (versusBall) {
+      versusBall.deactivate();
+      versusBall = null;
+    }
   }
   if (match.winner) ui.showVersusWin(match.winner === 'guest', match.snapshot());
 }
 
 function runVersusGuest(dt) {
   netSendAccum += dt;
-  if (netSendAccum >= NET_TICK) { netSendAccum = 0; room?.send('paddle', bladePacket(cvPaddle)); }
-  if (guestBallActive && versusBall) versusBall.mesh.position.lerp(guestBallTarget, Math.min(1, dt * 16));
+  if (netSendAccum >= NET_TICK) {
+    netSendAccum = 0;
+    room?.send('paddle', bladePacket(mousePaddle));
+  }
+  if (guestBallActive && versusBall) {
+    versusBall.mesh.position.lerp(guestBallTarget, Math.min(1, dt * 16));
+    versusBall.updateVisualSpin(dt);
+  }
 }
 
 async function enterVersus(role, code) {
-  training = false; paused = false; serveCountdown = 0; ui.hideCountdown();
-  machine.enabled = false; flyPaddle.enabled = false; updateTargetMarker(null);
-  balls.forEach((b) => b.deactivate()); versusBall = null; guestBallActive = false; ui.setLives(0);
-  document.body.classList.add('paddle-pointer-mode');
+  machine.enabled = false;
+  launchCountdown = 0;
+  ui.hideCountdown();
+  game.reset?.();
+  balls.forEach((b) => b.deactivate());
+  versusBall = null;
+  guestBallActive = false;
+  versusServeTimer = 0;
+  netSendAccum = 0;
   match.reset();
   netMode = role;
   remotePaddle.enabled = true;
-  // The guest plays from the far end; the 180° turn also mirrors the pointer
-  // mapping so left/right feel natural without extra transforms.
-  if (role === 'guest') { playerRig.position.set(0, 0, -PLAY_AREA.PLAYER_Z); playerRig.rotation.y = Math.PI; }
-  else { playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z); playerRig.rotation.y = 0; }
+  // The guest plays from the far (-Z) end; the 180° turn also mirrors the
+  // pointer mapping so left/right feel natural with no extra transforms.
+  if (role === 'guest') {
+    playerRig.position.set(0, 0, -PLAY_AREA.PLAYER_Z);
+    playerRig.rotation.y = Math.PI;
+  } else {
+    playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
+    playerRig.rotation.y = 0;
+  }
   room = createRoom({ code, role });
   if (role === 'host') room.on('paddle', (pkt) => applyRemotePaddle(pkt));
   else room.on('state', (state) => applyHostState(state));
   room.onOpponent((present) => {
     ui.setVersusOpponent(present);
+    // First time both players are present, the host kicks off the serve.
     if (present && role === 'host' && !match.winner && !versusBall && versusServeTimer <= 0) {
-      versusServeTimer = SERVE_COUNTDOWN_SECONDS;
-      ui.showCountdown(SERVE_COUNTDOWN_SECONDS);
+      startVersusServe();
     }
   });
   await room.connect();
 }
 
 function leaveVersus() {
-  if (room) { room.close(); room = null; }
+  room?.close();
+  room = null;
   netMode = null;
   remotePaddle.enabled = false;
-  versusBall = null; guestBallActive = false; versusServeTimer = 0;
+  remotePaddle.tracking = false;
+  versusBall = null;
+  guestBallActive = false;
+  versusServeTimer = 0;
+  netSendAccum = 0;
   balls.forEach((b) => b.deactivate());
   ui.hideCountdown();
-  playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z); playerRig.rotation.y = 0;
+  playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
+  playerRig.rotation.y = 0;
   clearRoomFromUrl();
 }
 
-machine.onServe = () => { session.serve(); ui.update(session.summary(), 'SERVE'); };
-physics.onBounce = (ball, event, details = {}) => {
-  if (netMode === 'host') { handleVersusHostBounce(ball, event); return; }
-  if (netMode === 'guest') return; // guest renders host-authoritative state only
-  if (!training || paused) return;
-  // A ball settling on the floor fires many bounce events; only the first
-  // counts as a drop. Ignore the rest until the ball is re-served.
-  if (event === 'floor' && ball.floorCounted) return;
-  const result = session.record(event, { ...details, position: ball.mesh.position.clone() });
-  if (event === 'paddle') ui.feedback(details.owner === 'fly' ? 'Fly return — move early.' : session.drill === 'fly' ? 'Nice placement — make the fly move.' : 'Nice return', 'success');
-  if (event === 'table' && result.targetHit) {
-    ui.feedback(`${result.move.shortLabel}: clean target · ${result.moveSuccesses}/5`, 'success');
+// --- Tournament lobby net pipe ----------------------------------------------
+// A single room per tournament; every inbound message + presence change is
+// forwarded to the UI, which owns the roster and bracket state.
+let tourneyRoom = null;
+function wireTourneyRoom(roomHandle) {
+  for (const type of ['join', 'roster', 'bracket']) {
+    roomHandle.on(type, (data) => ui._onTourneyMessage?.(type, data));
   }
-  if (event === 'table' && result.targetMiss) {
-    ui.feedback(`Missed ${result.move.shortLabel} — ${result.moveSuccesses}/5. ${result.move.cue}`, 'error');
-  }
-  if (event === 'table' && result.moveAdvanced) {
-    updateTargetMarker(result.nextMove);
-    if (result.drillComplete) {
-      training = false;
-      machine.enabled = false;
-      flyPaddle.enabled = false;
-      updateTargetMarker(null);
-      ui.feedback('Full target sequence complete!', 'success');
-      ui.showSummary(session.finish());
-      return;
-    }
-    ui.feedback(`Move complete — ${result.nextMove.shortLabel} is next.`, 'success');
-  }
-  if (event === 'table') ui.update(session.summary(), 'RALLY');
-  if (event === 'net') ui.feedback('Net error — close the racket angle.', 'error');
-  if (event === 'floor') {
-    ball.floorCounted = true;
-    const flyMiss = session.drill === 'fly' && ball.mesh.position.z < 0;
-    const rankedRunOver = session.mode === 'ranked' && result.playerMiss && session.misses >= RANKED_LIVES;
-    // The dropped ball vanishes right away so it can't rebound or double-count.
-    ball.deactivate();
-    if (rankedRunOver) {
-      training = false;
-      paused = false;
-      serveCountdown = 0;
-      ui.hideCountdown();
-      machine.enabled = false;
-      flyPaddle.enabled = false;
-      updateTargetMarker(null);
-      ui.loseLife();
-      ui.feedback('Final ball down — ranked run over.', 'error');
-      ui.showSummary(session.finish());
-      return;
-    }
-    if (result.playerMiss) {
-      if (session.mode === 'ranked') {
-        ui.loseLife();
-        const livesLeft = Math.max(0, RANKED_LIVES - session.misses);
-        ui.feedback(`Ball down — ${livesLeft} ${livesLeft === 1 ? 'ball' : 'balls'} left.`, 'error');
-      } else {
-        ui.feedback('Rally ended — reset your feet.', 'error');
-      }
-      // Clear any other balls in play and count down to the next serve.
-      balls.forEach((other) => { if (other !== ball) other.deactivate(); });
-      beginServeCountdown();
-    } else if (flyMiss) {
-      ui.feedback('The fly missed — keep the pressure on.', 'success');
-    }
-  }
-  ui.update(session.summary(), 'TRAINING');
-};
+  roomHandle.onOpponent((present) => ui._onTourneyPresence?.(present));
+}
 
+// --- Local tournament bot match ---------------------------------------------
+// A single playable game to 11 (win by 2) against an AI opponent, built on the
+// host loop with no network room. Returns a Promise that resolves true if you
+// win. The AI paddle lives at the far (-Z) end and tries to intercept balls
+// heading toward it, deliberately imperfect so you can score.
+
+// Reaction plane for the AI paddle — a little in front of the far baseline.
+const BOT_HOME_Z = -(TABLE.LENGTH / 2 - 0.35);
+
+function startBotMatch(opponentName) {
+  return new Promise((resolve) => {
+    botResultResolve = resolve;
+    vsBot = true;
+    botOpponentName = opponentName || 'Opponent';
+
+    machine.enabled = false;
+    launchCountdown = 0;
+    ui.hideCountdown();
+    game.reset?.();
+    balls.forEach((b) => b.deactivate());
+    versusBall = null;
+    guestBallActive = false;
+    versusServeTimer = 0;
+    netSendAccum = 0;
+    match.reset();
+
+    // Host loop with no room: broadcastHostState() is a no-op (guards !room).
+    netMode = 'host';
+    room = null;
+
+    remotePaddle.enabled = true;
+    remotePaddle.networked = true;
+
+    // You play from the near (+Z) end, unrotated; the bot faces you from -Z.
+    playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
+    playerRig.rotation.y = 0;
+    remoteAnchor.rotation.y = Math.PI; // blade faces +Z (back toward the player)
+    remoteAnchor.position.set(0, TABLE.HEIGHT + 0.2, BOT_HOME_Z);
+
+    ui.beginMatchView(botOpponentName);
+    ui.updateVersusScore(match.snapshot(), 'host');
+    startVersusServe();
+  });
+}
+
+function updateBotPaddle(dt) {
+  const ball = versusBall;
+  // Reaction gain <1 so the paddle lags the ideal intercept and misses some.
+  const k = Math.min(1, dt * 7);
+  let targetX = remoteAnchor.position.x;
+  let targetY = remoteAnchor.position.y;
+
+  if (ball && ball.active && ball.velocity.z < 0) {
+    const pos = ball.mesh.position;
+    // Linear predict where the ball crosses the paddle plane in x/y.
+    const dz = BOT_HOME_Z - pos.z;
+    const vz = ball.velocity.z;
+    const tHit = Math.abs(vz) > 1e-4 ? dz / vz : 0;
+    targetX = pos.x + ball.velocity.x * tHit;
+    targetY = pos.y + ball.velocity.y * tHit;
+  }
+
+  const minX = -(TABLE.WIDTH / 2 - 0.12);
+  const maxX = TABLE.WIDTH / 2 - 0.12;
+  const minY = TABLE.HEIGHT + 0.05;
+  const maxY = TABLE.HEIGHT + 0.45;
+  targetX = THREE.MathUtils.clamp(targetX, minX, maxX);
+  targetY = THREE.MathUtils.clamp(targetY, minY, maxY);
+
+  remoteAnchor.position.x += (targetX - remoteAnchor.position.x) * k;
+  remoteAnchor.position.y += (targetY - remoteAnchor.position.y) * k;
+  remoteAnchor.position.z = BOT_HOME_Z;
+  remoteAnchor.rotation.y = Math.PI;
+
+  // The networked flag makes the tick loop skip this paddle, so update it here
+  // to derive bladeCenter/normal/velocity for the physics collision.
+  remotePaddle.update(dt);
+}
+
+function endBotMatch(winner) {
+  const youWon = winner === 'host';
+  ui.hideCountdown();
+  netMode = null;
+  vsBot = false;
+  remotePaddle.enabled = false;
+  remotePaddle.tracking = false;
+  versusBall = null;
+  guestBallActive = false;
+  versusServeTimer = 0;
+  balls.forEach((b) => b.deactivate());
+  remoteAnchor.rotation.y = 0;
+  remoteAnchor.position.set(0, 0, 0);
+  ui.endMatchView?.();
+  const r = botResultResolve;
+  botResultResolve = null;
+  r?.(youWon);
+}
+
+function setMousePaddlePose(clientX, clientY) {
+  if (renderer.xr.isPresenting) return; // XR controllers own the paddles
+  const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
+  const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
+  // X spans a little more than the table width; Y rides just above the surface
+  // up to head height; Z sits the blade a bit in front of the player over the
+  // near half of the table. All relative to playerRig.
+  mousePaddleRig.position.set(
+    (x - 0.5) * 1.25,
+    0.95 + (0.5 - y) * 0.7,
+    -0.72
+  );
+  // A gentle roll with horizontal position gives natural left/right steering.
+  mousePaddleRig.rotation.set(0, 0, -(x - 0.5) * 0.6);
+}
+window.addEventListener('pointermove', (e) => setMousePaddlePose(e.clientX, e.clientY), { passive: true });
+window.addEventListener('pointerdown', (e) => setMousePaddlePose(e.clientX, e.clientY), { passive: true });
+
+// The mouse paddle is a desktop-only stand-in for a tracked controller: hide
+// and disable it in XR so it can't swat balls out of the air from a stale
+// pose, and bring it back when the immersive session ends.
+renderer.xr.addEventListener('sessionstart', () => {
+  mousePaddle.enabled = false;
+  mousePaddle.mesh.visible = false;
+  renderer.domElement.style.cursor = '';
+});
+renderer.xr.addEventListener('sessionend', () => {
+  mousePaddle.enabled = true;
+  mousePaddle.mesh.visible = true;
+});
+
+// In-headset pause menu. The DOM shell is invisible in an immersive session,
+// so this is the only way to reach settings with the headset on.
+const vrMenu = new VRMenu({
+  camera,
+  machine,
+  game,
+  settings,
+  sfx,
+  onExit: () => {
+    xr.end();
+    machine.enabled = false;
+    ui.showMenu();
+  },
+});
+// Added to the scene, not the player rig: the panel is positioned from the
+// camera's *world* pose, so parenting it under the rig would offset it by the
+// rig's own position.
+scene.add(vrMenu.group);
+
+// A/X on either controller opens and closes it. There's no WebXR event for
+// face buttons, so the gamepad has to be polled with edge detection.
+const MENU_BUTTONS = [4, 5]; // A/X and B/Y
+let menuButtonWasDown = false;
+
+function pollMenuButton() {
+  const down = inputSources.some((source) =>
+    MENU_BUTTONS.some((b) => source?.gamepad?.buttons?.[b]?.pressed)
+  );
+  if (down && !menuButtonWasDown) vrMenu.toggle();
+  menuButtonWasDown = down;
+}
+
+// You hold one bat, not two. The off hand keeps its controller model so you
+// can still see where it is, but carries no paddle — otherwise it swats balls
+// out of the air by accident.
+function applyHandedness() {
+  const preferred = settings.get('hand');
+  paddles.forEach((paddle, i) => {
+    // Handedness only governs the two XR grip paddles; the desktop mouse
+    // paddle isn't held in a hand and must keep its own enabled/visible state.
+    if (paddle === mousePaddle) return;
+    const handedness = inputSources[i]?.handedness;
+    // Before a controller reports its handedness, assume index 0 is the
+    // right hand rather than leaving the player with no paddle at all.
+    const hand = handedness ?? (i === 0 ? 'right' : 'left');
+    const holdsPaddle = preferred === 'both' || hand === preferred;
+
+    paddle.enabled = holdsPaddle;
+    paddle.mesh.visible = holdsPaddle;
+    if (controllerModels[i]) controllerModels[i].visible = !holdsPaddle;
+  });
+}
+
+settings.onChange((key) => {
+  if (key === 'hand') applyHandedness();
+});
+applyHandedness();
+
+// Short haptic tap on contact, on whichever hand actually struck the ball.
+function pulse(ball) {
+  let nearest = -1;
+  let best = Infinity;
+  paddles.forEach((paddle, i) => {
+    const d = paddle.bladeCenter.distanceToSquared(ball.mesh.position);
+    if (d < best) {
+      best = d;
+      nearest = i;
+    }
+  });
+  const actuator = inputSources[nearest]?.gamepad?.hapticActuators?.[0];
+  actuator?.pulse?.(0.7, 40);
+}
+
+// --- Desktop fallback: orbit controls for dev without a headset -------------
 const orbit = new OrbitControls(camera, renderer.domElement);
-// Desktop mouse input belongs to the paddle, not the camera. Keeping the
-// camera fixed removes the competing drag/damping path that made the paddle
-// feel delayed. XR still owns the camera during immersive sessions.
-orbit.enabled = false;
-orbit.enableDamping = false;
 orbit.target.set(0, TABLE.HEIGHT, 0);
 orbit.update();
-renderer.xr.addEventListener('sessionstart', () => { orbit.enabled = false; cvRig.visible = false; });
-renderer.xr.addEventListener('sessionend', () => { orbit.enabled = false; cvRig.visible = true; });
-const clock = new THREE.Clock();
-function updateFlyAI() {
-  const incoming = balls.find((ball) => ball.active && ball.velocity.z < 0 && ball.mesh.position.z < -.15);
-  if (!incoming) {
-    flyAnchor.position.x += (Math.sin(clock.elapsedTime * .9) * .25 - flyAnchor.position.x) * .08;
-    return;
-  }
-  const targetZ = flyAnchor.position.z - .185;
-  const travel = Math.max(.08, (targetZ - incoming.mesh.position.z) / incoming.velocity.z);
-  const predictedX = THREE.MathUtils.clamp(incoming.mesh.position.x + incoming.velocity.x * travel, -TABLE.WIDTH / 2 + .08, TABLE.WIDTH / 2 - .08);
-  const predictedY = THREE.MathUtils.clamp(incoming.mesh.position.y + incoming.velocity.y * travel, TABLE.HEIGHT + .08, TABLE.HEIGHT + .38);
-  flyAnchor.position.x += (predictedX - flyAnchor.position.x) * .18;
-  flyAnchor.position.y += (predictedY - flyAnchor.position.y) * .18;
-}
-renderer.setAnimationLoop(() => { const dt = clock.getDelta(); if (ui.isModeSelecting?.()) table.rotation.y += dt * .22; else if (!renderer.xr.isPresenting) table.rotation.y = THREE.MathUtils.damp(table.rotation.y, 0, 8, dt); if (!paused) { paddles.forEach((paddle) => { if (!paddle.networked) paddle.update(dt); }); if (netMode === 'host') { runVersusHost(dt); } else if (netMode === 'guest') { runVersusGuest(dt); } else { if (training) { if (serveCountdown > 0) { const prev = Math.ceil(serveCountdown); serveCountdown -= dt; if (serveCountdown <= 0) { serveCountdown = 0; ui.hideCountdown(); machine._timer = Math.min(machine._timer, .15); } else if (Math.ceil(serveCountdown) !== prev) { ui.showCountdown(Math.ceil(serveCountdown)); } } else { machine.update(dt); } } updateFlyAI(); physics.step(dt, balls, paddles); session.update(); if (training) ui.update(session.summary(), 'TRAINING'); } } balls.forEach((ball) => { if (ball.active && ball.mesh.position.length() > 12) ball.deactivate(); }); const t = clock.elapsedTime; flyOpponent.position.x = flyAnchor.position.x; flyOpponent.position.y = 1.55 + Math.sin(t * 2.1) * .05; renderer.render(scene, camera); });
-window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+renderer.xr.addEventListener('sessionstart', () => (orbit.enabled = false));
+renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
 
-// If the page was opened from a shared game link, join it as the guest.
+// --- Main loop --------------------------------------------------------------
+const clock = new THREE.Clock();
+let servedSeen = 0;
+
+function tick(dt) {
+  for (const paddle of paddles) {
+    // Networked (opponent) paddles are posed from incoming packets, not from
+    // local input, so they must not run the velocity-sampling update.
+    if (paddle.networked) continue;
+    paddle.update(dt);
+  }
+
+  pollMenuButton();
+  vrMenu.update(dt, controllers);
+  for (const controller of controllers) {
+    if (controller.userData.ray) controller.userData.ray.visible = vrMenu.open;
+  }
+
+  if (netMode === 'host') {
+    runVersusHost(dt);
+  } else if (netMode === 'guest') {
+    runVersusGuest(dt);
+  } else {
+    // --- Single-player trainer (bot / drills / countdown) -----------------
+    // 3-2-1 before the first serve: hold the machine, tick the on-screen count.
+    if (launchCountdown > 0) {
+      const prev = Math.ceil(launchCountdown);
+      launchCountdown -= dt;
+      if (launchCountdown <= 0) {
+        launchCountdown = 0;
+        ui.hideCountdown();
+        machine.enabled = true;
+        machine._timer = Math.min(machine._timer, 0.2);
+      } else if (Math.ceil(launchCountdown) !== prev) {
+        ui.showCountdown(Math.ceil(launchCountdown));
+      }
+    }
+
+    // The menu is a pause screen: hold the machine while it's up, but keep
+    // stepping physics so balls already in the air settle instead of freezing
+    // mid-flight.
+    const wasEnabled = machine.enabled;
+    if (vrMenu.open) machine.enabled = false;
+
+    machine.update(dt);
+    if (machine.servedCount !== servedSeen) {
+      servedSeen = machine.servedCount;
+      game.onServe();
+    }
+
+    if (vrMenu.open) machine.enabled = wasEnabled; // restore; the pause is momentary
+
+    physics.step(dt, balls, paddles);
+    game.update(balls);
+
+    // The aim ring shows where the machine is about to land a ball; in target
+    // mode there's no incoming shot to telegraph, so the pad takes over.
+    const targeting = machine.isTargetMode;
+    targetRing.visible = !targeting && settings.get('aimMarker');
+    targetZone.visible = targeting;
+    if (targeting) {
+      targetZone.update(dt);
+    } else {
+      targetRing.position.set(machine.aim.x, TABLE.HEIGHT + 0.002, machine.aim.z);
+    }
+
+    for (const ball of balls) {
+      if (!ball.active) continue;
+      ball.updateVisualSpin(dt);
+
+      // Any ball that has come to rest is out of play, wherever it settled.
+      // Keying retirement off the floor alone strands balls that stop on the
+      // table — which silently drains the pool until the machine can't serve.
+      if (ball.restingOn && ball.retireIn === null) {
+        ball.retireIn = DEAD_BALL_LINGER;
+      }
+
+      if (ball.mesh.position.length() > 14) {
+        retire(ball);
+      } else if (ball.retireIn !== null) {
+        ball.retireIn -= dt;
+        if (ball.retireIn <= 0) retire(ball);
+      }
+    }
+  }
+
+  scoreboard.update();
+  ui.update();
+
+  // Hide the OS cursor while the desktop player is training so it doesn't sit
+  // on top of the paddle, but restore it over the start menu so the buttons
+  // stay clickable. XR owns the cursor state through its session listeners.
+  if (!renderer.xr.isPresenting) {
+    renderer.domElement.style.cursor = ui.menu.hidden ? 'none' : '';
+  }
+
+  renderer.render(scene, camera);
+}
+
+// Per-ball scoring flags reset in Ball.serve(), so returning to the pool is
+// just a deactivate.
+function retire(ball) {
+  ball.deactivate();
+}
+
+renderer.setAnimationLoop(() => tick(clock.getDelta()));
+
+// Dev-only handle for driving the simulation from the console or an
+// automated check. `requestAnimationFrame` is frozen in a backgrounded tab,
+// so stepping `tick` by hand is the only way to measure trajectories
+// reliably. Vite strips this branch from production builds.
+if (import.meta.env.DEV) {
+  window.__probe = {
+    balls, machine, physics, game, paddles, targetZone,
+    settings, ui, vrMenu, scene, camera, tick,
+  };
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Keyboard shortcuts make desktop iteration much faster than reaching for a
+// headset every time.
+window.addEventListener('keydown', (e) => {
+  if (!ui.menu.hidden) return; // menu is up; let the buttons own the input
+
+  if (e.code === 'Space') {
+    e.preventDefault(); // stop the browser scrolling / re-firing a focused button
+    machine.enabled = !machine.enabled;
+    game.revision++;
+    ui.toast(machine.enabled ? 'Machine armed' : 'Paused');
+  } else if (e.code === 'KeyD') {
+    ui.toast(machine.nextDrill().name);
+    game.revision++;
+  } else if (e.code === 'KeyR') {
+    game.reset();
+    ui.toast('Score reset');
+  } else if (e.code === 'KeyS') {
+    machine.serve();
+  }
+});
+
+// If this page was opened from a shared room link (?room=CODE), drop straight
+// into the versus lobby as the guest and connect.
 const autoJoinCode = roomFromUrl();
 if (autoJoinCode) {
-  ui.openVersus('guest', { code: autoJoinCode, link: roomLinkFor(autoJoinCode), kind: isRealtimeAvailable() ? 'supabase' : 'local' });
-  enterVersus('guest', autoJoinCode).catch((error) => ui.feedback(error.message, 'error'));
-} else if (currentPath === '/training') {
-  ui.openTraining(new URLSearchParams(window.location.search).get('drill'));
-} else if (currentPath === '/live-game') {
-  ui.startLiveGame();
-} else if (currentPath === '/tournament') {
-  ui.openTournament();
+  ui.openVersusLobby({
+    role: 'guest',
+    code: autoJoinCode,
+    link: roomLinkFor(autoJoinCode),
+    kind: isRealtimeAvailable() ? 'supabase' : 'local',
+  });
+  enterVersus('guest', autoJoinCode).catch((err) => ui.toast?.(err?.message ?? 'Could not join room'));
+}
+
+// A shared tournament link (?t=CODE) drops the visitor straight into the
+// tournament lobby's join screen (Kahoot-style: enter a name, then you're in).
+const autoTourneyCode = tourneyFromUrl();
+if (autoTourneyCode) {
+  ui.openTournamentJoin?.(autoTourneyCode);
 }

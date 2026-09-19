@@ -30,7 +30,6 @@ export class Ball {
     this.velocity = new THREE.Vector3();
     this.spin = new THREE.Vector3(); // angular velocity, rad/s
     this.active = false; // inactive balls are hidden and skip physics
-    this.floorCounted = false; // guards against one landing counting as many misses
     this.mesh.visible = false;
     this.restingOn = null; // 'table' | 'floor' once the ball has settled
     this.retireIn = null; // seconds until this ball returns to the pool
@@ -53,7 +52,6 @@ export class Ball {
     this.spin.copy(spin ?? _axis.set(0, 0, 0));
     this.mesh.quaternion.identity();
     this.active = true;
-    this.floorCounted = false;
     this.mesh.visible = true;
     this.restingOn = null;
     this.retireIn = null;

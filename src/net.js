@@ -46,6 +46,35 @@ export function clearRoomFromUrl() {
   }
 }
 
+// Tournament lobby links use a separate `?t=` param so they don't collide with
+// 1v1 versus `?room=` links. Kept on the current path so the shared link loads
+// the same app (no server-side route needed).
+export function tourneyLinkFor(code) {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('room');
+  url.searchParams.set('t', code);
+  url.hash = '';
+  return url.toString();
+}
+
+export function tourneyFromUrl() {
+  try {
+    return new URL(window.location.href).searchParams.get('t');
+  } catch {
+    return null;
+  }
+}
+
+export function clearTourneyFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('t');
+    window.history.replaceState({}, '', url.toString());
+  } catch {
+    /* no-op */
+  }
+}
+
 export function isRealtimeAvailable() {
   return Boolean(supabase);
 }

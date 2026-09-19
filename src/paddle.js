@@ -1,108 +1,175 @@
 import * as THREE from 'three';
 import { PADDLE } from './constants.js';
 
-// A paddle that attaches to an input or AI anchor and tracks its own velocity.
-// Vertical paddles are used by desktop/CV and the fly; XR keeps its controller
-// grip orientation so existing headset input remains compatible.
+const _worldPos = new THREE.Vector3();
+const _worldQuat = new THREE.Quaternion();
+const _prevQuatInv = new THREE.Quaternion();
+const _deltaQuat = new THREE.Quaternion();
+const _axis = new THREE.Vector3();
+const _arm = new THREE.Vector3();
+
+// A paddle attached to a WebXR controller grip. It tracks its own linear and
+// angular velocity, which the physics step needs: the blade's speed sets how
+// hard the ball comes off, and the speed of the surface across the ball — a
+// product of the swing's rotation — is what puts spin on it.
 export class Paddle {
-  constructor({ owner = 'player', vertical = false, color = 0xff3030 } = {}) {
-    this.owner = owner;
-    this.enabled = true;
-    this.mesh = buildPaddleMesh(color, vertical);
-    this.velocity = new THREE.Vector3();
-    this._prevPos = new THREE.Vector3();
-    this._worldPos = new THREE.Vector3();
-    this._worldQuaternion = new THREE.Quaternion();
-    this._initialized = false;
+  // options.vertical: orient the paddle to stand upright with its face toward
+  // the -Z (ball machine) end and the handle hanging down, and recenter the
+  // mesh so the blade sits on the anchor origin. This is the pose a desktop
+  // mouse paddle wants — the pointer position maps straight to the blade — as
+  // opposed to the default grip pose, where the bat is held out from a fist.
+  constructor(options = {}) {
+    const { vertical = false } = options;
+    this.vertical = vertical;
+    this.mesh = buildPaddleMesh();
+
+    this.velocity = new THREE.Vector3(); // linear, m/s
+    this.angularVelocity = new THREE.Vector3(); // rad/s
     this.bladeCenter = new THREE.Vector3();
     this.bladeNormal = new THREE.Vector3();
+
+    // False until two frames have been sampled — velocity is meaningless
+    // before that, and a bogus first value can launch a ball across the room.
+    this.tracking = false;
+
+    // Whether this hand is actually holding the bat (see handedness setting).
+    this.enabled = true;
+
     this._blade = this.mesh.getObjectByName('blade');
-  }
+    this._prevPos = new THREE.Vector3();
+    this._prevQuat = new THREE.Quaternion();
+    this._samples = 0;
 
-  attachTo(anchor) {
-    anchor.add(this.mesh);
-  }
-
-  update(dt) {
-    this._blade.getWorldPosition(this._worldPos);
-    this.bladeCenter.copy(this._worldPos);
-    this._blade.getWorldQuaternion(this._worldQuaternion);
-    this.bladeNormal.set(0, 0, 1).applyQuaternion(this._worldQuaternion).normalize();
-    if (this._initialized && dt > 0) {
-      this.velocity.copy(this._worldPos).sub(this._prevPos).divideScalar(dt);
+    if (vertical) {
+      // Rotate the whole bat so the blade face (mesh +X) points down-table at
+      // -Z and the handle (mesh +Z) drops to -Y. makeBasis maps local X/Y/Z
+      // onto these world axes; it's a proper right-handed rotation (det +1).
+      const R = new THREE.Matrix4().makeBasis(
+        new THREE.Vector3(0, 0, -1),
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Vector3(0, -1, 0)
+      );
+      this.mesh.quaternion.setFromRotationMatrix(R);
+      // Then slide the mesh so the blade center lands exactly on the anchor
+      // origin, so whatever position the pointer sets on the rig is where the
+      // blade actually is — no hidden offset for the physics or the player.
+      const bladeOffset = this._blade.position.clone().applyMatrix4(R);
+      this.mesh.position.copy(bladeOffset).negate();
     }
-    this._prevPos.copy(this._worldPos);
-    this._initialized = true;
+  }
+
+  attachTo(controllerGrip) {
+    controllerGrip.add(this.mesh);
+  }
+
+  // Call once per render frame with real elapsed time.
+  update(dt) {
+    this._blade.getWorldPosition(_worldPos);
+    this._blade.getWorldQuaternion(_worldQuat);
+
+    this.bladeCenter.copy(_worldPos);
+    this.bladeNormal.set(0, 0, 1).applyQuaternion(_worldQuat);
+
+    if (this._samples > 0 && dt > 1e-5) {
+      this.velocity.copy(_worldPos).sub(this._prevPos).divideScalar(dt);
+
+      // Angular velocity from the rotation between frames
+      _prevQuatInv.copy(this._prevQuat).invert();
+      _deltaQuat.copy(_worldQuat).multiply(_prevQuatInv).normalize();
+      let angle = 2 * Math.acos(THREE.MathUtils.clamp(_deltaQuat.w, -1, 1));
+      const s = Math.sqrt(Math.max(1 - _deltaQuat.w * _deltaQuat.w, 0));
+      if (s < 1e-5) {
+        this.angularVelocity.set(0, 0, 0);
+      } else {
+        if (angle > Math.PI) angle -= 2 * Math.PI; // shortest arc
+        _axis.set(_deltaQuat.x / s, _deltaQuat.y / s, _deltaQuat.z / s);
+        this.angularVelocity.copy(_axis).multiplyScalar(angle / dt);
+      }
+
+      this.tracking = true;
+    }
+
+    this._prevPos.copy(_worldPos);
+    this._prevQuat.copy(_worldQuat);
+    this._samples++;
+  }
+
+  // Velocity of the blade surface at a world-space point.
+  velocityAt(point, out) {
+    _arm.copy(point).sub(this.bladeCenter);
+    out.copy(this.angularVelocity).cross(_arm).add(this.velocity);
+    return out;
   }
 }
 
-function createBladeShape() {
-  const shape = new THREE.Shape();
-  // A slightly tapered, rounded ITTF-style blade: broad at the shoulder,
-  // rounded across the top, and narrower where it meets the handle.
-  shape.moveTo(-0.042, -0.044);
-  shape.lineTo(-0.068, 0.018);
-  shape.quadraticCurveTo(-0.078, 0.054, -0.066, 0.092);
-  shape.quadraticCurveTo(-0.041, 0.128, 0, 0.135);
-  shape.quadraticCurveTo(0.041, 0.128, 0.066, 0.092);
-  shape.quadraticCurveTo(0.078, 0.054, 0.068, 0.018);
-  shape.lineTo(0.042, -0.044);
-  shape.quadraticCurveTo(0.022, -0.057, 0, -0.058);
-  shape.quadraticCurveTo(-0.022, -0.057, -0.042, -0.044);
-  return shape;
-}
-
-function createFaceMesh(shape, material, z) {
-  const face = new THREE.Mesh(new THREE.ShapeGeometry(shape), material);
-  face.position.z = z;
-  return face;
-}
-
-function buildPaddleMesh(color, vertical) {
+function buildPaddleMesh() {
   const group = new THREE.Group();
-  const woodMat = new THREE.MeshStandardMaterial({ color: 0xc8945b, roughness: 0.72 });
-  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x5b3423, roughness: 0.82 });
-  const rubberFront = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, depthTest: false, depthWrite: false, toneMapped: false, transparent: false, opacity: 1 });
-  const shape = createBladeShape();
 
+  const wood = new THREE.MeshStandardMaterial({ color: 0xb98b53, roughness: 0.65 });
+  const grip = new THREE.MeshStandardMaterial({ color: 0x7a2f2f, roughness: 0.8 });
+  const rubberRed = new THREE.MeshStandardMaterial({ color: 0xc0281f, roughness: 0.85 });
+  const rubberBlack = new THREE.MeshStandardMaterial({ color: 0x131315, roughness: 0.85 });
+  const edgeTape = new THREE.MeshStandardMaterial({ color: 0xe8e8ec, roughness: 0.6 });
+
+  // Flared handle
   const handle = new THREE.Mesh(
-    new THREE.CylinderGeometry(PADDLE.HANDLE_RADIUS * 0.9, PADDLE.HANDLE_RADIUS * 1.2, PADDLE.HANDLE_LENGTH, 12),
-    woodMat
+    new THREE.CylinderGeometry(
+      PADDLE.HANDLE_RADIUS,
+      PADDLE.HANDLE_RADIUS * 1.25,
+      PADDLE.HANDLE_LENGTH,
+      16
+    ),
+    grip
   );
-  handle.name = 'handle';
-  handle.position.y = -PADDLE.HANDLE_LENGTH / 2 - 0.012;
+  handle.rotation.x = Math.PI / 2;
+  handle.castShadow = true;
   group.add(handle);
 
-  const neck = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.018), edgeMat);
-  neck.name = 'neck';
-  neck.position.y = 0.004;
+  // Neck joining handle to blade
+  const neck = new THREE.Mesh(
+    new THREE.BoxGeometry(0.036, 0.012, 0.04),
+    wood
+  );
+  neck.position.set(0, 0, -PADDLE.HANDLE_LENGTH / 2 - 0.015);
   group.add(neck);
 
   const blade = new THREE.Group();
   blade.name = 'blade';
-  blade.position.y = 0.062;
-  blade.rotation.x = vertical ? 0 : -Math.PI / 2;
 
-  // Use a solid elliptical cylinder instead of a concave triangulated face.
-  // It stays opaque and readable at every camera angle.
-  const edge = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.082, 0.082, 0.018, 32),
-    edgeMat
+  const r = PADDLE.HEAD_RADIUS;
+  const core = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r, PADDLE.HEAD_THICKNESS, 40),
+    wood
   );
-  edge.rotation.x = Math.PI / 2;
-  edge.scale.y = 1.18;
-  edge.position.z = 0;
-  blade.add(edge);
+  core.rotation.x = Math.PI / 2;
+  core.castShadow = true;
+  blade.add(core);
 
-  const face = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.077, 0.077, 0.021, 32),
-    rubberFront
+  // Rubber sheets, inset slightly so the wood edge reads as edge tape
+  const faceGeo = new THREE.CylinderGeometry(r * 0.97, r * 0.97, 0.0018, 40);
+  for (const [mat, sign] of [
+    [rubberRed, 1],
+    [rubberBlack, -1],
+  ]) {
+    const face = new THREE.Mesh(faceGeo, mat);
+    face.rotation.x = Math.PI / 2;
+    face.position.z = sign * (PADDLE.HEAD_THICKNESS / 2 + 0.001);
+    blade.add(face);
+  }
+
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(r, 0.0035, 8, 44),
+    edgeTape
   );
-  face.rotation.x = Math.PI / 2;
-  face.scale.y = 1.18;
-  face.position.z = 0.035;
-  face.renderOrder = 2;
-  blade.add(face);
+  blade.add(rim);
+
+  // The blade extends forward from the fist along the grip's −Z, and its
+  // face normal points out to the side (grip +X) — the orientation a bat
+  // actually sits in when you hold the handle, so a natural forehand swing
+  // presents the rubber to the ball.
+  blade.position.set(0, 0.018, -(PADDLE.HANDLE_LENGTH / 2 + r * 0.82));
+  blade.rotation.y = Math.PI / 2;
   group.add(blade);
+
   return group;
 }
