@@ -103,9 +103,11 @@ export class Game {
 }
 
 // Where the scoreboard hangs: beyond the far end, angled up slightly so it's
-// readable from the player's side without blocking the table.
+// readable from the player's side without blocking the table. Hung high enough
+// that the (now much larger) panel clears the ball machine standing in front
+// of it, and sits a few degrees above eye level rather than in the rally line.
 export const SCOREBOARD_POSITION = {
   x: 0,
-  y: TABLE.HEIGHT + 0.95,
+  y: TABLE.HEIGHT + 0.98,
   z: -(TABLE.LENGTH / 2 + 1.15),
 };

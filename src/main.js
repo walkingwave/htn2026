@@ -102,6 +102,13 @@ const machine = new BallMachine(balls, settings);
 machine.enabled = false; // stays idle behind the start menu until a mode is picked
 scene.add(machine.mesh);
 
+// Sweep every ball back into the pool. Without this, balls still in flight
+// when you quit stay airborne behind the menu and are still hanging there
+// when the next session starts.
+function clearBalls() {
+  for (const ball of balls) ball.deactivate();
+}
+
 const game = new Game();
 const scoreboard = new Scoreboard(game, machine);
 scene.add(scoreboard.mesh);
@@ -136,7 +143,13 @@ function applyMode(mode) {
 }
 
 const xr = new XRManager(renderer);
-xr.onModeChange = applyMode;
+xr.onModeChange = (mode) => {
+  applyMode(mode);
+  // A session can end without warning — headset removed, system menu, battery.
+  // Close the in-world pause menu so it isn't still hanging there, open and
+  // holding input, the next time a session starts.
+  if (!mode) vrMenu.toggle(false);
+};
 
 const ui = new UI({
   xr,
@@ -147,12 +160,15 @@ const ui = new UI({
   // `mode` is an XR session mode, or null for the on-screen preview. The
   // desktop build being developed separately hooks in here.
   onStart: () => {
+    clearBalls();
     machine.enabled = true;
     game.reset();
   },
   onExit: () => {
     machine.enabled = false;
+    clearBalls();
   },
+  isInputBlocked: () => vrMenu.open,
 });
 
 xr.detectSupport().then((support) => ui.applyXRSupport(support));
@@ -425,23 +441,7 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Keyboard shortcuts make desktop iteration much faster than reaching for a
-// headset every time.
-window.addEventListener('keydown', (e) => {
-  if (!ui.menu.hidden) return; // menu is up; let the buttons own the input
-
-  if (e.code === 'Space') {
-    e.preventDefault(); // stop the browser scrolling / re-firing a focused button
-    machine.enabled = !machine.enabled;
-    game.revision++;
-    ui.toast(machine.enabled ? 'Machine armed' : 'Paused');
-  } else if (e.code === 'KeyD') {
-    ui.toast(machine.nextDrill().name);
-    game.revision++;
-  } else if (e.code === 'KeyR') {
-    game.reset();
-    ui.toast('Score reset');
-  } else if (e.code === 'KeyS') {
-    machine.serve();
-  }
-});
+// Keyboard shortcuts live entirely in UI, which owns the single keydown
+// listener. A second listener here meant every key fired twice: Space
+// toggled the machine and immediately toggled it back, and D skipped two
+// modes at once.

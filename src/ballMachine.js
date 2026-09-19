@@ -174,9 +174,18 @@ export class BallMachine {
 
   _launch(ball) {
     const mode = this.mode;
-    const spread = (mode.spread ?? this.spread) * this._setting('placement');
 
-    // Aim at a point on the player's half, short of the end line
+    // Aim at a point on the player's half, short of the end line. The spread
+    // has to be clamped to the table: a wide mode multiplied by the Wide
+    // placement setting otherwise targets past the side line, and a ball
+    // aimed off the table is unhittable and scores as a miss through no
+    // fault of the player.
+    const maxSpread = TABLE.WIDTH / 2 - BALL.RADIUS - 0.04;
+    const spread = Math.min(
+      (mode.spread ?? this.spread) * this._setting('placement'),
+      maxSpread
+    );
+
     _target.set(
       (Math.random() * 2 - 1) * spread,
       TABLE.HEIGHT + BALL.RADIUS,

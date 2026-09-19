@@ -10,8 +10,12 @@ import { buildPauseMenu } from './menuModel.js';
 // what the on-screen preview runs on.
 
 export class UI {
-  constructor({ xr, machine, game, settings, sfx, onStart, onExit }) {
+  // `isInputBlocked` lets the caller veto keyboard commands — the in-headset
+  // menu uses it so a keypress can't drive the game from behind an open
+  // pause screen.
+  constructor({ xr, machine, game, settings, sfx, onStart, onExit, isInputBlocked }) {
     Object.assign(this, { xr, machine, game, settings, sfx, onStart, onExit });
+    this.isInputBlocked = isInputBlocked ?? (() => false);
 
     this._selected = 0;
     this._entries = [];
@@ -271,6 +275,8 @@ export class UI {
       }
       return;
     }
+
+    if (this.isInputBlocked()) return; // the in-headset menu has the floor
 
     if (e.code === 'Escape') {
       if (!this.settingsEl.hidden) this.toggleSettings(false);
