@@ -1,65 +1,51 @@
-# Ping Pong VR Trainer (HTN 2026)
+# flyball. Ping Pong Trainer
 
-Web-based ping pong trainer/simulator for the Meta Quest 3S, running entirely in the Meta Quest Browser via **WebXR** — no Unity, no app store, no sideloading.
+A WebXR ping-pong trainer for Quest and desktop. The simulated ball is authoritative: it serves, collides with the paddle, bounces through the custom physics world, and records fundamentals while the player trains against escalating drills.
 
-## Stack
-
-- [Three.js](https://threejs.org/) — rendering + WebXR session management
-- [Vite](https://vite.dev/) — dev server + build
-- Custom lightweight physics (fixed timestep, table/net/paddle collisions)
-
-## Getting started
+## Run it
 
 ```bash
 npm install
 npm run dev
 ```
 
-The dev server runs on **HTTPS** (self-signed cert via `@vitejs/plugin-basic-ssl`) because WebXR requires a secure context.
+The Vite server uses HTTPS because WebXR requires a secure context. Open the printed LAN URL in the Quest Browser, accept the local certificate, then choose **Enter AR** or **Enter VR**. Desktop users get an orbit-camera fallback.
 
-### On desktop
+## Training modes
 
-Open `https://localhost:5173`, accept the cert warning. You get an orbit-camera view of the scene for development without a headset.
+- **Foundation** — slower, wider serves for learning contact.
+- **Standard** — balanced fundamentals training.
+- **Boss run** — faster, tighter serves; survive as long as possible.
 
-### On the Quest 3S
+The HUD tracks score, current and best rally, accuracy, table bounces, boss level, misses, net errors, survival time, and estimated reaction timing. Sessions finish after five missed balls and can be submitted to the fundamentals or boss leaderboard.
 
-1. Make sure the headset and your laptop are on the **same Wi-Fi network**.
-2. Find your laptop's LAN IP (`ipconfig getifaddr en0` on macOS). Vite also prints the Network URL on startup.
-3. In the Meta Quest Browser, go to `https://<laptop-ip>:5173`.
-4. Accept the self-signed certificate warning (Advanced → Proceed).
-5. Click **Enter AR** for passthrough mixed reality (virtual table in your real room), or **Enter VR** for a fully virtual space.
+## Input modes
 
-Controls:
-- Paddles are attached to both controllers.
-- **Trigger** toggles the ball machine on/off.
+- **Quest controllers:** paddles attach to controller grips and transfer controller velocity into the physics simulation.
+- **Browser CV:** `@mediapipe/tasks-vision` tracks the wrist/index pose from the webcam and drives a virtual paddle through the same physics path. Camera access requires HTTPS.
+- **Future referee mode:** the OpenCV approach from [Computer-Vision-Ping-Pong](https://github.com/dsaha04/Computer-Vision-Ping-Pong) is represented as a future service seam for HSV ball segmentation, table calibration, homography, and real-camera event validation. It is Python/OpenCV code and is intentionally not bundled into the browser runtime.
 
-### AR vs VR
+## Shared Supabase leaderboard
 
-| Mode | Background | Floor |
-| ---- | ---------- | ----- |
-| AR (`immersive-ar`) | Camera passthrough | Your real floor |
-| VR (`immersive-vr`) | Dark room | Virtual floor disc |
+This app reuses the leaderboard model from `../fly` and supports local demo rankings when credentials are absent.
 
-Both modes use the `local-floor` reference space, so the table sits at real floor height.
+1. Copy `.env.example` to `.env.local`.
+2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the same project used by `../fly`.
+3. Apply [`supabase/schema.sql`](./supabase/schema.sql) to that project.
+
+The production-safe next step is to route score inserts through the existing server-side validation endpoint from `../fly`; direct browser inserts should be protected with stricter RLS/rate limits before public deployment.
 
 ## Project structure
 
+```text
+src/main.js          Three.js/WebXR scene and game loop
+src/session.js       Metrics, difficulty profiles, and score summaries
+src/ui.js             Trainer HUD, lobby, results, and leaderboard panels
+src/physics.js        Fixed-step ball/table/net/paddle physics
+src/paddle.js         Controller paddle geometry and velocity tracking
+src/handTracking.js   MediaPipe browser CV adapter
+src/leaderboard.js    Shared Supabase client plus local fallback rankings
+src/ballMachine.js    Difficulty-aware simulated serve machine
+src/table.js          Table/net/floor scene
+supabase/schema.sql   Shared leaderboard schema
 ```
-src/
-  main.js         Entry point: renderer, XR session, controllers, game loop
-  constants.js    Regulation table/ball/paddle dimensions, physics tuning
-  table.js        Table, net, lines, floor meshes
-  paddle.js       Controller-attached paddle with velocity tracking
-  ball.js         Pooled ball object
-  ballMachine.js  Trainer: serves balls at the player on an interval
-  physics.js      Fixed-timestep physics: gravity, bounces, paddle hits
-```
-
-## Ideas / next steps
-
-- Haptic pulse on paddle hit (`gamepad.hapticActuators[0].pulse(...)`)
-- Hit/bounce audio (positional `THREE.Audio`)
-- Scoring + drill modes (target zones on the table)
-- Spin (Magnus effect) in `physics.js`
-- Hand tracking fallback (Quest Browser supports WebXR hand input)
-- AR table placement via hit-test (anchor the table to a real surface)

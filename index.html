@@ -3,32 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ping Pong VR Trainer</title>
-    <style>
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background: #000;
-      }
-      #overlay {
-        position: absolute;
-        top: 12px;
-        left: 12px;
-        color: #fff;
-        font-family: system-ui, sans-serif;
-        font-size: 14px;
-        pointer-events: none;
-        z-index: 1;
-      }
-    </style>
+    <meta name="theme-color" content="#172433" />
+    <title>flyball. — Ping Pong Trainer</title>
   </head>
   <body>
-    <div id="overlay">
-      <strong>Ping Pong VR Trainer</strong><br />
-      Enter AR (passthrough) or VR on Quest, or drag to orbit on desktop.
-    </div>
+    <main id="app" aria-label="Flyball ping pong trainer"></main>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

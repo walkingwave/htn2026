@@ -9,8 +9,9 @@ export class BallMachine {
     this.interval = 2.5; // seconds between serves
     this.speed = 4.2; // m/s launch speed
     this.spread = 0.45; // max lateral offset of target point (m)
-    this.enabled = true;
+    this.enabled = false;
     this._timer = 1.0; // small delay before first serve
+    this.onServe = null;
 
     this.mesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.25, 0.25, 0.25),
@@ -46,5 +47,6 @@ export class BallMachine {
     velocity.y = 1.2 + dist * 0.25;
 
     ball.serve(origin, velocity);
+    this.onServe?.(ball);
   }
 }
