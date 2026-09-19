@@ -75,7 +75,17 @@ const machine = new BallMachine(balls); scene.add(machine.mesh); const session =
 let training = false; let paused = false; let cvStop = null; let cvActive = false;
 const paddles = []; const controllerModelFactory = new XRControllerModelFactory();
 for (const index of [0, 1]) { const grip = renderer.xr.getControllerGrip(index); grip.add(controllerModelFactory.createControllerModel(grip)); playerRig.add(grip); const paddle = new Paddle(); paddle.attachTo(grip); paddles.push(paddle); const controller = renderer.xr.getController(index); controller.addEventListener('selectstart', () => { machine.enabled = !machine.enabled; }); playerRig.add(controller); }
-const cvRig = new THREE.Group(); cvRig.visible = true; cvRig.add(buildHands()); playerRig.add(cvRig); const cvPaddle = new Paddle({ owner: 'player', vertical: true }); cvPaddle.mesh.scale.setScalar(.72); cvPaddle.attachTo(cvRig); paddles.push(cvPaddle); paddles.push(flyPaddle);
+const cvRig = new THREE.Group();
+cvRig.visible = true;
+const cvHands = buildHands();
+cvHands.scale.setScalar(.38);
+cvRig.add(cvHands);
+playerRig.add(cvRig);
+const cvPaddle = new Paddle({ owner: 'player', vertical: true });
+cvPaddle.mesh.scale.setScalar(.52);
+cvPaddle.attachTo(cvRig);
+paddles.push(cvPaddle);
+paddles.push(flyPaddle);
 
 function setPointerPose(clientX, clientY) { if (cvActive || renderer.xr.isPresenting) return; const x = clientX / window.innerWidth; const y = clientY / window.innerHeight; cvRig.position.set((x - .5) * 1.25, .95 + (.5 - y) * .7, -.72); cvRig.rotation.set(0, 0, -(x - .5) * .6); }
 renderer.domElement.addEventListener('pointermove', (event) => setPointerPose(event.clientX, event.clientY));
