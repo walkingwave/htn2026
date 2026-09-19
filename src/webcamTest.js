@@ -296,8 +296,11 @@ function detectAndRender() {
   const height = video.videoHeight;
   frameContext.drawImage(video, 0, 0, width, height);
   const imageData = frameContext.getImageData(0, 0, width, height);
-  const detectedPaddleAssist = findPaddleByColour(imageData, activePaddleFace);
+  const colourPaddleCandidate = findPaddleByColour(imageData, activePaddleFace);
   const markers = refineMarkerCorners(detector.detect(imageData), detector.grey);
+  const detectedPaddleAssist = colourPaddleCandidate?.colour === 'black'
+    ? validateBlackPaddleCandidate(colourPaddleCandidate, imageData, detector.candidates)
+    : colourPaddleCandidate;
   const decodedPaddleMarkers = markers.filter((marker) => FRONT_IDS.has(marker.id) || BACK_IDS.has(marker.id));
   const paddleMarkers = recoverMarkersWithOpticalFlow(decodedPaddleMarkers, detector.grey);
   rememberTrackingFrame(detector.grey, paddleMarkers);
@@ -308,15 +311,15 @@ function detectAndRender() {
   paddleMarkers.forEach(drawMarker);
 
   if (!boardPose) {
-    // Red is distinctive enough for a short marker-free fallback. Black is
-    // common in clothing, furniture, and shadows, so never track it without
-    // a decoded marker confirming that it really is the paddle.
+    // Permit only a short marker-free fallback. Unlike a generic dark object,
+    // a black candidate has already been required to contain the target's
+    // white square surrounds and at least one ArUco-like square candidate.
     const recentlyConfirmed = performance.now() - lastPoseAt < 750;
-    const fallbackAssist = recentlyConfirmed && detectedPaddleAssist?.colour === 'red' ? detectedPaddleAssist : null;
+    const fallbackAssist = recentlyConfirmed ? detectedPaddleAssist : null;
     if (fallbackAssist) {
       drawPaddleAssist(fallbackAssist);
       applyColourPaddlePosition(fallbackAssist, width, height);
-      setStatus('Red paddle fallback — position is live; hold a marker toward the camera for angle tracking', 'tracking');
+      setStatus(`${fallbackAssist.colour} paddle fallback — position is live; hold a marker toward the camera for angle tracking`, 'tracking');
       setConfidence('low — colour fallback', 'low');
       return;
     }
@@ -505,7 +508,8 @@ function drawPaddleAssist(bounds) {
   overlayContext.strokeRect(bounds.left, bounds.top, bounds.width, bounds.height);
   overlayContext.setLineDash([]);
   overlayContext.font = `bold ${Math.max(14, overlay.width / 48)}px system-ui`;
-  overlayContext.fillText(`${bounds.colour.toUpperCase()} PADDLE ASSIST`, bounds.left + 6, Math.max(20, bounds.top - 7));
+  const structureNote = bounds.colour === 'black' ? ` · ${bounds.whiteSquareCount} white squares` : '';
+  overlayContext.fillText(`${bounds.colour.toUpperCase()} PADDLE ASSIST${structureNote}`, bounds.left + 6, Math.max(20, bounds.top - 7));
   overlayContext.restore();
 }
 
@@ -596,6 +600,83 @@ function findPaddleByColour(imageData, colour) {
     diameter: Math.max(boxWidth, boxHeight),
     colour,
   };
+}
+
+function validateBlackPaddleCandidate(bounds, imageData, squareCandidates) {
+  const whiteSquareCount = countWhiteSquaresInside(bounds, imageData);
+  const arucoCandidateCount = squareCandidates.filter((corners) => {
+    const centerX = corners.reduce((sum, corner) => sum + corner.x, 0) / corners.length;
+    const centerY = corners.reduce((sum, corner) => sum + corner.y, 0) / corners.length;
+    return centerX >= bounds.left && centerX <= bounds.left + bounds.width
+      && centerY >= bounds.top && centerY <= bounds.top + bounds.height;
+  }).length;
+
+  if (whiteSquareCount < 2 || arucoCandidateCount < 1) return null;
+  return { ...bounds, whiteSquareCount, arucoCandidateCount };
+}
+
+function countWhiteSquaresInside(bounds, imageData) {
+  const sample = 3;
+  const width = Math.max(1, Math.floor(bounds.width / sample));
+  const height = Math.max(1, Math.floor(bounds.height / sample));
+  const mask = new Uint8Array(width * height);
+  const { data } = imageData;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const imageX = Math.min(imageData.width - 1, Math.floor(bounds.left + (x + 0.5) * sample));
+      const imageY = Math.min(imageData.height - 1, Math.floor(bounds.top + (y + 0.5) * sample));
+      const source = (imageY * imageData.width + imageX) * 4;
+      const red = data[source];
+      const green = data[source + 1];
+      const blue = data[source + 2];
+      const brightest = Math.max(red, green, blue);
+      const darkest = Math.min(red, green, blue);
+      if (darkest > 155 && brightest - darkest < 55) mask[y * width + x] = 1;
+    }
+  }
+
+  let squareCount = 0;
+  const stack = new Int32Array(mask.length);
+  for (let start = 0; start < mask.length; start += 1) {
+    if (!mask[start]) continue;
+    let stackSize = 1;
+    let count = 0;
+    let minX = width;
+    let maxX = 0;
+    let minY = height;
+    let maxY = 0;
+    stack[0] = start;
+    mask[start] = 0;
+    while (stackSize) {
+      const index = stack[--stackSize];
+      const x = index % width;
+      const y = (index - x) / width;
+      count += 1;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      for (const neighbour of [index - 1, index + 1, index - width, index + width]) {
+        if (neighbour < 0 || neighbour >= mask.length || !mask[neighbour]) continue;
+        const neighbourX = neighbour % width;
+        if (Math.abs(neighbourX - x) > 1) continue;
+        mask[neighbour] = 0;
+        stack[stackSize++] = neighbour;
+      }
+    }
+
+    const componentWidth = maxX - minX + 1;
+    const componentHeight = maxY - minY + 1;
+    const aspect = componentWidth / componentHeight;
+    const boxFraction = (componentWidth * componentHeight) / (width * height);
+    const fill = count / (componentWidth * componentHeight);
+    const touchesCropEdge = minX === 0 || minY === 0 || maxX === width - 1 || maxY === height - 1;
+    if (!touchesCropEdge && aspect >= 0.6 && aspect <= 1.65 && boxFraction >= 0.006 && boxFraction <= 0.22 && fill >= 0.18) {
+      squareCount += 1;
+    }
+  }
+  return squareCount;
 }
 
 function colourPaddlePosition(bounds, frameWidth, frameHeight) {
