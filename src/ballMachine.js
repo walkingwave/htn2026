@@ -80,8 +80,14 @@ export class BallMachine {
     this.aim = new THREE.Vector3(0, TABLE.HEIGHT, TABLE.LENGTH / 4);
   }
 
+  // Clamped, because an out-of-range index does not fail quietly: every
+  // `mode.type` read throws, which kills the whole frame loop. The list has
+  // already changed length once (Coach moved out to its own game), and
+  // anything holding a stale index would have taken the game down with it.
   get mode() {
-    return MODES[this.modeIndex];
+    const i = Math.min(Math.max(this.modeIndex | 0, 0), MODES.length - 1);
+    if (i !== this.modeIndex) this.modeIndex = i;
+    return MODES[i];
   }
 
   // Kept as `drill` for the HUD's benefit — it only ever wants the name.
@@ -96,11 +102,14 @@ export class BallMachine {
   }
 
   get isTargetMode() {
-    return this.mode.type === 'target';
+    return !this.coachActive && this.mode.type === 'target';
   }
 
+  // Coach suspends the arcade entirely. Without this the rally opponent
+  // stayed live during a lesson — standing at the far end and swinging —
+  // because the arcade mode underneath was still set to rally.
   get isRallyMode() {
-    return this.mode.type === 'rally';
+    return !this.coachActive && this.mode.type === 'rally';
   }
 
   // Coach is a separate game rather than one of the rotating arcade modes,
@@ -255,14 +264,14 @@ export class BallMachine {
     let spinAmount = mode.spin ?? 0;
     let axis = mode.axis ?? 'x';
     let speed = mode.speed ?? 4.5;
+    // Only Infinite overrides them; every other mode keeps the defaults
+    // above. Reassigning the raw fields in an else branch here undid the
+    // guard completely, which is how a mode with no spin or speed served a
+    // NaN ball in the first place.
     if (mode.type === 'infinite') {
       spinAmount = rand(...mode.spinRange);
       axis = Math.random() < 0.35 ? 'y' : 'x';
       speed = rand(...mode.speedRange);
-    } else {
-      spinAmount = mode.spin;
-      axis = mode.axis;
-      speed = mode.speed;
     }
 
     const spin = new THREE.Vector3();

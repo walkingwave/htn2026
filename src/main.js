@@ -455,7 +455,12 @@ function applyScenario() {
 function applyGame() {
   const coaching = settings.get('game') === 'coach';
   machine.coachActive = coaching;
-  if (coaching) clearBalls();
+  // Clear on every switch, not just into Coach. A held ball never falls and
+  // never recycles, so leaving one behind parked it in mid-air over the
+  // arcade table for good and cost a slot in the pool.
+  clearBalls();
+  game.reset();
+  coach.reset();
   game.revision++;
 }
 

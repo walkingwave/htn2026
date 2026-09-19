@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Paddle } from './paddle.js';
-import { TABLE, BALL, PHYSICS, PADDLE } from './constants.js';
+import { TABLE, NET, BALL, PHYSICS, PADDLE } from './constants.js';
 
 // An opponent that rallies with you from the far end.
 //
@@ -545,7 +545,7 @@ function flyShot(origin, velocity, targetY, spin) {
 
     if (prevZ < 0 && _fp.z >= 0) {
       const t = Math.abs(prevZ) / Math.max(Math.abs(prevZ - _fp.z), 1e-6);
-      netClearance = prevY + (_fp.y - prevY) * t - (TABLE.HEIGHT + 0.1525);
+      netClearance = prevY + (_fp.y - prevY) * t - (TABLE.HEIGHT + NET.HEIGHT);
     }
     if (_fv.y < 0 && _fp.y <= targetY) {
       return { landed: true, x: _fp.x, z: _fp.z, netClearance };

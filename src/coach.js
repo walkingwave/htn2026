@@ -75,6 +75,8 @@ const UNTRACED = new THREE.Color(0xe2231a);
 
 const _tangent = new THREE.Vector3();
 const _side = new THREE.Vector3();
+const _local = new THREE.Vector3();
+const _curvePoint = new THREE.Vector3();
 
 export const COACH_STATE = {
   IDLE: 'idle',
@@ -146,6 +148,7 @@ export class Coach {
     this._elapsed = 0;
     this._ghostT = 0;
     this.progress = 0;
+    this._paintedStep = -1;
     this.deviation = 0;
     this._paintProgress(0);
   }
@@ -430,7 +433,8 @@ export class Coach {
   // no menu at all.
   _checkBoardTap(blade) {
     if (!this._board) return;
-    const local = this._board.worldToLocal(blade.clone());
+    // Reused rather than cloned: this runs every frame the lesson is idle.
+    const local = this._board.worldToLocal(_local.copy(blade));
     const onPanel =
       Math.abs(local.x) < 0.28 && Math.abs(local.y) < 0.18 && Math.abs(local.z) < 0.1;
 
@@ -495,15 +499,17 @@ export class Coach {
       case COACH_STATE.READY:
       case COACH_STATE.SCORED: {
         this._ghostT = (this._ghostT + dt / (this.duration + 0.7)) % 1;
-        this.ghost.position.copy(this.curve.getPointAt(this._ghostT));
+        this.curve.getPointAt(this._ghostT, this.ghost.position);
 
-        const atStart = blade.distanceTo(this.curve.getPointAt(0)) < 0.11;
+        const atStart =
+          blade.distanceTo(this.curve.getPointAt(0, _curvePoint)) < 0.11;
         if (atStart && this._armCooldown <= 0) {
           this.state = COACH_STATE.TRACING;
           this._samples.length = 0;
           this._elapsed = 0;
           this._ghostT = 0;
           this.progress = 0;
+          this._paintedStep = -1;
           this._paintProgress(0);
 
           this.sfx?.ui(true);
@@ -514,12 +520,19 @@ export class Coach {
       case COACH_STATE.TRACING: {
         this._elapsed += dt;
         this._ghostT = Math.min(this._elapsed / this.duration, 1);
-        this.ghost.position.copy(this.curve.getPointAt(this._ghostT));
+        this.curve.getPointAt(this._ghostT, this.ghost.position);
 
         // Progress only moves forward: the trail should fill in as the
         // stroke completes, not flicker back when the bat wobbles.
+        // Repaint only when the green edge actually moves a segment. The
+        // colour attribute is re-uploaded to the GPU on every paint, and at
+        // headset framerate that is a pointless upload most frames.
         this.progress = Math.max(this.progress, near.t);
-        this._paintProgress(this.progress);
+        const step = Math.floor(this.progress * RIBBON_SAMPLES);
+        if (step !== this._paintedStep) {
+          this._paintedStep = step;
+          this._paintProgress(this.progress);
+        }
 
         this._samples.push({
           t: near.t,
