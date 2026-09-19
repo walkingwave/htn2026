@@ -91,20 +91,20 @@ function buildPaddleMesh(color, vertical) {
     bevelSize: 0.003,
     bevelSegments: 2,
     curveSegments: 8,
-  }), woodMat);
+  }), rubberFront);
   core.position.z = -PADDLE.HEAD_THICKNESS / 2;
   core.name = 'wood-core';
   core.renderOrder = 0;
   blade.add(core);
 
-  const frontFace = createFaceMesh(shape, rubberFront, PADDLE.HEAD_THICKNESS / 2 + 0.004);
-  const backFace = createFaceMesh(shape, rubberBack, -PADDLE.HEAD_THICKNESS / 2 - 0.004);
+  const frontFace = createFaceMesh(shape, rubberFront, 0.028);
+  const backFace = createFaceMesh(shape, rubberBack, -0.028);
   frontFace.renderOrder = 2;
   backFace.renderOrder = 2;
   blade.add(frontFace, backFace);
 
   // A thin contrasting edge tape makes the blade readable from the side.
-  const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(shape.getPoints(32).map((point) => new THREE.Vector3(point.x, point.y, PADDLE.HEAD_THICKNESS / 2 + 0.002))), new THREE.LineBasicMaterial({ color: 0xf1c27d }));
+  const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(shape.getPoints(32).map((point) => new THREE.Vector3(point.x, point.y, 0.03))), new THREE.LineBasicMaterial({ color: 0xf1c27d }));
   blade.add(edge);
   group.add(blade);
   return group;
