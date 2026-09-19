@@ -41,6 +41,7 @@ export class Ball {
     // instead would mean any other route back into the pool leaves a ball
     // permanently unable to score.
     this.scoredTarget = false;
+    this.awaitingOutcome = false; // struck, but not yet landed anywhere
     this.countedHit = false;
     this.countedReturn = false;
     this.countedMiss = false;
@@ -58,6 +59,7 @@ export class Ball {
     this.touchedByPaddle = false;
     this.isFeed = false;
     this.scoredTarget = false;
+    this.awaitingOutcome = false; // struck, but not yet landed anywhere
     this.countedHit = false;
     this.countedReturn = false;
     this.countedMiss = false;

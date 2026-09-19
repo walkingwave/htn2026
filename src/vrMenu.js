@@ -20,10 +20,17 @@ const H = 768;
 const PANEL_WIDTH = 0.95;
 const PANEL_HEIGHT = (PANEL_WIDTH * H) / W;
 
-// Sized so the full row list clears the footer. Adding a row without
-// checking these pushes the last entries off the bottom of the panel.
 const ROW_TOP = 176;
-const ROW_H = 52;
+const ROW_BOTTOM = 700; // rows must finish above the footer
+const ROW_H_MAX = 52;
+
+// Row height adapts to how many entries there are. Twice now a new setting
+// has pushed the last rows off the bottom of the panel, so the layout
+// derives from the list rather than being a constant to remember to update.
+function rowHeight(count) {
+  if (count <= 0) return ROW_H_MAX;
+  return Math.min(ROW_H_MAX, (ROW_BOTTOM - ROW_TOP) / count);
+}
 const DWELL_TIME = 1.4; // seconds of sustained gaze to activate
 const DWELL_STEPS = 20; // visible increments of the dwell bar; see update()
 
@@ -145,11 +152,8 @@ export class VRMenu {
   update(dt, controllers) {
     if (!this.open) return;
 
-    const pointer = this._activePointer(controllers);
-    this.usingGaze = pointer.gaze;
-
-    _raycaster.set(pointer.origin, pointer.direction);
-    const hit = _raycaster.intersectObject(this.panel, false)[0];
+    const { hit, gaze } = this._pick(controllers);
+    this.usingGaze = gaze;
 
     let index = -1;
     if (hit) {
@@ -198,25 +202,42 @@ export class VRMenu {
     if (this._dirty) this.draw();
   }
 
-  _activePointer(controllers) {
+  // Try every tracked controller and take whichever is actually pointing at
+  // the panel, rather than assuming a hand. Committing to the first
+  // controller in the list meant that if you pointed with your other hand,
+  // the ray came from the one hanging at your side and nothing ever
+  // highlighted — the menu looked broken.
+  _pick(controllers) {
+    let fallback = null;
+
     for (const controller of controllers) {
       if (!controller?.visible) continue;
       _matrix.identity().extractRotation(controller.matrixWorld);
       _origin.setFromMatrixPosition(controller.matrixWorld);
       _direction.set(0, 0, -1).applyMatrix4(_matrix).normalize();
-      return { origin: _origin, direction: _direction, gaze: false };
+
+      _raycaster.set(_origin, _direction);
+      const hit = _raycaster.intersectObject(this.panel, false)[0];
+      if (hit) return { hit, gaze: false };
+      fallback = { hit: null, gaze: false };
     }
 
+    // No controller on target: fall back to the head, so the menu still
+    // works by looking at it.
     this.camera.getWorldPosition(_origin);
     this.camera.getWorldDirection(_direction);
-    return { origin: _origin, direction: _direction, gaze: true };
+    _raycaster.set(_origin, _direction);
+    const gazeHit = _raycaster.intersectObject(this.panel, false)[0];
+    if (gazeHit) return { hit: gazeHit, gaze: true };
+
+    return fallback ?? { hit: null, gaze: true };
   }
 
   _indexAt(uv) {
     if (!uv) return -1;
     const y = (1 - uv.y) * H;
     if (y < ROW_TOP) return -1;
-    const i = Math.floor((y - ROW_TOP) / ROW_H);
+    const i = Math.floor((y - ROW_TOP) / rowHeight(this.items.length));
     return i >= 0 && i < this.items.length ? i : -1;
   }
 
@@ -274,18 +295,20 @@ export class VRMenu {
     ctx.lineTo(W - 60, ROW_TOP - 26);
     ctx.stroke();
 
+    const rowH = rowHeight(this.items.length);
+    const fontSize = Math.min(25, Math.round(rowH * 0.5));
     this.items.forEach((item, i) => {
-      const y = ROW_TOP + i * ROW_H;
+      const y = ROW_TOP + i * rowH;
       const selected = i === this.hovered;
 
       if (selected) {
         ctx.fillStyle = 'rgba(226,35,26,0.18)';
-        ctx.fillRect(40, y, W - 80, ROW_H - 4);
+        ctx.fillRect(40, y, W - 80, rowH - 4);
       }
 
-      const baseline = y + 34;
+      const baseline = y + rowH * 0.66;
       ctx.fillStyle = selected ? ACCENT : PAPER;
-      ctx.font = `${selected ? 700 : 500} 25px ${MONO}`;
+      ctx.font = `${selected ? 700 : 500} ${fontSize}px ${MONO}`;
       ctx.fillText(selected ? '▸' : ' ', 56, baseline);
       ctx.fillText(item.label.toUpperCase(), 96, baseline);
 

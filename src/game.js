@@ -34,43 +34,58 @@ export class Game {
   }
 
   // Called for every physics contact.
+  // Touching the ball is not the same as putting it back on the table, so a
+  // hit only opens the question — the shot stays unresolved until it either
+  // lands on the far half or doesn't. The streak counts good returns, and
+  // breaks the moment one goes astray.
   onContact(ball, event) {
     if (event === 'paddle') {
       if (ball.countedHit) return;
       ball.countedHit = true;
+      ball.awaitingOutcome = true; // resolved on the next bounce
       this.hits++;
-      this.streak++;
-      this.bestStreak = Math.max(this.bestStreak, this.streak);
       this._changed('Hit');
       return;
     }
 
-    // A bounce on the far half after the player struck it is a good return.
-    if (
-      event === 'table' &&
-      ball.touchedByPaddle &&
-      !ball.countedReturn &&
-      ball.mesh.position.z < 0
-    ) {
-      ball.countedReturn = true;
-      this.returns++;
-      this._changed('On the table');
+    if (event === 'table' && ball.awaitingOutcome) {
+      ball.awaitingOutcome = false;
+      if (ball.mesh.position.z < 0) {
+        // Over the net and down on their side: a good return.
+        ball.countedReturn = true;
+        this.returns++;
+        this.streak++;
+        this.bestStreak = Math.max(this.bestStreak, this.streak);
+        this._changed('On the table');
+      } else {
+        // Came down on your own half — it never crossed.
+        this.streak = 0;
+        this._changed('Not over');
+      }
       return;
     }
 
-    // Reaching the floor untouched is a miss, whichever mode we're in. This
-    // catches balls that drop short as well as ones that fly past — the
-    // fly-past check in update() alone would never fire on a dropped feed.
-    if (
-      event === 'floor' &&
-      !ball.touchedByPaddle &&
-      !ball.countedMiss &&
-      !ball.countedHit
-    ) {
-      ball.countedMiss = true;
-      this.misses++;
-      this.streak = 0;
-      this._changed('Missed');
+    if (event === 'floor') {
+      // A struck ball that reaches the floor without having landed on the
+      // far half went long, wide, or into the net. Either way the streak is
+      // over; it is not a miss, because you did make contact.
+      if (ball.awaitingOutcome) {
+        ball.awaitingOutcome = false;
+        this.streak = 0;
+        this._changed('Off the table');
+        return;
+      }
+
+      // Reaching the floor untouched is a miss, whichever mode we're in.
+      // This catches balls that drop short as well as ones that fly past —
+      // the fly-past check in update() alone would never fire on a feed
+      // that was simply left.
+      if (!ball.touchedByPaddle && !ball.countedMiss && !ball.countedHit) {
+        ball.countedMiss = true;
+        this.misses++;
+        this.streak = 0;
+        this._changed('Missed');
+      }
     }
   }
 

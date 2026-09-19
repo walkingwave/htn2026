@@ -55,6 +55,7 @@ export class BallMachine {
   constructor(balls, settings) {
     this.balls = balls; // pooled Ball instances
     this.settings = settings;
+    this.server = null; // set to the opponent, who serves in rally mode
     this.enabled = true;
     this.spread = 0.5; // lateral spread of the target point (m)
     this.modeIndex = 0;
@@ -186,6 +187,14 @@ export class BallMachine {
   serve() {
     const ball = this.balls.find((b) => !b.active);
     if (!ball) return; // pool exhausted; a ball will free up shortly
+
+    // In rally mode the opponent puts the ball in play from their own bat,
+    // so the machine hands off rather than firing from the corner.
+    if (this.isRallyMode && this.server) {
+      if (!this.server.serve(ball)) return;
+      this.servedCount++;
+      return;
+    }
 
     if (this.isTargetMode) {
       this._feedToPlayer(ball);

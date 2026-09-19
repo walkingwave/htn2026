@@ -31,6 +31,12 @@ export const OPTIONS = {
     { label: 'Controller', value: 'controller' },
     { label: 'Real paddle', value: 'hand' },
   ],
+  // How hard the rally opponent is to beat.
+  difficulty: [
+    { label: 'Easy', value: 'easy' },
+    { label: 'Normal', value: 'normal' },
+    { label: 'Hard', value: 'hard' },
+  ],
 };
 
 const DEFAULTS = {
@@ -39,6 +45,7 @@ const DEFAULTS = {
   placement: 1,
   hand: 'right',
   paddleSource: 'controller',
+  difficulty: 'normal',
   sound: true,
   aimMarker: true,
 };

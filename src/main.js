@@ -140,6 +140,7 @@ scene.add(targetZone.mesh);
 // real spin, real restitution, and a net cord behaves like a net cord.
 const opponent = new Opponent();
 scene.add(opponent.mesh);
+machine.server = opponent; // in rally mode the opponent puts the ball in play
 
 // AR: transparent background, no virtual floor, dimmer fill so the real room
 // carries the lighting. VR: full venue.
@@ -374,8 +375,10 @@ function applyHandedness() {
 
 settings.onChange((key) => {
   if (key === 'hand') applyHandedness();
+  if (key === 'difficulty') opponent.setSkill(settings.get('difficulty'));
 });
 applyHandedness();
+opponent.setSkill(settings.get('difficulty'));
 
 // Short haptic tap on contact, on whichever hand actually struck the ball.
 function pulse(ball) {

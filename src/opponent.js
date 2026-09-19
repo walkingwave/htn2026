@@ -43,6 +43,11 @@ const HIT_HEIGHT_MIN = 0.28;
 // Planned clearance over the tape, chosen from measured net-cord rates
 // rather than by eye.
 const NET_MARGIN = 0.15;
+
+// How long the bat keeps travelling along a planned swing. Long enough to
+// carry it through the ball, short enough that a miss doesn't send it into
+// orbit.
+const SWING_FOLLOW_THROUGH = 0.22; // seconds
 const READY = new THREE.Vector3(0, TABLE.HEIGHT + 0.2, HIT_PLANE_Z);
 
 export const OPPONENT_SKILL = {
@@ -61,6 +66,7 @@ const _outDir = new THREE.Vector3();
 const _normal = new THREE.Vector3();
 const _swing = new THREE.Vector3();
 const _bladeOffset = new THREE.Vector3();
+const _swingPos = new THREE.Vector3();
 const _faceQuat = new THREE.Quaternion();
 const _faceDir = new THREE.Vector3();
 const FORWARD = new THREE.Vector3(0, 0, 1); // the blade's own face axis
@@ -82,6 +88,7 @@ export class Opponent {
     this._swingVel = new THREE.Vector3();
     this._recover = 0;
     this._willMiss = false;
+    this._swingElapsed = 0;
 
     // The blade sits at an offset inside the paddle mesh, so placing the
     // blade somewhere means placing the mesh at that point less the offset.
@@ -239,13 +246,29 @@ export class Opponent {
     if (nearContact && !this._willMiss) {
       if (this.state !== 'swinging') {
         this.state = 'swinging';
+        this._swingElapsed = 0;
         this._planSwing(ball);
       }
-      // Drive the blade through the contact point along the swing
+
+      this._swingElapsed += dt;
+
+      // A swing is a stroke, not a launch. It was integrating position along
+      // the swing vector every frame with nothing to stop it, so whenever
+      // the opponent missed, the bat kept accelerating away and sailed off
+      // over the player's head. Bound it: follow through for a fixed window,
+      // then give up on the ball and walk back.
+      if (this._swingElapsed > SWING_FOLLOW_THROUGH) {
+        this.paddle.enabled = false;
+        this.targetBall = null;
+        this.state = 'recover';
+        this._recover = 0.25;
+        return;
+      }
+
       this.paddle.enabled = true;
-      const pos = this._blade.getWorldPosition(new THREE.Vector3());
-      pos.addScaledVector(this._swingVel, dt);
-      this._place(pos, this._swingNormal);
+      _swingPos.copy(this._blade.getWorldPosition(_v));
+      _swingPos.addScaledVector(this._swingVel, dt);
+      this._place(_swingPos, this._swingNormal);
     } else {
       this.paddle.enabled = false;
       this._driftTo(goal, dt);
@@ -307,6 +330,36 @@ export class Opponent {
     this._swingNormal = _normal.clone();
 
     this._recover = 0.35;
+  }
+
+  // Serves to start a rally: the ball appears just in front of the bat and
+  // is played from there, so the exchange begins where the opponent is
+  // standing rather than shooting out of a machine parked at the corner.
+  serve(ball) {
+    const from = new THREE.Vector3(
+      (Math.random() * 2 - 1) * 0.25,
+      TABLE.HEIGHT + 0.22,
+      HIT_PLANE_Z + 0.06
+    );
+
+    // Stand the bat behind the ball so the serve visibly comes off the face
+    _swingPos.copy(from).add(new THREE.Vector3(0, -0.02, -0.11));
+    this._place(_swingPos, TOWARD_PLAYER);
+    this.paddle.enabled = false; // the serve is scripted; don't also strike it
+    this.state = 'recover';
+    this._recover = 0.3;
+    this.targetBall = null;
+
+    const target = new THREE.Vector3(
+      (Math.random() * 2 - 1) * (TABLE.WIDTH / 2 - 0.2),
+      TABLE.HEIGHT + BALL.RADIUS,
+      TABLE.LENGTH * 0.24 + Math.random() * TABLE.LENGTH * 0.18
+    );
+    const velocity = solveReturn(from, target, this.skill.pace * 0.85);
+    const spin = new THREE.Vector3((Math.random() * 2 - 1) * 90, 0, 0);
+
+    ball.serve(from, velocity, spin);
+    return true;
   }
 
   // Called by the game when the opponent's bat actually connects.

@@ -44,6 +44,7 @@ export function buildPauseMenu({ machine, settings, game, onExit, onResume }) {
       },
     },
     { ...cycle('paddleSource'), label: 'Bat follows' },
+    { ...cycle('difficulty'), label: 'Opponent' },
     { ...cycle('hand'), label: 'Paddle hand' },
     { ...cycle('pace'), label: 'Ball pace' },
     { ...cycle('feedRate'), label: 'Feed rate' },
