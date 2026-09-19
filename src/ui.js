@@ -3,12 +3,12 @@ import { getLeaderboard, submitScore, scoreFor } from './leaderboard.js';
 
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 
-export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, onEnableCV, onDrillChange, onLandscapeChange }) {
+export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, onEnableCV, onDrillChange, onLandscapeChange, onVersusCreate, onVersusLeave }) {
   const root = document.createElement('section');
   root.className = 'trainer-ui landing-active';
   root.innerHTML = `<section class="landing-screen" id="landing-screen" aria-label="Flyball ping pong trainer introduction">
     <nav class="landing-nav"><a class="landing-brand" href="#top" aria-label="flyball home"><span class="brand-emoji" aria-hidden="true">🏓</span><span>flyball<span class="accent">.</span></span></a><div class="landing-nav-links"><a href="#how-it-works">How it works</a><a href="#drills">Drills</a><a href="#leaderboard-preview">Leaderboard</a></div><button class="landing-nav-cta" id="landing-nav-start">Start training <span>↗</span></button></nav>
-    <div class="landing-hero" id="top"><div class="hero-copy"><div class="hero-kicker"><span class="hero-kicker-dot"></span> DESKTOP-FIRST PING PONG COACH</div><h1>Hone your skills.<br><em>Play to win.</em></h1><p class="hero-lede">Train every return, play against a fly that refuses to give you easy points, then step into Versus when you feel like a pro.</p><div class="hero-actions"><button class="landing-primary" id="landing-start">Start your first drill <span>→</span></button><button class="landing-ghost" id="landing-camera"><span class="camera-icon">◉</span> Play with your camera</button></div><div class="hero-note"><span>NO VR REQUIRED</span><span class="note-line"></span><span>POINTER · WEBCAM · XR</span></div></div><div class="hero-arena" aria-label="Player view across a ping pong table"><div class="hero-glow"></div><div class="hero-grid"></div><div class="hero-view-label"><span></span> PLAYER VIEW / POINT 08</div><div class="hero-table"><div class="hero-net"></div><div class="hero-target"></div><div class="hero-paddle hero-paddle-player"></div><div class="hero-paddle hero-paddle-fly"></div><div class="hero-ball"></div></div><div class="hero-fly"><span class="fly-eye fly-eye-left"></span><span class="fly-eye fly-eye-right"></span><span class="fly-wing fly-wing-left"></span><span class="fly-wing fly-wing-right"></span></div><div class="hero-stat hero-stat-one"><b>06</b><span>coaching moves</span></div><div class="hero-stat hero-stat-two"><b>05×</b><span>clean reps to advance</span></div><div class="hero-caption"><span class="caption-dot"></span> LIVE TRAINING SIMULATION</div></div></div>
+    <div class="landing-hero" id="top"><div class="hero-copy"><div class="hero-kicker"><span class="hero-kicker-dot"></span> DESKTOP-FIRST PING PONG COACH</div><h1>Hone your skills.<br><em>Play to win.</em></h1><p class="hero-lede">Train every return, play against a fly that refuses to give you easy points, then step into Versus when you feel like a pro.</p><div class="hero-actions"><button class="landing-primary" id="landing-start">Start your first drill <span>→</span></button><button class="landing-ghost" id="landing-versus"><span class="camera-icon">⚔</span> Play a friend</button><button class="landing-ghost" id="landing-camera"><span class="camera-icon">◉</span> Play with your camera</button></div><div class="hero-note"><span>NO VR REQUIRED</span><span class="note-line"></span><span>POINTER · WEBCAM · XR</span></div></div><div class="hero-arena" aria-label="Player view across a ping pong table"><div class="hero-glow"></div><div class="hero-grid"></div><div class="hero-view-label"><span></span> PLAYER VIEW / POINT 08</div><div class="hero-table"><div class="hero-net"></div><div class="hero-target"></div><div class="hero-paddle hero-paddle-player"></div><div class="hero-paddle hero-paddle-fly"></div><div class="hero-ball"></div></div><div class="hero-fly"><span class="fly-eye fly-eye-left"></span><span class="fly-eye fly-eye-right"></span><span class="fly-wing fly-wing-left"></span><span class="fly-wing fly-wing-right"></span></div><div class="hero-stat hero-stat-one"><b>06</b><span>coaching moves</span></div><div class="hero-stat hero-stat-two"><b>05×</b><span>clean reps to advance</span></div><div class="hero-caption"><span class="caption-dot"></span> LIVE TRAINING SIMULATION</div></div></div>
     <div class="landing-strip" id="how-it-works"><div><span class="strip-number">01</span><strong>Hone it.</strong><small>Build the fundamentals that make every shot cleaner.</small></div><div><span class="strip-number">02</span><strong>Play the fly.</strong><small>Read a moving opponent and stay composed under pressure.</small></div><div><span class="strip-number">03</span><strong>Go Versus.</strong><small>Feeling like a pro? Crush others on the leaderboard.</small></div></div>
     <section class="landing-section" id="drills"><div class="section-heading"><div><span class="landing-eyebrow">YOUR TRAINING ROOM</span><h2>Every point has a purpose.</h2></div><p>Choose the skill you want to sharpen. The coach tracks the details that matter after the rally is over.</p></div><div class="landing-drill-grid"><button class="landing-drill-card landing-drill-target" data-landing-drill="target"><span class="drill-card-top"><span class="card-icon">◎</span><span class="card-arrow">↗</span></span><strong>Hone your skills</strong><p>Six progressive moves. Five successful shots per target. No skipping the fundamentals.</p><span class="card-meta">FOREHAND · BACKHAND · PLACEMENT</span></button><button class="landing-drill-card landing-drill-fly" data-landing-drill="fly"><span class="drill-card-top"><span class="card-icon">✦</span><span class="card-arrow">↗</span></span><strong>Play against a fly</strong><p>Read an opponent that moves, returns, and makes you earn every clean point.</p><span class="card-meta">REACTION · PRESSURE · SURVIVAL</span></button><button class="landing-drill-card landing-drill-rally" data-landing-drill="rally"><span class="drill-card-top"><span class="card-icon">↗</span><span class="card-arrow">↗</span></span><strong>Feeling like a pro?</strong><p>Crush others in Versus. First, build the consistency that makes a champion hard to beat.</p><span class="card-meta">TIMING · CONTROL · CONSISTENCY</span></button></div></section>
     <section class="landing-coach-section"><div class="coach-quote"><span class="landing-eyebrow">THE COACH IN THE LOOP</span><blockquote>“Good hands are a start.<br><em>Good decisions win points.</em>”</blockquote><p>Flyball turns every return into a piece of feedback: racket angle, preparation, placement, and pressure.</p></div><div class="coach-list"><div><span>↗</span><b>Pointer fallback</b><small>Start playing immediately with your mouse.</small></div><div><span>◉</span><b>Camera paddle</b><small>Use your webcam to make your hands the controller.</small></div><div><span>✦</span><b>Global rankings</b><small>Save your fundamentals and boss-run scores.</small></div></div></section>
@@ -22,7 +22,10 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
   <div class="countdown hidden" id="countdown" aria-live="assertive" aria-label="Serve countdown"></div>
   <aside class="control-panel"><div><span class="eyebrow">COACHING PLAN</span><h1 id="panel-title">Build your fundamentals.</h1><p id="panel-copy">Pick a drill, then use your paddle to return the simulated ball.</p></div><div class="target-stage" id="target-stage"><div><span class="eyebrow">CURRENT MOVE</span><strong id="target-move">Ready to train</strong></div><span class="target-count" id="target-count">0 / 5</span><p id="target-cue">Every target move requires five clean repetitions before the next one unlocks.</p></div><div class="drill-list">${Object.entries(DRILLS).map(([key, value]) => `<button class="drill-option ${key === 'rally' ? 'selected' : ''}" data-drill="${key}"><span class="difficulty-icon">${key === 'fly' ? '✦' : key === 'target' ? '◎' : '↗'}</span><span><b>${value.label}</b><small>${value.detail}</small></span></button>`).join('')}</div><div class="difficulty-list">${Object.entries(DIFFICULTIES).map(([key, value]) => `<button class="difficulty-option ${key === 'standard' ? 'selected' : ''}" data-difficulty="${key}"><span><b>${value.label}</b><small>${value.detail}</small></span></button>`).join('')}</div><div class="control-actions"><button class="primary-button" id="start-button">Start drill →</button><button class="secondary-button" id="pause-button">Pause</button><button class="secondary-button" id="reset-button">Reset</button></div><div class="control-actions secondary-actions"><button class="secondary-button" id="machine-button">Pause ball machine</button><button class="secondary-button" id="cv-button">Use camera paddle</button></div><p class="control-hint">No VR required: move the on-screen paddle with your pointer, or enable camera CV. XR remains available when you have it.</p></aside>
   <div class="leaderboard-panel hidden" id="leaderboard-panel"><div class="panel-heading"><div><span class="eyebrow">THE ARENA / LIVE RANKINGS</span><h2>Fundamentals under pressure.</h2></div><button class="text-button" id="close-leaderboard">Close</button></div><div class="leader-tabs"><button class="leader-tab selected" data-category="fundamentals">Fundamentals</button><button class="leader-tab" data-category="boss">Boss survival</button></div><div id="leaderboard-list"></div></div>
-  <div class="summary-panel hidden" id="summary-panel"><span class="eyebrow">SESSION COMPLETE</span><h2 id="summary-title">Good work.</h2><p id="summary-coach" class="summary-coach"></p><div class="summary-verdict hidden" id="summary-verdict"></div><div class="summary-grid" id="summary-grid"></div><div class="save-row"><input id="player-name" maxlength="32" placeholder="your name" aria-label="Player name"/><button class="primary-button" id="save-score">Save score</button></div><p class="save-status" id="save-status"></p><button class="secondary-button" id="summary-close">Back to drills</button></div>`;
+  <div class="summary-panel hidden" id="summary-panel"><span class="eyebrow">SESSION COMPLETE</span><h2 id="summary-title">Good work.</h2><p id="summary-coach" class="summary-coach"></p><div class="summary-verdict hidden" id="summary-verdict"></div><div class="summary-grid" id="summary-grid"></div><div class="save-row"><input id="player-name" maxlength="32" placeholder="your name" aria-label="Player name"/><button class="primary-button" id="save-score">Save score</button></div><p class="save-status" id="save-status"></p><button class="secondary-button" id="summary-close">Back to drills</button></div>
+  <div class="versus-panel hidden" id="versus-panel"><div class="panel-heading"><div><span class="eyebrow">ONLINE VERSUS / 1V1</span><h2 id="versus-title">Play a friend</h2></div><button class="text-button" id="versus-close">Leave</button></div><p class="versus-sub" id="versus-sub">Share the link below. First to 7 points wins.</p><div class="versus-code-row"><span class="eyebrow">ROOM CODE</span><strong id="versus-code">------</strong></div><div class="versus-link-row"><input id="versus-link" readonly aria-label="Shareable game link" /><button class="primary-button" id="versus-copy">Copy link</button></div><p class="versus-status" id="versus-lobby-status">Waiting for your opponent to join…</p><p class="versus-note" id="versus-note"></p></div>
+  <div class="versus-score hidden" id="versus-score"><div class="vs-side"><small id="vs-you-label">YOU</small><strong id="vs-you">0</strong></div><div class="vs-mid"><span id="vs-serve">YOUR SERVE</span><small>FIRST TO <b id="vs-target">7</b></small></div><div class="vs-side"><small>OPPONENT</small><strong id="vs-them">0</strong></div></div>
+  <div class="versus-win hidden" id="versus-win"><div class="versus-win-card"><span class="eyebrow" id="versus-win-eyebrow">MATCH COMPLETE</span><h2 id="versus-win-title">You win!</h2><p id="versus-win-score">0 – 0</p><div class="versus-win-actions"><button class="primary-button" id="versus-win-leave">Back to home</button></div></div></div>`;
   document.body.appendChild(root);
 
   let difficulty = 'standard';
@@ -33,9 +36,10 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
   let pendingDrill = drill;
   let lastSummary = null;
   const $ = (id) => root.querySelector(`#${id}`);
+  const navigate = (path) => window.location.assign(path);
   const enterTrainer = () => { root.classList.remove('landing-active', 'mode-select-active'); root.classList.add('sidebar-closed'); window.scrollTo(0, 0); };
   const showModeSelect = (nextDrill = drill) => { pendingDrill = nextDrill; root.classList.remove('landing-active'); root.classList.add('mode-select-active'); $('mode-choice').classList.remove('hidden'); $('landscape-choice').classList.add('hidden'); };
-  const enterLanding = () => { root.classList.add('landing-active'); root.classList.remove('mode-select-active', 'sidebar-closed'); $('leaderboard-panel').classList.add('hidden'); $('summary-panel').classList.add('hidden'); $('lives').classList.add('hidden'); $('countdown').classList.add('hidden'); };
+  const enterLanding = () => { if (root.classList.contains('versus-active')) { onVersusLeave?.(); } root.classList.remove('mode-select-active', 'sidebar-closed', 'versus-active'); root.classList.add('landing-active'); $('leaderboard-panel').classList.add('hidden'); $('summary-panel').classList.add('hidden'); $('lives').classList.add('hidden'); $('countdown').classList.add('hidden'); $('versus-panel').classList.add('hidden'); $('versus-score').classList.add('hidden'); $('versus-win').classList.add('hidden'); };
   const startMode = (selectedMode) => { mode = selectedMode; $('mode-choice').classList.add('hidden'); $('landscape-choice').classList.remove('hidden'); onLandscapeChange?.(landscape); };
   const chooseDrill = (nextDrill) => {
     drill = nextDrill;
@@ -100,6 +104,55 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
   };
   const hideCountdown = () => { const el = $('countdown'); el.classList.add('hidden'); el.classList.remove('pop'); };
 
+  // Online versus lobby + scoreboard.
+  let versusRole = 'host';
+  const openVersus = (role, info) => {
+    versusRole = role;
+    root.classList.remove('landing-active', 'mode-select-active');
+    root.classList.add('sidebar-closed', 'versus-active');
+    $('versus-panel').classList.remove('hidden');
+    $('versus-win').classList.add('hidden');
+    $('versus-score').classList.add('hidden');
+    $('versus-title').textContent = role === 'host' ? 'Your game is ready' : 'Joining game';
+    $('versus-code').textContent = info.code ?? '------';
+    $('versus-link').value = info.link ?? window.location.href;
+    $('versus-note').textContent = info.kind === 'local'
+      ? 'Local mode: open this link in another tab/window on this device. Add Supabase keys for cross-device play.'
+      : 'Online: send this link to anyone, anywhere.';
+    $('versus-lobby-status').textContent = role === 'host' ? 'Waiting for your opponent to join…' : 'Connecting to the host…';
+  };
+  const setVersusOpponent = (present) => {
+    if (!root.classList.contains('versus-active')) return;
+    if (present) {
+      $('versus-panel').classList.add('hidden');
+      $('versus-score').classList.remove('hidden');
+      feedback('Opponent connected — game on!', 'success');
+    } else {
+      $('versus-score').classList.add('hidden');
+      $('versus-win').classList.add('hidden');
+      $('versus-panel').classList.remove('hidden');
+      $('versus-lobby-status').textContent = 'Waiting for your opponent…';
+    }
+  };
+  const versusScores = (snap) => versusRole === 'host'
+    ? { you: snap.scoreHost, them: snap.scoreGuest }
+    : { you: snap.scoreGuest, them: snap.scoreHost };
+  const updateVersusScore = (snap, myRole) => {
+    if (myRole) versusRole = myRole;
+    const { you, them } = versusScores(snap);
+    $('vs-you').textContent = you;
+    $('vs-them').textContent = them;
+    $('vs-target').textContent = snap.target;
+    $('vs-serve').textContent = snap.server === versusRole ? 'YOUR SERVE' : 'THEIR SERVE';
+  };
+  const showVersusWin = (didWin, snap) => {
+    const { you, them } = versusScores(snap);
+    $('versus-win').classList.remove('hidden');
+    $('versus-win-eyebrow').textContent = didWin ? 'GG — YOU TOOK IT' : 'GG — RUN IT BACK';
+    $('versus-win-title').textContent = didWin ? 'You win! 🏓' : 'You lost.';
+    $('versus-win-score').textContent = `${you} – ${them}`;
+  };
+
   const showSummary = async (summary) => {
     lastSummary = summary; update(summary, 'COMPLETE');
     const verdict = $('summary-verdict');
@@ -146,27 +199,35 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
 
   root.querySelectorAll('[data-drill]').forEach((button) => button.addEventListener('click', () => { chooseDrill(button.dataset.drill); update({ drill, difficulty, completedMoves: 0, totalMoves: 6, targetHits: 0, targetAccuracy: 0, accuracy: 0, score: 0, rally: 0, longestRally: 0, bossLevel: DIFFICULTIES[difficulty].bossLevel, currentMoveNumber: 1, currentMoveLabel: 'Ready to train', currentMoveCue: DRILLS[drill].coach, moveSuccesses: 0, moveRequired: 5 }, 'READY'); }));
   root.querySelectorAll('[data-difficulty]').forEach((button) => button.addEventListener('click', () => { difficulty = button.dataset.difficulty; root.querySelectorAll('[data-difficulty]').forEach((item) => item.classList.toggle('selected', item === button)); }));
-  root.querySelectorAll('[data-landing-drill]').forEach((button) => button.addEventListener('click', () => showModeSelect(button.dataset.landingDrill)));
-  $('landing-start').addEventListener('click', () => showModeSelect());
-  $('landing-nav-start').addEventListener('click', () => showModeSelect());
-  $('landing-camera').addEventListener('click', () => showModeSelect());
+  root.querySelectorAll('[data-landing-drill]').forEach((button) => button.addEventListener('click', () => navigate(`/training?drill=${button.dataset.landingDrill}`)));
+  $('landing-start').addEventListener('click', () => navigate('/training'));
+  $('landing-nav-start').addEventListener('click', () => navigate('/training'));
+  $('landing-camera').addEventListener('click', () => navigate('/training'));
   root.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => startMode(button.dataset.mode)));
-  $('mode-back').addEventListener('click', enterLanding);
+  $('mode-back').addEventListener('click', () => navigate('/'));
   root.querySelectorAll('[data-landscape]').forEach((button) => button.addEventListener('click', () => { landscape = button.dataset.landscape; root.querySelectorAll('[data-landscape]').forEach((item) => item.classList.toggle('selected', item === button)); onLandscapeChange?.(landscape); }));
   $('landscape-start').addEventListener('click', () => { chooseDrill(pendingDrill); enterTrainer(); onStart(difficulty, drill, mode, landscape); feedback(mode === 'ranked' ? 'Ranked run live — 3 balls to drop. Make every return count.' : 'Casual drill live — build your rhythm.', 'success'); });
   $('sidebar-toggle').addEventListener('click', () => root.classList.toggle('sidebar-closed'));
   const switchDrill = (direction) => { const keys = Object.keys(DRILLS); const next = (keys.indexOf(drill) + direction + keys.length) % keys.length; chooseDrill(keys[next]); onDrillChange?.(drill, mode); feedback(`Switched to ${DRILLS[drill].label}.`, 'success'); };
   $('previous-drill').addEventListener('click', () => switchDrill(-1));
   $('next-drill').addEventListener('click', () => switchDrill(1));
-  $('landing-return').addEventListener('click', enterLanding);
-  $('topbar-brand').addEventListener('click', enterLanding);
-  $('landing-leaderboard').addEventListener('click', () => { enterTrainer(); $('leaderboard-panel').classList.remove('hidden'); loadLeaderboard(); });
+  $('landing-return').addEventListener('click', () => navigate('/'));
+  $('topbar-brand').addEventListener('click', () => navigate('/'));
+  $('landing-versus').addEventListener('click', () => navigate('/live-game'));
+  $('versus-copy').addEventListener('click', async () => {
+    const link = $('versus-link').value;
+    try { await navigator.clipboard.writeText(link); $('versus-copy').textContent = 'Copied!'; setTimeout(() => { $('versus-copy').textContent = 'Copy link'; }, 1500); }
+    catch { $('versus-link').select(); feedback('Press Ctrl/Cmd+C to copy the link.', ''); }
+  });
+  $('versus-close').addEventListener('click', () => navigate('/'));
+  $('versus-win-leave').addEventListener('click', () => navigate('/'));
+  $('landing-leaderboard').addEventListener('click', () => navigate('/tournament'));
   $('start-button').addEventListener('click', () => { $('summary-panel').classList.add('hidden'); onStart(difficulty, drill, mode, landscape); feedback(drill === 'target' ? 'Move 1 live — land five clean shots.' : mode === 'ranked' ? 'Ranked run live — you have 3 balls to drop.' : 'Rally live — watch the serve.', 'success'); });
   $('pause-button').addEventListener('click', () => onPause());
   $('reset-button').addEventListener('click', () => onReset());
   $('machine-button').addEventListener('click', () => { const enabled = onMachineToggle(); $('machine-button').textContent = enabled ? 'Pause ball machine' : 'Resume ball machine'; });
   $('cv-button').addEventListener('click', () => { onEnableCV(); $('cv-button').textContent = 'Camera loading…'; });
-  $('leaderboard-button').addEventListener('click', () => { $('leaderboard-panel').classList.remove('hidden'); loadLeaderboard(); });
+  $('leaderboard-button').addEventListener('click', () => navigate('/tournament'));
   $('close-leaderboard').addEventListener('click', () => $('leaderboard-panel').classList.add('hidden'));
   $('summary-close').addEventListener('click', () => $('summary-panel').classList.add('hidden'));
   root.querySelectorAll('.leader-tab').forEach((button) => button.addEventListener('click', () => { category = button.dataset.category; root.querySelectorAll('.leader-tab').forEach((item) => item.classList.toggle('selected', item === button)); loadLeaderboard(); }));
@@ -178,5 +239,23 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
     try { const result = await submitScore(name, lastSummary, saveCategory); $('save-status').textContent = result.storage === 'local' ? `Saved on this device. Configure Supabase to publish globally. (${scoreFor(lastSummary, saveCategory)} pts)` : 'Score saved to the arena.'; } catch { $('save-status').textContent = 'Could not reach the leaderboard. Your session is still safe.'; }
   });
 
-  return { update, feedback, showSummary, setLives, loseLife, showCountdown, hideCountdown, getDifficulty: () => difficulty, getDrill: () => drill, isModeSelecting: () => root.classList.contains('mode-select-active') };
+  const openTraining = (requestedDrill) => {
+    if (requestedDrill && DRILLS[requestedDrill]) chooseDrill(requestedDrill);
+    showModeSelect(requestedDrill ?? drill);
+  };
+  const openTournament = () => {
+    enterTrainer();
+    $('leaderboard-panel').classList.remove('hidden');
+    loadLeaderboard();
+  };
+  const startLiveGame = async () => {
+    try {
+      const info = await onVersusCreate?.();
+      if (info) openVersus('host', info);
+    } catch (error) {
+      feedback(`Couldn't start a game: ${error.message}`, 'error');
+    }
+  };
+
+  return { update, feedback, showSummary, setLives, loseLife, showCountdown, hideCountdown, openVersus, setVersusOpponent, updateVersusScore, showVersusWin, openTraining, openTournament, startLiveGame, getDifficulty: () => difficulty, getDrill: () => drill, isModeSelecting: () => root.classList.contains('mode-select-active') };
 }

@@ -10,6 +10,7 @@ export class Ball {
     this.mesh.castShadow = true;
     this.velocity = new THREE.Vector3();
     this.active = false; // inactive balls are hidden and skip physics
+    this.floorCounted = false; // guards against one landing counting as many misses
     this.mesh.visible = false;
   }
 
@@ -17,6 +18,7 @@ export class Ball {
     this.mesh.position.copy(position);
     this.velocity.copy(velocity);
     this.active = true;
+    this.floorCounted = false;
     this.mesh.visible = true;
   }
 
