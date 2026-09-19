@@ -16,6 +16,8 @@ import { BallMachine } from './ballMachine.js';
 import { Game } from './game.js';
 import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
+import { HandPaddleRig } from './handPaddle.js';
+import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
@@ -220,6 +222,8 @@ const rayGeometry = new THREE.BufferGeometry().setFromPoints([
 ]);
 
 const controllerModels = [];
+const handRigs = [];
+const paddleSources = [];
 
 for (const i of [0, 1]) {
   // Grip space is the controller's physical pose, so a mesh parented here
@@ -234,6 +238,29 @@ for (const i of [0, 1]) {
   const paddle = new Paddle();
   paddle.attachTo(grip);
   paddles.push(paddle);
+
+  // Hand tracking, so the bat can follow your actual hand holding a real
+  // paddle instead of a controller. The hand space is a sibling of the grip;
+  // the router below decides which one the mesh hangs off each frame.
+  const hand = renderer.xr.getHand(i);
+  playerRig.add(hand);
+  const handRig = new HandPaddleRig(hand, i === 0 ? 'right' : 'left');
+  playerRig.add(handRig.group);
+  handRigs.push(handRig);
+
+  // Parent for poses fed in from outside the page — a camera-based tracker
+  // running elsewhere. Nothing writes to it until such a feed connects.
+  const externalRoot = new THREE.Group();
+  playerRig.add(externalRoot);
+
+  paddleSources.push(
+    new PaddleSourceRouter({
+      paddle,
+      controllerGrip: grip,
+      handRig,
+      externalRoot,
+    })
+  );
 
   const controller = renderer.xr.getController(i);
   controller.addEventListener('connected', (e) => {
@@ -356,6 +383,23 @@ const clock = new THREE.Clock();
 let servedSeen = 0;
 
 function tick(dt) {
+  // Choose what drives each bat before reading its pose, so the velocity
+  // Paddle derives is measured against the parent it is actually on.
+  const wanted = settings.get('paddleSource') ?? PADDLE_SOURCE.CONTROLLER;
+  for (const source of paddleSources) {
+    source.setMode(wanted);
+    source.update(dt);
+  }
+  // A controller model is shown only for a hand that is idle: not holding
+  // the bat, and not being tracked as a hand. Seeing a floating controller
+  // beside your real hand is worse than seeing nothing.
+  paddleSources.forEach((source, i) => {
+    const model = controllerModels[i];
+    if (!model) return;
+    model.visible =
+      !paddles[i].enabled && source.activeSource !== PADDLE_SOURCE.HAND;
+  });
+
   for (const paddle of paddles) paddle.update(dt);
 
   pollMenuButton();

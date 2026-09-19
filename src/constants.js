@@ -52,7 +52,10 @@ export const BALL = {
 };
 
 export const PADDLE = {
-  HEAD_RADIUS: 0.085,
+  // Contact disc. Kept between the blade's two semi-axes (75 x 79 mm) so it
+  // neither overhangs the rim — which produces hits off thin air — nor sits
+  // so far inside that the edge of the visible bat passes through the ball.
+  HEAD_RADIUS: 0.077,
   HEAD_THICKNESS: 0.015,
   HANDLE_LENGTH: 0.105,
   HANDLE_RADIUS: 0.016,
