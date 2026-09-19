@@ -1,6 +1,6 @@
 # flyball. Ping Pong Trainer
 
-A WebXR ping-pong trainer for Quest and desktop. The simulated ball is authoritative: it serves, collides with the paddle, bounces through the custom physics world, and records fundamentals while the player trains against escalating drills.
+A desktop-first ping-pong coaching product for webcam, pointer, and optional WebXR play. The landing page introduces the training loop, drills, coaching system, and rankings before the simulated ball serves. The ball is authoritative: it collides with the paddle, bounces through the custom physics world, and records fundamentals while the player trains against escalating drills.
 
 ## Run it
 
@@ -9,7 +9,17 @@ npm install
 npm run dev
 ```
 
-The Vite server uses HTTPS because WebXR requires a secure context. Open the printed LAN URL in the Quest Browser, accept the local certificate, then choose **Enter AR** or **Enter VR**. Desktop users get an orbit-camera fallback.
+The default Vite server uses plain HTTP for desktop play and webcam CV, so open `http://localhost:5173`. WebXR requires HTTPS; when testing on a headset, run `npm run dev:https`, open the printed HTTPS LAN URL, and accept the development certificate. Desktop users do not need VR or HTTPS.
+
+## Product flow
+
+The app opens on a product landing page inspired by the editorial feel of `../spark`, then moves into the trainer without requiring VR:
+
+```text
+Landing page → drill selection → desktop/CV training → coaching results → leaderboard
+```
+
+The landing page highlights skill-building, playing against the fly, and the pro Versus progression. It explains pointer and webcam input and links to the live rankings. Use **Start training** to enter the trainer lobby, or choose a drill card to enter with that drill selected. Versus is currently represented as the competitive product direction; the playable modes today are target, rally, and fly training.
 
 ## Training modes
 
@@ -25,7 +35,7 @@ The HUD tracks score, current and best rally, accuracy, table bounces, boss leve
 ## Input modes
 
 - **Quest controllers:** paddles attach to controller grips and transfer controller velocity into the physics simulation.
-- **Browser CV:** `@mediapipe/tasks-vision` tracks the wrist/index pose from the webcam and drives a virtual paddle through the same physics path. Camera access requires HTTPS.
+- **Browser CV:** `@mediapipe/tasks-vision` tracks the wrist/index pose from the webcam and drives a virtual paddle through the same physics path. Camera access works on localhost during development; deployed/non-localhost sites require HTTPS.
 - **Future referee mode:** the OpenCV approach from [Computer-Vision-Ping-Pong](https://github.com/dsaha04/Computer-Vision-Ping-Pong) is represented as a future service seam for HSV ball segmentation, table calibration, homography, and real-camera event validation. It is Python/OpenCV code and is intentionally not bundled into the browser runtime.
 
 ## Shared Supabase leaderboard

@@ -1,12 +1,12 @@
 import { defineConfig } from 'vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
-// WebXR requires a secure context. basic-ssl gives us a self-signed cert so
-// the Quest browser can connect over the LAN (https://<your-ip>:5173).
-export default defineConfig({
-  plugins: [basicSsl()],
+// Desktop and webcam CV work over http://localhost. Use `vite --mode https`
+// only when testing WebXR on a device that requires a secure LAN context.
+export default defineConfig(({ mode }) => ({
+  plugins: mode === 'https' ? [basicSsl()] : [],
   server: {
-    host: true, // expose on LAN so the headset can reach the dev server
+    host: true,
     port: 5173,
   },
-});
+}));

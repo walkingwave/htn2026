@@ -5,8 +5,17 @@ const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&'
 
 export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, onEnableCV }) {
   const root = document.createElement('section');
-  root.className = 'trainer-ui';
-  root.innerHTML = `<header class="topbar"><div class="brand"><span class="brand-mark">✦</span><span>flyball<span class="accent">.</span></span></div><div class="session-pill"><span class="live-dot"></span><span id="session-status">READY</span></div><button class="text-button" id="leaderboard-button">Leaderboard ↗</button></header>
+  root.className = 'trainer-ui landing-active';
+  root.innerHTML = `<section class="landing-screen" id="landing-screen" aria-label="Flyball ping pong trainer introduction">
+    <nav class="landing-nav"><a class="landing-brand" href="#top" aria-label="flyball home"><span class="brand-mark">✦</span><span>flyball<span class="accent">.</span></span></a><div class="landing-nav-links"><a href="#how-it-works">How it works</a><a href="#drills">Drills</a><a href="#leaderboard-preview">Leaderboard</a></div><button class="landing-nav-cta" id="landing-nav-start">Start training <span>↗</span></button></nav>
+    <div class="landing-hero" id="top"><div class="hero-copy"><div class="hero-kicker"><span class="hero-kicker-dot"></span> DESKTOP-FIRST PING PONG COACH</div><h1>Hone your skills.<br><em>Play to win.</em></h1><p class="hero-lede">Train every return, play against a fly that refuses to give you easy points, then step into Versus when you feel like a pro.</p><div class="hero-actions"><button class="landing-primary" id="landing-start">Start your first drill <span>→</span></button><button class="landing-ghost" id="landing-camera"><span class="camera-icon">◉</span> Play with your camera</button></div><div class="hero-note"><span>NO VR REQUIRED</span><span class="note-line"></span><span>POINTER · WEBCAM · XR</span></div></div><div class="hero-arena" aria-label="Player view across a ping pong table"><div class="hero-glow"></div><div class="hero-grid"></div><div class="hero-view-label"><span></span> PLAYER VIEW / POINT 08</div><div class="hero-table"><div class="hero-net"></div><div class="hero-target"></div><div class="hero-paddle hero-paddle-player"></div><div class="hero-paddle hero-paddle-fly"></div><div class="hero-ball"></div></div><div class="hero-fly"><span class="fly-eye fly-eye-left"></span><span class="fly-eye fly-eye-right"></span><span class="fly-wing fly-wing-left"></span><span class="fly-wing fly-wing-right"></span></div><div class="hero-stat hero-stat-one"><b>06</b><span>coaching moves</span></div><div class="hero-stat hero-stat-two"><b>05×</b><span>clean reps to advance</span></div><div class="hero-caption"><span class="caption-dot"></span> LIVE TRAINING SIMULATION</div></div></div>
+    <div class="landing-strip" id="how-it-works"><div><span class="strip-number">01</span><strong>Hone it.</strong><small>Build the fundamentals that make every shot cleaner.</small></div><div><span class="strip-number">02</span><strong>Play the fly.</strong><small>Read a moving opponent and stay composed under pressure.</small></div><div><span class="strip-number">03</span><strong>Go Versus.</strong><small>Feeling like a pro? Crush others on the leaderboard.</small></div></div>
+    <section class="landing-section" id="drills"><div class="section-heading"><div><span class="landing-eyebrow">YOUR TRAINING ROOM</span><h2>Every point has a purpose.</h2></div><p>Choose the skill you want to sharpen. The coach tracks the details that matter after the rally is over.</p></div><div class="landing-drill-grid"><button class="landing-drill-card landing-drill-target" data-landing-drill="target"><span class="drill-card-top"><span class="card-icon">◎</span><span class="card-arrow">↗</span></span><strong>Hone your skills</strong><p>Six progressive moves. Five successful shots per target. No skipping the fundamentals.</p><span class="card-meta">FOREHAND · BACKHAND · PLACEMENT</span></button><button class="landing-drill-card landing-drill-fly" data-landing-drill="fly"><span class="drill-card-top"><span class="card-icon">✦</span><span class="card-arrow">↗</span></span><strong>Play against a fly</strong><p>Read an opponent that moves, returns, and makes you earn every clean point.</p><span class="card-meta">REACTION · PRESSURE · SURVIVAL</span></button><button class="landing-drill-card landing-drill-rally" data-landing-drill="rally"><span class="drill-card-top"><span class="card-icon">↗</span><span class="card-arrow">↗</span></span><strong>Feeling like a pro?</strong><p>Crush others in Versus. First, build the consistency that makes a champion hard to beat.</p><span class="card-meta">TIMING · CONTROL · CONSISTENCY</span></button></div></section>
+    <section class="landing-coach-section"><div class="coach-quote"><span class="landing-eyebrow">THE COACH IN THE LOOP</span><blockquote>“Good hands are a start.<br><em>Good decisions win points.</em>”</blockquote><p>Flyball turns every return into a piece of feedback: racket angle, preparation, placement, and pressure.</p></div><div class="coach-list"><div><span>↗</span><b>Pointer fallback</b><small>Start playing immediately with your mouse.</small></div><div><span>◉</span><b>Camera paddle</b><small>Use your webcam to make your hands the controller.</small></div><div><span>✦</span><b>Global rankings</b><small>Save your fundamentals and boss-run scores.</small></div></div></section>
+    <section class="landing-leaderboard" id="leaderboard-preview"><div><span class="landing-eyebrow">THE ARENA / LIVE RANKINGS</span><h2>Train with a score to settle.</h2><p>Compete on fundamentals or see how long you can last against the fly.</p></div><button class="landing-outline" id="landing-leaderboard">View leaderboard <span>↗</span></button></section>
+    <footer class="landing-footer"><span>flyball<span class="accent">.</span> / ping pong trainer</span><span>Made for better fundamentals.</span></footer>
+  </section>
+  <header class="topbar"><div class="brand"><span class="brand-mark">✦</span><span>flyball<span class="accent">.</span></span></div><div class="session-pill"><span class="live-dot"></span><span id="session-status">READY</span></div><button class="text-button" id="landing-return">Home</button><button class="text-button" id="leaderboard-button">Leaderboard ↗</button></header>
   <div class="hud-grid"><div class="hud-card score-card"><span class="eyebrow">YOUR SCORE</span><strong id="score">0</strong><small><span id="rally">0</span> hit rally</small></div><div class="hud-card"><span class="eyebrow">BEST RALLY</span><strong id="best-rally">0</strong><small>clean returns</small></div><div class="hud-card"><span class="eyebrow">DRILL PROGRESS</span><strong id="accuracy">—</strong><small id="progress-label">returns / attempts</small></div><div class="hud-card boss-card"><span class="eyebrow">BOSS LEVEL</span><strong id="boss-level">01</strong><small id="difficulty-label">Standard drill</small></div></div>
   <div class="feedback" id="feedback">Choose a drill to begin.</div>
   <aside class="control-panel"><div><span class="eyebrow">COACHING PLAN</span><h1 id="panel-title">Build your fundamentals.</h1><p id="panel-copy">Pick a drill, then use your paddle to return the simulated ball.</p></div><div class="target-stage" id="target-stage"><div><span class="eyebrow">CURRENT MOVE</span><strong id="target-move">Ready to train</strong></div><span class="target-count" id="target-count">0 / 5</span><p id="target-cue">Every target move requires five clean repetitions before the next one unlocks.</p></div><div class="drill-list">${Object.entries(DRILLS).map(([key, value]) => `<button class="drill-option ${key === 'rally' ? 'selected' : ''}" data-drill="${key}"><span class="difficulty-icon">${key === 'fly' ? '✦' : key === 'target' ? '◎' : '↗'}</span><span><b>${value.label}</b><small>${value.detail}</small></span></button>`).join('')}</div><div class="difficulty-list">${Object.entries(DIFFICULTIES).map(([key, value]) => `<button class="difficulty-option ${key === 'standard' ? 'selected' : ''}" data-difficulty="${key}"><span><b>${value.label}</b><small>${value.detail}</small></span></button>`).join('')}</div><div class="control-actions"><button class="primary-button" id="start-button">Start drill →</button><button class="secondary-button" id="pause-button">Pause</button><button class="secondary-button" id="reset-button">Reset</button></div><div class="control-actions secondary-actions"><button class="secondary-button" id="machine-button">Pause ball machine</button><button class="secondary-button" id="cv-button">Use camera paddle</button></div><p class="control-hint">No VR required: move the on-screen paddle with your pointer, or enable camera CV. XR remains available when you have it.</p></aside>
@@ -19,6 +28,14 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
   let category = 'fundamentals';
   let lastSummary = null;
   const $ = (id) => root.querySelector(`#${id}`);
+  const enterTrainer = () => { root.classList.remove('landing-active'); window.scrollTo(0, 0); };
+  const enterLanding = () => { root.classList.add('landing-active'); $('leaderboard-panel').classList.add('hidden'); $('summary-panel').classList.add('hidden'); };
+  const chooseDrill = (nextDrill) => {
+    drill = nextDrill;
+    root.querySelectorAll('[data-drill]').forEach((item) => item.classList.toggle('selected', item.dataset.drill === drill));
+    $('panel-title').textContent = DRILLS[drill].label;
+    $('panel-copy').textContent = DRILLS[drill].detail;
+  };
 
   const update = (summary, status = 'TRAINING') => {
     if (!summary) return;
@@ -26,9 +43,7 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
     $('rally').textContent = summary.rally;
     $('best-rally').textContent = summary.longestRally;
     $('accuracy').textContent = drill === 'target' ? `${summary.targetAccuracy}%` : `${summary.accuracy}%`;
-    $('progress-label').textContent = drill === 'target'
-      ? `${summary.completedMoves}/${summary.totalMoves} moves · ${summary.targetHits} hits`
-      : 'returns / attempts';
+    $('progress-label').textContent = drill === 'target' ? `${summary.completedMoves}/${summary.totalMoves} moves · ${summary.targetHits} hits` : 'returns / attempts';
     $('boss-level').textContent = String(summary.bossLevel).padStart(2, '0');
     $('difficulty-label').textContent = `${DRILLS[summary.drill].label} · ${DIFFICULTIES[summary.difficulty].label}`;
     $('session-status').textContent = status;
@@ -45,59 +60,30 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
   };
 
   const feedback = (message, kind = '') => {
-    const node = $('feedback');
-    node.textContent = message;
-    node.className = `feedback ${kind}`;
-    window.clearTimeout(feedback.timer);
-    feedback.timer = window.setTimeout(() => node.className = 'feedback', 1800);
+    const node = $('feedback'); node.textContent = message; node.className = `feedback ${kind}`; window.clearTimeout(feedback.timer); feedback.timer = window.setTimeout(() => node.className = 'feedback', 1800);
   };
 
   const showSummary = (summary) => {
-    lastSummary = summary;
-    update(summary, 'COMPLETE');
-    $('summary-title').textContent = summary.drill === 'fly'
-      ? 'You read the fly.'
-      : summary.drill === 'target'
-        ? (summary.targetComplete ? 'Target sequence complete.' : `${summary.completedMoves} moves completed.`)
-        : 'You found your rhythm.';
-    $('summary-coach').textContent = summary.drill === 'target'
-      ? `${summary.completedMoves}/${summary.totalMoves} moves complete. ${summary.targetComplete ? 'Excellent control—repeat the sequence at the next speed.' : DRILLS.target.coach}`
-      : summary.drill === 'fly'
-        ? `${summary.flyReturns} fly returns and ${summary.flyMisses} fly misses. ${DRILLS.fly.coach}`
-        : summary.accuracy >= 70 ? 'Good consistency. Next, reduce swing size and challenge the next speed.' : DRILLS[summary.drill].coach;
-    $('summary-grid').innerHTML = [
-      ['Score', summary.score],
-      ['Moves complete', `${summary.completedMoves}/${summary.totalMoves}`],
-      ['Longest rally', `${summary.longestRally} hits`],
-      ['Accuracy', `${summary.accuracy}%`],
-      ['Target hits', `${summary.targetHits}`],
-      ['Fly returns', `${summary.flyReturns ?? 0}`],
-      ['Fly misses', `${summary.flyMisses ?? 0}`],
-      ['Survival', `${summary.survivalSeconds}s`],
-      ['Reaction', summary.reactionMs ? `${summary.reactionMs}ms` : '—'],
-    ].map(([label, value]) => `<div><small>${label}</small><strong>${value}</strong></div>`).join('');
+    lastSummary = summary; update(summary, 'COMPLETE');
+    $('summary-title').textContent = summary.drill === 'fly' ? 'You read the fly.' : summary.drill === 'target' ? (summary.targetComplete ? 'Target sequence complete.' : `${summary.completedMoves} moves completed.`) : 'You found your rhythm.';
+    $('summary-coach').textContent = summary.drill === 'target' ? `${summary.completedMoves}/${summary.totalMoves} moves complete. ${summary.targetComplete ? 'Excellent control—repeat the sequence at the next speed.' : DRILLS.target.coach}` : summary.drill === 'fly' ? `${summary.flyReturns} fly returns and ${summary.flyMisses} fly misses. ${DRILLS.fly.coach}` : summary.accuracy >= 70 ? 'Good consistency. Next, reduce swing size and challenge the next speed.' : DRILLS[summary.drill].coach;
+    $('summary-grid').innerHTML = [['Score', summary.score], ['Moves complete', `${summary.completedMoves}/${summary.totalMoves}`], ['Longest rally', `${summary.longestRally} hits`], ['Accuracy', `${summary.accuracy}%`], ['Target hits', `${summary.targetHits}`], ['Fly returns', `${summary.flyReturns ?? 0}`], ['Fly misses', `${summary.flyMisses ?? 0}`], ['Survival', `${summary.survivalSeconds}s`], ['Reaction', summary.reactionMs ? `${summary.reactionMs}ms` : '—']].map(([label, value]) => `<div><small>${label}</small><strong>${value}</strong></div>`).join('');
     $('summary-panel').classList.remove('hidden');
   };
 
   const loadLeaderboard = async () => {
-    const list = $('leaderboard-list');
-    list.innerHTML = '<p class="muted">Loading rankings…</p>';
-    const rows = await getLeaderboard(category);
+    const list = $('leaderboard-list'); list.innerHTML = '<p class="muted">Loading rankings…</p>'; const rows = await getLeaderboard(category);
     list.innerHTML = rows.length ? rows.map((row, index) => `<div class="leader-row"><span class="rank">${String(index + 1).padStart(2, '0')}</span><span><b>${escapeHtml(row.player_name)}</b><small>${row.max_rally} hit rally · ${row.difficulty}</small></span><strong>${row.score.toLocaleString()} pts</strong></div>`).join('') : '<p class="muted">No scores yet. Be first.</p>';
   };
 
-  root.querySelectorAll('[data-drill]').forEach((button) => button.addEventListener('click', () => {
-    drill = button.dataset.drill;
-    root.querySelectorAll('[data-drill]').forEach((item) => item.classList.toggle('selected', item === button));
-    $('panel-title').textContent = DRILLS[drill].label;
-    $('panel-copy').textContent = DRILLS[drill].detail;
-    update({ ...({ drill, difficulty }), completedMoves: 0, totalMoves: 6, targetHits: 0, targetAccuracy: 0, accuracy: 0, score: 0, rally: 0, longestRally: 0, bossLevel: DIFFICULTIES[difficulty].bossLevel, currentMoveNumber: 1, currentMoveLabel: 'Ready to train', currentMoveCue: DRILLS[drill].coach, moveSuccesses: 0, moveRequired: 5 }, 'READY');
-  }));
-  root.querySelectorAll('[data-difficulty]').forEach((button) => button.addEventListener('click', () => {
-    difficulty = button.dataset.difficulty;
-    root.querySelectorAll('[data-difficulty]').forEach((item) => item.classList.toggle('selected', item === button));
-  }));
-
+  root.querySelectorAll('[data-drill]').forEach((button) => button.addEventListener('click', () => { chooseDrill(button.dataset.drill); update({ drill, difficulty, completedMoves: 0, totalMoves: 6, targetHits: 0, targetAccuracy: 0, accuracy: 0, score: 0, rally: 0, longestRally: 0, bossLevel: DIFFICULTIES[difficulty].bossLevel, currentMoveNumber: 1, currentMoveLabel: 'Ready to train', currentMoveCue: DRILLS[drill].coach, moveSuccesses: 0, moveRequired: 5 }, 'READY'); }));
+  root.querySelectorAll('[data-difficulty]').forEach((button) => button.addEventListener('click', () => { difficulty = button.dataset.difficulty; root.querySelectorAll('[data-difficulty]').forEach((item) => item.classList.toggle('selected', item === button)); }));
+  root.querySelectorAll('[data-landing-drill]').forEach((button) => button.addEventListener('click', () => { chooseDrill(button.dataset.landingDrill); enterTrainer(); feedback(`Ready for ${DRILLS[drill].label}.`, 'success'); }));
+  $('landing-start').addEventListener('click', enterTrainer);
+  $('landing-nav-start').addEventListener('click', enterTrainer);
+  $('landing-camera').addEventListener('click', () => { enterTrainer(); window.setTimeout(() => $('cv-button').click(), 100); });
+  $('landing-return').addEventListener('click', enterLanding);
+  $('landing-leaderboard').addEventListener('click', () => { enterTrainer(); $('leaderboard-panel').classList.remove('hidden'); loadLeaderboard(); });
   $('start-button').addEventListener('click', () => { $('summary-panel').classList.add('hidden'); onStart(difficulty, drill); feedback(drill === 'target' ? 'Move 1 live — land five clean shots.' : 'Rally live — watch the serve.', 'success'); });
   $('pause-button').addEventListener('click', () => onPause());
   $('reset-button').addEventListener('click', () => onReset());
@@ -111,10 +97,7 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
     const name = $('player-name').value.trim();
     if (!name || !lastSummary) { $('save-status').textContent = 'Add your name first.'; return; }
     $('save-status').textContent = 'Saving…';
-    try {
-      const result = await submitScore(name, lastSummary, category);
-      $('save-status').textContent = result.storage === 'local' ? `Saved on this device. Configure Supabase to publish globally. (${scoreFor(lastSummary, category)} pts)` : 'Score saved to the arena.';
-    } catch { $('save-status').textContent = 'Could not reach the leaderboard. Your session is still safe.'; }
+    try { const result = await submitScore(name, lastSummary, category); $('save-status').textContent = result.storage === 'local' ? `Saved on this device. Configure Supabase to publish globally. (${scoreFor(lastSummary, category)} pts)` : 'Score saved to the arena.'; } catch { $('save-status').textContent = 'Could not reach the leaderboard. Your session is still safe.'; }
   });
 
   return { update, feedback, showSummary, getDifficulty: () => difficulty, getDrill: () => drill };
