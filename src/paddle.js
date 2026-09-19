@@ -92,132 +92,219 @@ export class Paddle {
   }
 }
 
-// A real bat is one flat piece of wood whose outline runs continuously from
-// the blade into the handle, with rubber sheets laid on each face. Building
-// it from stacked cylinders and a torus never reads right, so the silhouette
-// is drawn as a 2D profile and extruded — the blade thin, the handle thicker
-// and flared, cut from the same outline.
+// Built the way a real bat is, which is what makes it read as one:
+//
+//   • one flat wood blank whose outline runs continuously from the blade,
+//     through a narrow concave throat, down into a thin tang
+//   • two shaped grip cheeks glued either side of that tang — that is what
+//     gives the handle its thickness and its flare
+//   • a rubber sheet on each face, stopping just short of the rim so a
+//     sliver of ply shows all the way round
+//
+// The throat is the detail that matters most. A disc joined to a handle by a
+// straight neck reads as a lollipop; the concave sweep from blade into
+// handle is the shape the eye actually recognises as a bat.
+//
+// Dimensions are a real bat's: a 150 x 158 mm blade, 100 mm handle, roughly
+// 260 mm overall.
+
+const BLADE_RX = 0.075; // blade half-width
+const BLADE_RY = 0.079; // half-height; blades are slightly taller than wide
+const PLY_THICKNESS = 0.0062;
+const RUBBER_THICKNESS = 0.0019;
+const THROAT_HALF = 0.019; // half-width where the blade necks down
+const TANG_HALF = 0.0125;
+const HANDLE_TOP = -0.098;
+const HANDLE_LEN = 0.1;
+const HANDLE_END = HANDLE_TOP - HANDLE_LEN;
+
 function buildPaddleMesh() {
   const group = new THREE.Group();
 
-  const wood = new THREE.MeshStandardMaterial({ color: 0xc49a62, roughness: 0.6 });
-  const grip = new THREE.MeshStandardMaterial({ color: 0x6f2320, roughness: 0.85 });
+  const ply = new THREE.MeshStandardMaterial({
+    color: 0xbf9560,
+    roughness: 0.62,
+    metalness: 0,
+  });
+  const gripWood = new THREE.MeshStandardMaterial({
+    color: 0x7d3b2a,
+    roughness: 0.72,
+    metalness: 0,
+  });
   const rubberRed = new THREE.MeshStandardMaterial({
-    color: 0xc0281f,
-    roughness: 0.95,
+    map: rubberTexture('#b62a20'),
+    color: 0xffffff,
+    roughness: 0.98,
     metalness: 0,
   });
   const rubberBlack = new THREE.MeshStandardMaterial({
-    color: 0x111113,
-    roughness: 0.95,
+    map: rubberTexture('#161618'),
+    color: 0xffffff,
+    roughness: 0.98,
     metalness: 0,
   });
-
-  const R = PADDLE.HEAD_RADIUS;
-  const bladeThickness = 0.007; // the wood itself; rubber sits on top
-  const neckHalf = 0.015;
-  const shoulderY = -Math.sqrt(Math.max(R * R - neckHalf * neckHalf, 0));
-
-  // --- Blade: a slightly egg-shaped disc running down into a short neck ---
-  const bladeShape = new THREE.Shape();
-  const a0 = Math.atan2(shoulderY, neckHalf);
-  bladeShape.moveTo(neckHalf, shoulderY);
-  bladeShape.absarc(0, 0, R, a0, Math.PI * 2 + Math.atan2(shoulderY, -neckHalf), false);
-  bladeShape.lineTo(-neckHalf, shoulderY - 0.022);
-  bladeShape.lineTo(neckHalf, shoulderY - 0.022);
-  bladeShape.closePath();
-
-  const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, {
-    depth: bladeThickness,
-    bevelEnabled: true,
-    bevelThickness: 0.0016,
-    bevelSize: 0.0016,
-    bevelSegments: 2,
-    curveSegments: 48,
-  });
-  bladeGeo.translate(0, 0, -bladeThickness / 2);
-  // Slightly elongated along the handle axis, as real blades are
-  bladeGeo.scale(1, 1.06, 1);
-  // The profile is drawn with the handle running down −Y; rotate so it runs
-  // down −X instead, which maps to "back toward the hand" once the blade is
-  // turned to face sideways. Rotating about Z leaves the face normal (+Z)
-  // untouched, so the physics normal is unaffected.
-  bladeGeo.rotateZ(-Math.PI / 2);
 
   const blade = new THREE.Group();
   blade.name = 'blade';
 
-  const core = new THREE.Mesh(bladeGeo, wood);
+  // Everything is modelled in profile space (handle down −Y) inside this
+  // group, which is turned once at the end. Turning each piece individually
+  // would compose with the mirroring rotations on the back-facing pieces and
+  // throw them onto the wrong axis.
+  const art = new THREE.Group();
+  blade.add(art);
+
+  // --- The wood blank: blade + throat + tang, one continuous outline ------
+  const blank = extrude(blankProfile(), PLY_THICKNESS);
+  const core = new THREE.Mesh(blank, ply);
   core.castShadow = true;
-  blade.add(core);
+  art.add(core);
 
-  // --- Rubber sheets, covering the face nearly to the edge ---
-  const rubberShape = new THREE.Shape();
-  const rr = R - 0.0035;
-  rubberShape.absarc(0, 0, rr, 0, Math.PI * 2, false);
-  const rubberGeo = new THREE.ExtrudeGeometry(rubberShape, {
-    depth: 0.0017,
-    bevelEnabled: true,
-    bevelThickness: 0.0006,
-    bevelSize: 0.0009,
-    bevelSegments: 1,
-    curveSegments: 48,
-  });
-  rubberGeo.scale(1, 1.06, 1);
-  rubberGeo.rotateZ(-Math.PI / 2);
-
-  for (const [mat, sign] of [
+  // --- Rubber on both faces ------------------------------------------------
+  const sheet = extrude(rubberProfile(), RUBBER_THICKNESS, 0.0005);
+  for (const [material, side] of [
     [rubberRed, 1],
     [rubberBlack, -1],
   ]) {
-    const face = new THREE.Mesh(rubberGeo, mat);
-    face.position.z = sign * (bladeThickness / 2);
-    if (sign < 0) face.rotation.y = Math.PI; // extrusion grows along +Z
-    blade.add(face);
+    const face = new THREE.Mesh(sheet, material);
+    face.position.z = side * (PLY_THICKNESS / 2);
+    if (side < 0) face.rotation.y = Math.PI; // the extrusion grows along +Z
+    art.add(face);
   }
 
-  // --- Handle: same silhouette language, thicker and flared ---------------
-  const L = PADDLE.HANDLE_LENGTH;
-  const wTop = 0.0165; // half width at the shoulder, where it leaves the neck
-  const wWaist = 0.0122; // pinched where the fingers sit
-  const wEnd = 0.0235; // flared so the hand can't slide off the end
+  // --- Grip cheeks, one glued to each side of the tang --------------------
+  const cheek = extrude(cheekProfile(), 0.0088, 0.0032);
+  for (const side of [1, -1]) {
+    const mesh = new THREE.Mesh(cheek, gripWood);
+    mesh.position.z = side * (PLY_THICKNESS / 2);
+    if (side < 0) mesh.rotation.y = Math.PI;
+    mesh.castShadow = true;
+    art.add(mesh);
+  }
 
-  const handleDepth = 0.0145;
-  const handleShape = new THREE.Shape();
-  handleShape.moveTo(wTop, 0);
-  handleShape.bezierCurveTo(wWaist, -L * 0.22, wWaist, -L * 0.62, wEnd, -L * 0.94);
-  handleShape.quadraticCurveTo(wEnd, -L, wEnd - 0.007, -L);
-  handleShape.lineTo(-(wEnd - 0.007), -L);
-  handleShape.quadraticCurveTo(-wEnd, -L, -wEnd, -L * 0.94);
-  handleShape.bezierCurveTo(-wWaist, -L * 0.62, -wWaist, -L * 0.22, -wTop, 0);
-  handleShape.closePath();
+  // The profile is drawn with the handle running down −Y. Turn it so the
+  // handle runs along −X, which becomes "back toward the hand" once the
+  // blade is rotated to face sideways. Rotating about the face axis leaves
+  // the physics normal (+Z) untouched.
+  art.rotation.z = -Math.PI / 2;
 
-  const handleGeo = new THREE.ExtrudeGeometry(handleShape, {
-    depth: handleDepth,
-    bevelEnabled: true,
-    bevelThickness: 0.0045,
-    bevelSize: 0.0045,
-    bevelSegments: 4,
-    curveSegments: 24,
-  });
-  handleGeo.translate(0, 0, -handleDepth / 2);
-  handleGeo.rotateZ(-Math.PI / 2); // same reorientation as the blade
-
-  const handle = new THREE.Mesh(handleGeo, grip);
-  handle.castShadow = true;
-  // Butts up against the neck, running back toward the hand
-  handle.position.x = shoulderY - 0.018;
-  blade.add(handle);
-
-  // The blade extends forward from the fist along the grip's −Z, and its
-  // face normal points out to the side (grip +X) — the orientation a bat
-  // actually sits in when you hold the handle, so a natural forehand swing
-  // presents the rubber to the ball. The blade group's origin is the head
-  // centre, which is also what the physics treats as the contact disc, so
-  // the whole bat hangs off that point.
-  blade.position.set(0, 0.016, -(PADDLE.HANDLE_LENGTH * 0.55 + R * 0.55));
+  // Blade group origin is the head centre, which is also the contact disc
+  // the physics uses, so the whole bat hangs off that point.
+  blade.position.set(0, 0.016, -(PADDLE.HANDLE_LENGTH * 0.5 + BLADE_RX * 0.6));
   blade.rotation.y = Math.PI / 2;
   group.add(blade);
 
   return group;
 }
+
+function extrude(shape, depth, bevel = 0.0009) {
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 2,
+    curveSegments: 40,
+  });
+  geo.translate(0, 0, -depth / 2);
+  return geo;
+}
+
+// Blade ellipse, swept anticlockwise, then a concave throat down into the
+// tang and back up the other side. Drawn with absellipse at real radii —
+// scaling a unit circle afterwards leaves the straight segments and the arc
+// in different units, which is exactly how this went wrong the first time.
+function blankProfile() {
+  const s = new THREE.Shape();
+  // Parametric angle at which the rim reaches the throat's half-width
+  const a = Math.acos(THROAT_HALF / BLADE_RX);
+  const y0 = -BLADE_RY * Math.sin(a);
+
+  s.moveTo(THROAT_HALF, y0);
+  s.absellipse(0, 0, BLADE_RX, BLADE_RY, -a, Math.PI + a, false, 0);
+
+  // Concave sweep into the tang — the shape that says "bat" rather than
+  // "lollipop". Control points pull inward, not outward.
+  s.bezierCurveTo(-0.017, y0 - 0.012, -TANG_HALF, y0 - 0.016, -TANG_HALF, HANDLE_TOP);
+  s.lineTo(-TANG_HALF, HANDLE_END + 0.004);
+  s.quadraticCurveTo(-TANG_HALF, HANDLE_END, -TANG_HALF + 0.004, HANDLE_END);
+  s.lineTo(TANG_HALF - 0.004, HANDLE_END);
+  s.quadraticCurveTo(TANG_HALF, HANDLE_END, TANG_HALF, HANDLE_END + 0.004);
+  s.lineTo(TANG_HALF, HANDLE_TOP);
+  s.bezierCurveTo(TANG_HALF, y0 - 0.016, 0.017, y0 - 0.012, THROAT_HALF, y0);
+  s.closePath();
+  return s;
+}
+
+// The rubber covers the blade face but stops short of the rim.
+function rubberProfile() {
+  const inset = 0.0024; // a thin sliver of ply, not a wide border
+  const s = new THREE.Shape();
+  s.absellipse(0, 0, BLADE_RX - inset, BLADE_RY - inset, 0, Math.PI * 2, false, 0);
+  return s;
+}
+
+// A grip cheek: waisted where the fingers sit, flared at the butt so the
+// hand cannot slide off.
+function cheekProfile() {
+  // The cheek runs up into the throat and dies away to nothing there, rather
+  // than stopping at a flat edge. A squared-off top reads as a separate
+  // block bolted to the blade; a real grip tapers out of the throat.
+  const tip = HANDLE_TOP + 0.026; // how far up the throat the cheek reaches
+  const wTip = 0.0092;
+  const shoulder = HANDLE_TOP - 0.004;
+  const wShoulder = 0.0158;
+  const wWaist = 0.0133;
+  const wEnd = 0.0228;
+  const end = HANDLE_END;
+
+  const s = new THREE.Shape();
+  s.moveTo(wTip, tip);
+  s.bezierCurveTo(wShoulder, tip - 0.012, wShoulder, shoulder, wShoulder, shoulder);
+  s.bezierCurveTo(wWaist, shoulder - 0.035, wWaist, end + 0.032, wEnd, end + 0.009);
+  s.quadraticCurveTo(wEnd, end, wEnd - 0.008, end);
+  s.lineTo(-(wEnd - 0.008), end);
+  s.quadraticCurveTo(-wEnd, end, -wEnd, end + 0.009);
+  s.bezierCurveTo(-wWaist, end + 0.032, -wWaist, shoulder - 0.035, -wShoulder, shoulder);
+  s.bezierCurveTo(-wShoulder, shoulder, -wShoulder, tip - 0.012, -wTip, tip);
+  s.quadraticCurveTo(0, tip + 0.009, wTip, tip); // rounded crown
+  s.closePath();
+  return s;
+}
+
+// Matte rubber with a fine pimple pattern. Without it the face is a flat
+// disc of colour and reads as plastic; the texture is what sells it as
+// rubber at arm's length.
+let rubberTextures = null;
+function rubberTexture(hex) {
+  rubberTextures ??= new Map();
+  if (rubberTextures.has(hex)) return rubberTextures.get(hex);
+
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = hex;
+  ctx.fillRect(0, 0, size, size);
+
+  // Staggered dimples, lit from the top-left so they read as texture
+  const pitch = 7;
+  for (let y = 0, row = 0; y < size; y += pitch, row++) {
+    for (let x = (row % 2) * (pitch / 2); x < size; x += pitch) {
+      ctx.fillStyle = 'rgba(255,255,255,0.045)';
+      ctx.fillRect(x, y, 2, 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.10)';
+      ctx.fillRect(x + 1, y + 1, 2, 2);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(9, 9);
+  tex.anisotropy = 8;
+  rubberTextures.set(hex, tex);
+  return tex;
+}
+
