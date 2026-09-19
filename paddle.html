@@ -50,6 +50,7 @@
       <div class="toolbar">
         <button id="start-camera">Start webcam</button>
         <button id="calibrate" disabled>Calibrate neutral pose</button>
+        <button id="auto-calibrate" disabled>Auto-calibrate camera</button>
         <label>Camera <select id="camera-select"><option value="">Default camera</option></select></label>
         <label>Dictionary <select id="dictionary"><option value="MATLAB_DICT_4X4_250">MATLAB DICT_4X4_250</option></select></label>
         <label>Marker size <input id="marker-size" type="number" min="1" max="20" step="0.1" value="3" /> cm</label>
@@ -69,6 +70,7 @@
           <li>Keep a white quiet border around every black marker and make the sheets lie flat.</li>
           <li>Use matte tape and even front lighting to avoid reflections over the marker cells.</li>
           <li>Keep at least two markers visible for stable tracking; four visible markers give the best pose.</li>
+          <li>For automatic camera calibration, keep all four markers visible and slowly tilt the board until 24 samples are collected.</li>
           <li>Tune focal scale if depth or tilt is consistently exaggerated; use lens k1 only to correct edge-of-frame lens curvature.</li>
         </ul>
       </details>

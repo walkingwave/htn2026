@@ -93,11 +93,42 @@ class VectorOneEuroFilter {
     );
   }
 }
+
+class PredictivePositionFilter {
+  constructor({ alpha = 0.52, beta = 0.11, predictionLead = 0.035 } = {}) {
+    this.alpha = alpha;
+    this.beta = beta;
+    this.predictionLead = predictionLead;
+    this.reset();
+  }
+
+  reset() {
+    this.position = null;
+    this.velocity = new THREE.Vector3();
+    this.lastTime = null;
+  }
+
+  filter(measurement, time) {
+    if (!this.position) {
+      this.position = measurement.clone();
+      this.lastTime = time;
+      return this.position.clone();
+    }
+    const dt = THREE.MathUtils.clamp((time - this.lastTime) / 1000, 1 / 240, 0.1);
+    const prediction = this.position.clone().addScaledVector(this.velocity, dt);
+    const residual = measurement.clone().sub(prediction);
+    this.position.copy(prediction).addScaledVector(residual, this.alpha);
+    this.velocity.addScaledVector(residual, this.beta / dt);
+    this.lastTime = time;
+    return this.position.clone().addScaledVector(this.velocity, this.predictionLead);
+  }
+}
 const video = document.querySelector('#video');
 const overlay = document.querySelector('#video-overlay');
 const overlayContext = overlay.getContext('2d');
 const startButton = document.querySelector('#start-camera');
 const calibrateButton = document.querySelector('#calibrate');
+const autoCalibrateButton = document.querySelector('#auto-calibrate');
 const cameraSelect = document.querySelector('#camera-select');
 const dictionarySelect = document.querySelector('#dictionary');
 const markerSizeInput = document.querySelector('#marker-size');
@@ -121,10 +152,18 @@ let lastSmoothedPoseAt = 0;
 const positionHistory = [];
 let previousGreyFrame = null;
 let previousPaddleMarkers = [];
+let stableTrackingMode = 'lost';
+let pendingTrackingMode = 'lost';
+let pendingTrackingFrames = 0;
+let lastPaddleBounds = null;
+let collectingCameraCalibration = false;
+let cameraCalibrationFrame = 0;
+const cameraCalibrationSamples = [];
 const positionSmoother = new VectorOneEuroFilter(
-  { minCutoff: 0.6, beta: 0.1 },
-  { minCutoff: 0.75, beta: 0.12 }
+  { minCutoff: 1.65, beta: 0.3 },
+  { minCutoff: 1.9, beta: 0.34 }
 );
+const predictivePositionFilter = new PredictivePositionFilter();
 const { paddle } = makeVirtualPaddleView();
 
 function makeDetector() {
@@ -176,6 +215,26 @@ function setConfidence(message, kind) {
   confidence.className = kind;
 }
 
+function updateTrackingMode(nextMode) {
+  if (nextMode === stableTrackingMode) {
+    pendingTrackingMode = nextMode;
+    pendingTrackingFrames = 0;
+    return stableTrackingMode;
+  }
+  if (nextMode !== pendingTrackingMode) {
+    pendingTrackingMode = nextMode;
+    pendingTrackingFrames = 1;
+  } else {
+    pendingTrackingFrames += 1;
+  }
+  const requiredFrames = stableTrackingMode === 'lost' ? 2 : nextMode === 'lost' ? 6 : 3;
+  if (pendingTrackingFrames >= requiredFrames) {
+    stableTrackingMode = nextMode;
+    pendingTrackingFrames = 0;
+  }
+  return stableTrackingMode;
+}
+
 dictionarySelect.addEventListener('change', () => {
   detector = makeDetector();
   setStatus(`Using ${dictionarySelect.value}; show a marker`);
@@ -186,6 +245,7 @@ for (const input of [focalScaleInput, lensK1Input]) {
     calibration = null;
     positionHistory.length = 0;
     positionSmoother.reset();
+    predictivePositionFilter.reset();
     smoothedQuaternion = null;
     setStatus('Camera model updated — recalibrate the neutral pose');
   });
@@ -206,9 +266,17 @@ calibrateButton.addEventListener('click', () => {
       : new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI),
   };
   positionSmoother.reset();
+  predictivePositionFilter.reset();
   positionHistory.length = 0;
   smoothedQuaternion = null;
   setStatus('Neutral pose calibrated — move the paddle naturally from this position', 'tracking');
+});
+
+autoCalibrateButton.addEventListener('click', () => {
+  collectingCameraCalibration = true;
+  cameraCalibrationFrame = 0;
+  cameraCalibrationSamples.length = 0;
+  setStatus('Camera calibration: slowly tilt the full marker board in several directions', 'tracking');
 });
 
 async function startCamera() {
@@ -227,18 +295,36 @@ async function startCamera() {
       audio: false,
     });
     activeStream = stream;
+    await optimizeCameraForTracking(stream.getVideoTracks()[0]);
     video.srcObject = stream;
     await video.play();
     resizeOverlay();
     active = true;
     startButton.textContent = 'Webcam running';
     startButton.disabled = true;
+    autoCalibrateButton.disabled = false;
     await populateCameras();
     setStatus('Looking for IDs 1–8…');
     requestAnimationFrame(trackFrame);
   } catch (error) {
     console.error(error);
     setStatus(`Could not start webcam: ${error.message}`, 'error');
+  }
+}
+
+async function optimizeCameraForTracking(track) {
+  if (!track?.getCapabilities) return;
+  const capabilities = track.getCapabilities();
+  const advanced = {};
+  if (capabilities.focusMode?.includes('continuous')) advanced.focusMode = 'continuous';
+  if (capabilities.exposureMode?.includes('continuous')) advanced.exposureMode = 'continuous';
+  if (capabilities.whiteBalanceMode?.includes('continuous')) advanced.whiteBalanceMode = 'continuous';
+  if (capabilities.frameRate?.max) advanced.frameRate = Math.min(60, capabilities.frameRate.max);
+  if (!Object.keys(advanced).length) return;
+  try {
+    await track.applyConstraints({ advanced: [advanced] });
+  } catch (error) {
+    console.info('Camera does not support all tracking constraints', error);
   }
 }
 
@@ -275,6 +361,143 @@ function undistortCorner(corner, frameWidth, frameHeight) {
   };
 }
 
+function collectCameraCalibrationSample(markers, frameWidth, frameHeight) {
+  if (!collectingCameraCalibration) return;
+  cameraCalibrationFrame += 1;
+  if (cameraCalibrationFrame % 5 !== 0) return;
+  const frontMarkers = markers.filter((marker) => FRONT_IDS.has(marker.id));
+  const backMarkers = markers.filter((marker) => BACK_IDS.has(marker.id));
+  const boardMarkers = frontMarkers.length >= 4 ? frontMarkers : backMarkers.length >= 4 ? backMarkers : null;
+  if (!boardMarkers) return;
+  const estimate = estimateFocalScaleFromBoard(boardMarkers, frameWidth, frameHeight, 0);
+  if (!estimate) return;
+  cameraCalibrationSamples.push({
+    markers: boardMarkers.map((marker) => new AR.Marker(marker.id, marker.corners.map((corner) => ({ ...corner })), marker.hammingDistance)),
+    frameWidth,
+    frameHeight,
+  });
+  autoCalibrateButton.textContent = `Calibrating ${cameraCalibrationSamples.length}/24`;
+  if (cameraCalibrationSamples.length < 24) return;
+
+  let bestLensK1 = 0;
+  let bestLensError = Infinity;
+  for (let lensK1 = -0.5; lensK1 <= 0.5001; lensK1 += 0.025) {
+    const error = cameraCalibrationSamples.reduce((sum, sample) => sum + calibrationHomographyError(sample, lensK1), 0);
+    if (error < bestLensError) {
+      bestLensError = error;
+      bestLensK1 = lensK1;
+    }
+  }
+  const focalEstimates = cameraCalibrationSamples
+    .map((sample) => estimateFocalScaleFromBoard(sample.markers, sample.frameWidth, sample.frameHeight, bestLensK1))
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+  const focalScale = focalEstimates[Math.floor(focalEstimates.length / 2)] || 1;
+  focalScaleInput.value = focalScale.toFixed(3);
+  lensK1Input.value = bestLensK1.toFixed(3);
+  collectingCameraCalibration = false;
+  autoCalibrateButton.textContent = 'Auto-calibrate camera';
+  calibration = null;
+  positionHistory.length = 0;
+  positionSmoother.reset();
+  predictivePositionFilter.reset();
+  smoothedQuaternion = null;
+  setStatus(`Camera calibrated: focal ${focalScale.toFixed(3)}, k1 ${bestLensK1.toFixed(3)} — now recalibrate neutral pose`, 'tracking');
+}
+
+function estimateFocalScaleFromBoard(markers, frameWidth, frameHeight, lensK1) {
+  const halfMarker = markerSizeMm() / 2;
+  const localCorners = [[-halfMarker, halfMarker], [halfMarker, halfMarker], [halfMarker, -halfMarker], [-halfMarker, -halfMarker]];
+  const points = [];
+  for (const marker of markers) {
+    const centre = MARKER_CENTRES_MM[marker.id];
+    marker.corners.forEach((corner, index) => {
+      const distortedX = (corner.x - frameWidth / 2) / frameWidth;
+      const distortedY = (frameHeight / 2 - corner.y) / frameWidth;
+      const radialScale = 1 + lensK1 * (distortedX ** 2 + distortedY ** 2);
+      points.push({
+        x: (centre[0] + localCorners[index][0]) / 40,
+        y: (centre[1] + localCorners[index][1]) / 40,
+        u: (distortedX / radialScale) * frameWidth,
+        v: (distortedY / radialScale) * frameWidth,
+      });
+    });
+  }
+  const normal = Array.from({ length: 8 }, () => Array(8).fill(0));
+  const rightHandSide = Array(8).fill(0);
+  for (const point of points) {
+    const rows = [
+      { coefficients: [point.x, point.y, 1, 0, 0, 0, -point.u * point.x, -point.u * point.y], value: point.u },
+      { coefficients: [0, 0, 0, point.x, point.y, 1, -point.v * point.x, -point.v * point.y], value: point.v },
+    ];
+    for (const row of rows) {
+      for (let column = 0; column < 8; column += 1) {
+        rightHandSide[column] += row.coefficients[column] * row.value;
+        for (let other = 0; other < 8; other += 1) normal[column][other] += row.coefficients[column] * row.coefficients[other];
+      }
+    }
+  }
+  const h = solveLinearSystem(normal, rightHandSide);
+  if (!h) return null;
+  const estimatesSquared = [];
+  const orthogonalDenominator = h[6] * h[7];
+  if (Math.abs(orthogonalDenominator) > 1e-8) estimatesSquared.push(-(h[0] * h[1] + h[3] * h[4]) / orthogonalDenominator);
+  const equalNormDenominator = h[6] ** 2 - h[7] ** 2;
+  if (Math.abs(equalNormDenominator) > 1e-8) estimatesSquared.push(-(h[0] ** 2 + h[3] ** 2 - h[1] ** 2 - h[4] ** 2) / equalNormDenominator);
+  const estimates = estimatesSquared
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .map((value) => Math.sqrt(value) / frameWidth)
+    .filter((value) => value >= 0.5 && value <= 2);
+  if (!estimates.length) return null;
+  return estimates.reduce((sum, value) => sum + value, 0) / estimates.length;
+}
+
+function calibrationHomographyError(sample, lensK1) {
+  const halfMarker = markerSizeMm() / 2;
+  const localCorners = [[-halfMarker, halfMarker], [halfMarker, halfMarker], [halfMarker, -halfMarker], [-halfMarker, -halfMarker]];
+  const points = [];
+  for (const marker of sample.markers) {
+    const centre = MARKER_CENTRES_MM[marker.id];
+    marker.corners.forEach((corner, index) => {
+      const distortedX = (corner.x - sample.frameWidth / 2) / sample.frameWidth;
+      const distortedY = (sample.frameHeight / 2 - corner.y) / sample.frameWidth;
+      const radialScale = 1 + lensK1 * (distortedX ** 2 + distortedY ** 2);
+      points.push({
+        x: (centre[0] + localCorners[index][0]) / 40,
+        y: (centre[1] + localCorners[index][1]) / 40,
+        u: (distortedX / radialScale) * sample.frameWidth,
+        v: (distortedY / radialScale) * sample.frameWidth,
+      });
+    });
+  }
+  const h = fitCalibrationHomography(points);
+  if (!h) return 1e6;
+  return Math.sqrt(points.reduce((sum, point) => {
+    const denominator = h[6] * point.x + h[7] * point.y + 1;
+    const u = (h[0] * point.x + h[1] * point.y + h[2]) / denominator;
+    const v = (h[3] * point.x + h[4] * point.y + h[5]) / denominator;
+    return sum + (u - point.u) ** 2 + (v - point.v) ** 2;
+  }, 0) / points.length);
+}
+
+function fitCalibrationHomography(points) {
+  const normal = Array.from({ length: 8 }, () => Array(8).fill(0));
+  const rightHandSide = Array(8).fill(0);
+  for (const point of points) {
+    const rows = [
+      { coefficients: [point.x, point.y, 1, 0, 0, 0, -point.u * point.x, -point.u * point.y], value: point.u },
+      { coefficients: [0, 0, 0, point.x, point.y, 1, -point.v * point.x, -point.v * point.y], value: point.v },
+    ];
+    for (const row of rows) {
+      for (let column = 0; column < 8; column += 1) {
+        rightHandSide[column] += row.coefficients[column] * row.value;
+        for (let other = 0; other < 8; other += 1) normal[column][other] += row.coefficients[column] * row.coefficients[other];
+      }
+    }
+  }
+  return solveLinearSystem(normal, rightHandSide);
+}
+
 function resizeOverlay() {
   overlay.width = video.videoWidth;
   overlay.height = video.videoHeight;
@@ -302,6 +525,7 @@ function detectAndRender() {
     ? validateBlackPaddleCandidate(colourPaddleCandidate, imageData, detector.candidates)
     : colourPaddleCandidate;
   const decodedPaddleMarkers = markers.filter((marker) => FRONT_IDS.has(marker.id) || BACK_IDS.has(marker.id));
+  collectCameraCalibrationSample(decodedPaddleMarkers, width, height);
   const paddleMarkers = recoverMarkersWithOpticalFlow(decodedPaddleMarkers, detector.grey);
   rememberTrackingFrame(detector.grey, paddleMarkers);
   const boardPose = estimateBoardPose(paddleMarkers, width, height);
@@ -317,12 +541,15 @@ function detectAndRender() {
     const recentlyConfirmed = performance.now() - lastPoseAt < 750;
     const fallbackAssist = recentlyConfirmed ? detectedPaddleAssist : null;
     if (fallbackAssist) {
+      updateTrackingMode('colour');
+      lastPaddleBounds = { ...fallbackAssist };
       drawPaddleAssist(fallbackAssist);
       applyColourPaddlePosition(fallbackAssist, width, height);
       setStatus(`${fallbackAssist.colour} paddle fallback — position is live; hold a marker toward the camera for angle tracking`, 'tracking');
       setConfidence('low — colour fallback', 'low');
       return;
     }
+    updateTrackingMode('lost');
     if (performance.now() - lastPoseAt > 300) {
       const candidateCount = detector.candidates.length;
       setStatus(
@@ -342,7 +569,10 @@ function detectAndRender() {
   const matchingAssist = detectedPaddleAssist?.colour === activePaddleFace ? detectedPaddleAssist : null;
   const assistConsistent = !matchingAssist || markersFitPaddleAssist(boardPose.markers, matchingAssist);
   const acceptedAssist = assistConsistent ? matchingAssist : null;
+  const currentTrackingMode = boardPose.flowMarkerCount ? 'flow' : 'markers';
+  updateTrackingMode(currentTrackingMode);
   if (acceptedAssist) drawPaddleAssist(acceptedAssist);
+  lastPaddleBounds = acceptedAssist ? { ...acceptedAssist } : boundsAroundMarkers(boardPose.markers);
   applyBoardPose(boardPose, acceptedAssist, width, height);
   lastPoseAt = performance.now();
   const side = isFrontBoard ? 'front / red' : 'back / black';
@@ -352,11 +582,28 @@ function detectAndRender() {
   const confidenceKind = !assistConsistent ? 'low' : boardPose.usesWholeBoardPose ? 'high' : 'medium';
   const confidenceLabel = !assistConsistent
     ? 'low — marker/silhouette mismatch'
-    : `${confidenceKind} — ${boardPose.usesWholeBoardPose ? 'whole-board' : 'marker'} pose, ${boardPose.reprojectionError.toFixed(1)} px error`;
+    : `${confidenceKind} — ${boardPose.usesWholeBoardPose ? 'whole-board' : 'marker'} pose, ${boardPose.reprojectionError.toFixed(1)} px error, ${stableTrackingMode}`;
   setConfidence(confidenceLabel, confidenceKind);
   const rejectedNote = boardPose.rejectedMarkerCount ? `; ignored ${boardPose.rejectedMarkerCount} outlier` : '';
   const flowNote = boardPose.flowMarkerCount ? `; ${boardPose.flowMarkerCount} held by optical flow` : '';
   setStatus(`Tracking ${side} board with ${decodedMarkerCount}/${boardPose.detectedMarkerCount} decoded marker${boardPose.detectedMarkerCount === 1 ? '' : 's'}${flowNote}${rejectedNote}`, 'tracking');
+}
+
+function boundsAroundMarkers(markers) {
+  const corners = markers.flatMap((marker) => marker.corners);
+  const left = Math.min(...corners.map((corner) => corner.x));
+  const right = Math.max(...corners.map((corner) => corner.x));
+  const top = Math.min(...corners.map((corner) => corner.y));
+  const bottom = Math.max(...corners.map((corner) => corner.y));
+  const padding = Math.max(right - left, bottom - top) * 0.35;
+  return {
+    left: left - padding,
+    top: top - padding,
+    width: right - left + padding * 2,
+    height: bottom - top + padding * 2,
+    centerX: (left + right) / 2,
+    centerY: (top + bottom) / 2,
+  };
 }
 
 function refineMarkerCorners(markers, greyImage) {
@@ -397,13 +644,16 @@ function refineCorner(greyImage, corner, radius) {
     }
   }
   const determinant = a00 * a11 - a01 * a01;
-  if (Math.abs(determinant) < 1e-6) return { ...corner };
+  if (Math.abs(determinant) < 1e-6) return { ...corner, quality: 0.1 };
   const refinedX = (a11 * b0 - a01 * b1) / determinant;
   const refinedY = (a00 * b1 - a01 * b0) / determinant;
+  const trace = a00 + a11;
+  const minimumEigenvalue = (trace - Math.sqrt((a00 - a11) ** 2 + 4 * a01 ** 2)) / 2;
   const maxShift = 2.5;
   return {
     x: corner.x + THREE.MathUtils.clamp(refinedX - corner.x, -maxShift, maxShift),
     y: corner.y + THREE.MathUtils.clamp(refinedY - corner.y, -maxShift, maxShift),
+    quality: THREE.MathUtils.clamp(minimumEigenvalue / 20000, 0.1, 3),
   };
 }
 
@@ -412,10 +662,15 @@ function recoverMarkersWithOpticalFlow(decodedMarkers, currentGrey) {
     return decodedMarkers;
   }
   const decodedIds = new Set(decodedMarkers.map((marker) => marker.id));
+  const recoverableMarkers = previousPaddleMarkers.filter(
+    (marker) => !decodedIds.has(marker.id) && (marker.flowAge || 0) < 3
+  );
+  if (!recoverableMarkers.length) return decodedMarkers;
+  const previousPyramid = buildGreyPyramid(previousGreyFrame);
+  const currentPyramid = buildGreyPyramid(currentGrey);
   const recovered = [];
-  for (const marker of previousPaddleMarkers) {
-    if (decodedIds.has(marker.id) || (marker.flowAge || 0) >= 3) continue;
-    const corners = marker.corners.map((corner) => trackCorner(previousGreyFrame, currentGrey, corner));
+  for (const marker of recoverableMarkers) {
+    const corners = marker.corners.map((corner) => trackCornerPyramid(previousPyramid, currentPyramid, corner));
     if (corners.some((corner) => !corner)) continue;
     recovered.push(Object.assign(
       new AR.Marker(marker.id, corners, marker.hammingDistance),
@@ -425,31 +680,72 @@ function recoverMarkersWithOpticalFlow(decodedMarkers, currentGrey) {
   return [...decodedMarkers, ...recovered];
 }
 
-function trackCorner(previousGrey, currentGrey, corner) {
-  const patchRadius = 2;
-  const searchRadius = 10;
-  const sourceX = Math.round(corner.x);
-  const sourceY = Math.round(corner.y);
-  if (sourceX < patchRadius || sourceX >= previousGrey.width - patchRadius || sourceY < patchRadius || sourceY >= previousGrey.height - patchRadius) return null;
-  let best = null;
-  for (let dy = -searchRadius; dy <= searchRadius; dy += 1) {
-    for (let dx = -searchRadius; dx <= searchRadius; dx += 1) {
-      const targetX = sourceX + dx;
-      const targetY = sourceY + dy;
-      if (targetX < patchRadius || targetX >= currentGrey.width - patchRadius || targetY < patchRadius || targetY >= currentGrey.height - patchRadius) continue;
-      let squaredError = 0;
-      for (let py = -patchRadius; py <= patchRadius; py += 1) {
-        for (let px = -patchRadius; px <= patchRadius; px += 1) {
-          const previousValue = previousGrey.data[(sourceY + py) * previousGrey.width + sourceX + px];
-          const currentValue = currentGrey.data[(targetY + py) * currentGrey.width + targetX + px];
-          squaredError += (previousValue - currentValue) ** 2;
-        }
+function buildGreyPyramid(greyImage) {
+  const levels = [{ width: greyImage.width, height: greyImage.height, data: new Uint8Array(greyImage.data) }];
+  for (let level = 1; level < 3; level += 1) {
+    const source = levels[level - 1];
+    const width = Math.floor(source.width / 2);
+    const height = Math.floor(source.height / 2);
+    const data = new Uint8Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const sourceX = x * 2;
+        const sourceY = y * 2;
+        data[y * width + x] = (
+          source.data[sourceY * source.width + sourceX]
+          + source.data[sourceY * source.width + sourceX + 1]
+          + source.data[(sourceY + 1) * source.width + sourceX]
+          + source.data[(sourceY + 1) * source.width + sourceX + 1]
+        ) / 4;
       }
-      if (!best || squaredError < best.error) best = { x: targetX, y: targetY, error: squaredError };
     }
+    levels.push({ width, height, data });
+  }
+  return levels;
+}
+
+function trackCornerPyramid(previousPyramid, currentPyramid, corner) {
+  const patchRadius = 2;
+  let displacementX = 0;
+  let displacementY = 0;
+  let best = null;
+  for (let level = previousPyramid.length - 1; level >= 0; level -= 1) {
+    const previousGrey = previousPyramid[level];
+    const currentGrey = currentPyramid[level];
+    const scale = 2 ** level;
+    const sourceX = Math.round(corner.x / scale);
+    const sourceY = Math.round(corner.y / scale);
+    if (level < previousPyramid.length - 1) {
+      displacementX *= 2;
+      displacementY *= 2;
+    }
+    best = null;
+    for (let dy = -4; dy <= 4; dy += 1) {
+      for (let dx = -4; dx <= 4; dx += 1) {
+        const targetX = sourceX + displacementX + dx;
+        const targetY = sourceY + displacementY + dy;
+        if (sourceX < patchRadius || sourceX >= previousGrey.width - patchRadius || sourceY < patchRadius || sourceY >= previousGrey.height - patchRadius) continue;
+        if (targetX < patchRadius || targetX >= currentGrey.width - patchRadius || targetY < patchRadius || targetY >= currentGrey.height - patchRadius) continue;
+        let squaredError = 0;
+        for (let py = -patchRadius; py <= patchRadius; py += 1) {
+          for (let px = -patchRadius; px <= patchRadius; px += 1) {
+            const previousValue = previousGrey.data[(sourceY + py) * previousGrey.width + sourceX + px];
+            const currentValue = currentGrey.data[(targetY + py) * currentGrey.width + targetX + px];
+            squaredError += (previousValue - currentValue) ** 2;
+          }
+        }
+        if (!best || squaredError < best.error) best = { dx, dy, error: squaredError };
+      }
+    }
+    if (!best) return null;
+    displacementX += best.dx;
+    displacementY += best.dy;
   }
   if (!best || best.error / ((patchRadius * 2 + 1) ** 2) > 1800) return null;
-  return refineCorner(currentGrey, best, 3);
+  return refineCorner(currentPyramid[0], {
+    x: corner.x + displacementX,
+    y: corner.y + displacementY,
+  }, 3);
 }
 
 function rememberTrackingFrame(greyImage, markers) {
@@ -577,7 +873,15 @@ function findPaddleByColour(imageData, colour) {
         stack[stackSize++] = index + width;
       }
     }
-    if (!largest || count > largest.count) largest = { count, minX, maxX, minY, maxY };
+    const centerX = ((minX + maxX + 1) * sample) / 2;
+    const centerY = ((minY + maxY + 1) * sample) / 2;
+    let score = count;
+    if (lastPaddleBounds && performance.now() - lastPoseAt < 1200) {
+      const distanceSquared = (centerX - lastPaddleBounds.centerX) ** 2 + (centerY - lastPaddleBounds.centerY) ** 2;
+      const trackingRadiusSquared = Math.max(lastPaddleBounds.width, lastPaddleBounds.height) ** 2;
+      score /= 1 + distanceSquared / Math.max(1, trackingRadiusSquared);
+    }
+    if (!largest || score > largest.score) largest = { count, score, minX, maxX, minY, maxY };
   }
 
   if (!largest || largest.count < width * height * 0.015) return null;
@@ -804,7 +1108,8 @@ function estimateBoardPose(markers, frameWidth, frameHeight) {
     return sum;
   }, new THREE.Vector4());
   let quaternion = new THREE.Quaternion(quaternionSum.x, quaternionSum.y, quaternionSum.z, quaternionSum.w).normalize();
-  const wholeBoardPose = estimateWholeBoardPose(inliers.map((item) => item.marker), frameWidth, frameHeight);
+  const wholeBoardPose = estimateAllCornerBoardPose(inliers.map((item) => item.marker), frameWidth, frameHeight)
+    || estimateWholeBoardPose(inliers.map((item) => item.marker), frameWidth, frameHeight);
   if (wholeBoardPose) {
     position = wholeBoardPose.position;
     quaternion = wholeBoardPose.quaternion;
@@ -867,6 +1172,109 @@ function estimateWholeBoardPose(markers, frameWidth, frameHeight) {
     quaternion,
     reprojectionError: pose.bestError,
   };
+}
+
+function estimateAllCornerBoardPose(markers, frameWidth, frameHeight) {
+  if (markers.length < 2) return null;
+  const halfMarker = markerSizeMm() / 2;
+  const boardScaleMm = 40;
+  const localCorners = [
+    [-halfMarker, halfMarker],
+    [halfMarker, halfMarker],
+    [halfMarker, -halfMarker],
+    [-halfMarker, -halfMarker],
+  ];
+  const correspondences = [];
+  for (const marker of markers) {
+    const centre = MARKER_CENTRES_MM[marker.id];
+    if (!centre) continue;
+    const decodeWeight = 1 / (1 + (marker.hammingDistance || 0));
+    marker.corners.forEach((corner, index) => {
+      const image = undistortCorner(corner, frameWidth, frameHeight);
+      correspondences.push({
+        x: (centre[0] + localCorners[index][0]) / boardScaleMm,
+        y: (centre[1] + localCorners[index][1]) / boardScaleMm,
+        u: image.x,
+        v: image.y,
+        weight: decodeWeight * (corner.quality || 0.5),
+      });
+    });
+  }
+  if (correspondences.length < 8) return null;
+
+  const normal = Array.from({ length: 8 }, () => Array(8).fill(0));
+  const rightHandSide = Array(8).fill(0);
+  for (const point of correspondences) {
+    const rows = [
+      { coefficients: [point.x, point.y, 1, 0, 0, 0, -point.u * point.x, -point.u * point.y], value: point.u },
+      { coefficients: [0, 0, 0, point.x, point.y, 1, -point.v * point.x, -point.v * point.y], value: point.v },
+    ];
+    for (const row of rows) {
+      for (let column = 0; column < 8; column += 1) {
+        rightHandSide[column] += row.coefficients[column] * row.value * point.weight;
+        for (let other = 0; other < 8; other += 1) {
+          normal[column][other] += row.coefficients[column] * row.coefficients[other] * point.weight;
+        }
+      }
+    }
+  }
+  const homography = solveLinearSystem(normal, rightHandSide);
+  if (!homography) return null;
+
+  const reprojectionError = Math.sqrt(correspondences.reduce((sum, point) => {
+    const denominator = homography[6] * point.x + homography[7] * point.y + 1;
+    const projectedU = (homography[0] * point.x + homography[1] * point.y + homography[2]) / denominator;
+    const projectedV = (homography[3] * point.x + homography[4] * point.y + homography[5]) / denominator;
+    return sum + (projectedU - point.u) ** 2 + (projectedV - point.v) ** 2;
+  }, 0) / correspondences.length);
+  if (!Number.isFinite(reprojectionError) || reprojectionError > 5) return null;
+
+  const focalLength = focalLengthPixels(frameWidth);
+  const firstColumn = new THREE.Vector3(homography[0] / focalLength, homography[3] / focalLength, homography[6]);
+  const secondColumn = new THREE.Vector3(homography[1] / focalLength, homography[4] / focalLength, homography[7]);
+  const translation = new THREE.Vector3(homography[2] / focalLength, homography[5] / focalLength, 1);
+  let scale = 2 / (firstColumn.length() + secondColumn.length());
+  if (translation.z * scale < 0) scale *= -1;
+  const r1 = firstColumn.multiplyScalar(scale).normalize();
+  const scaledSecondColumn = secondColumn.multiplyScalar(scale);
+  const r2 = scaledSecondColumn.addScaledVector(r1, -r1.dot(scaledSecondColumn)).normalize();
+  const r3 = new THREE.Vector3().crossVectors(r1, r2).normalize();
+  translation.multiplyScalar(scale * boardScaleMm);
+  const matrix = new THREE.Matrix4().set(
+    r1.x, -r2.x, -r3.x, 0,
+    -r1.y, r2.y, r3.y, 0,
+    -r1.z, r2.z, r3.z, 0,
+    0, 0, 0, 1
+  );
+  const quaternion = new THREE.Quaternion().setFromRotationMatrix(matrix);
+  const isFrontBoard = FRONT_IDS.has(markers[0].id);
+  if (!isFrontBoard) quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));
+  return {
+    position: new THREE.Vector3(-translation.x / 1000, translation.y / 1000, -translation.z / 1000),
+    quaternion,
+    reprojectionError,
+  };
+}
+
+function solveLinearSystem(matrix, values) {
+  const size = values.length;
+  const augmented = matrix.map((row, index) => [...row, values[index]]);
+  for (let pivot = 0; pivot < size; pivot += 1) {
+    let bestRow = pivot;
+    for (let row = pivot + 1; row < size; row += 1) {
+      if (Math.abs(augmented[row][pivot]) > Math.abs(augmented[bestRow][pivot])) bestRow = row;
+    }
+    if (Math.abs(augmented[bestRow][pivot]) < 1e-9) return null;
+    [augmented[pivot], augmented[bestRow]] = [augmented[bestRow], augmented[pivot]];
+    const divisor = augmented[pivot][pivot];
+    for (let column = pivot; column <= size; column += 1) augmented[pivot][column] /= divisor;
+    for (let row = 0; row < size; row += 1) {
+      if (row === pivot) continue;
+      const factor = augmented[row][pivot];
+      for (let column = pivot; column <= size; column += 1) augmented[row][column] -= factor * augmented[pivot][column];
+    }
+  }
+  return augmented.map((row) => row[size]);
 }
 
 function markerImageArea(marker) {
@@ -977,28 +1385,30 @@ function applySmoothedPose(position, quaternion) {
   if (now - lastSmoothedPoseAt > 300) {
     positionHistory.length = 0;
     positionSmoother.reset();
+    predictivePositionFilter.reset();
     smoothedQuaternion = null;
   }
   lastSmoothedPoseAt = now;
   positionHistory.push(position.clone());
-  if (positionHistory.length > 5) positionHistory.shift();
+  if (positionHistory.length > 3) positionHistory.shift();
   const median = (axis) => {
     const values = positionHistory.map((sample) => sample[axis]).sort((a, b) => a - b);
     return values[Math.floor(values.length / 2)];
   };
   const stablePosition = new THREE.Vector3(median('x'), median('y'), median('z'));
-  paddle.position.copy(positionSmoother.filter(stablePosition, now));
+  const predictedPosition = predictivePositionFilter.filter(stablePosition, now);
+  paddle.position.copy(positionSmoother.filter(predictedPosition, now));
   if (!smoothedQuaternion) {
     smoothedQuaternion = quaternion.clone();
   } else {
     const dt = Math.max(1 / 240, (now - lastQuaternionAt) / 1000);
     const angle = smoothedQuaternion.angleTo(quaternion);
-    const deadZone = THREE.MathUtils.degToRad(0.65);
+    const deadZone = THREE.MathUtils.degToRad(0.4);
     if (angle > deadZone) {
       // Remove sub-degree corner noise while preserving the remainder of a
       // real rotation, then respond progressively faster to larger motions.
       const stableTarget = smoothedQuaternion.clone().slerp(quaternion, (angle - deadZone) / angle);
-      const alpha = THREE.MathUtils.clamp(0.025 + angle * 0.2 + dt * 0.8, 0.025, 0.2);
+      const alpha = THREE.MathUtils.clamp(0.06 + angle * 0.32 + dt * 1.2, 0.06, 0.35);
       smoothedQuaternion.slerp(stableTarget, alpha);
     }
   }
