@@ -13,8 +13,13 @@ const _arm = new THREE.Vector3();
 // hard the ball comes off, and the speed of the surface across the ball — a
 // product of the swing's rotation — is what puts spin on it.
 export class Paddle {
-  constructor() {
+  constructor({ vertical = false } = {}) {
     this.mesh = buildPaddleMesh();
+
+    // Desktop/remote paddles aren't held by a controller, so turn the bat to
+    // stand upright with its face toward the far end of the table (−Z). The
+    // default (grip) orientation leaves the face pointing sideways (+X).
+    if (vertical) this.mesh.rotation.y = Math.PI / 2;
 
     this.velocity = new THREE.Vector3(); // linear, m/s
     this.angularVelocity = new THREE.Vector3(); // rad/s

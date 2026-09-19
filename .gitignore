@@ -3,6 +3,3 @@ dist/
 .DS_Store
 *.local
 .vite/
-
-# Throwaway local vite configs used for one-off dev servers
-vite.*.config.js

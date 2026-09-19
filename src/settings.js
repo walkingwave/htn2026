@@ -25,12 +25,6 @@ export const OPTIONS = {
     { label: 'Left', value: 'left' },
     { label: 'Both', value: 'both' },
   ],
-  // What drives the bat. `hand` lets you hold your own real paddle and have
-  // the headset track your hand instead of a controller.
-  paddleSource: [
-    { label: 'Controller', value: 'controller' },
-    { label: 'Real paddle', value: 'hand' },
-  ],
 };
 
 const DEFAULTS = {
@@ -38,7 +32,6 @@ const DEFAULTS = {
   feedRate: 1,
   placement: 1,
   hand: 'right',
-  paddleSource: 'controller',
   sound: true,
   aimMarker: true,
 };
