@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 import { createTable } from './table.js';
+import { createXRButtons } from './xrButtons.js';
 import { Paddle } from './paddle.js';
 import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
@@ -13,15 +13,18 @@ import { PLAY_AREA, TABLE } from './constants.js';
 const BALL_POOL_SIZE = 8;
 
 // --- Renderer / scene ---
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// alpha:true so the framebuffer is transparent in AR — the Quest compositor
+// shows camera passthrough wherever nothing is drawn.
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
 document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x101018);
+const VR_BACKGROUND = new THREE.Color(0x101018);
+scene.background = VR_BACKGROUND;
 
 const camera = new THREE.PerspectiveCamera(
   70,
@@ -47,7 +50,19 @@ keyLight.position.set(3, 6, 2);
 scene.add(keyLight);
 
 // --- World ---
-scene.add(createTable());
+const table = createTable();
+scene.add(table);
+const vrEnvironment = table.getObjectByName('vr-environment');
+
+// AR: transparent background + real floor via passthrough. VR: dark room.
+function applyMode(mode) {
+  const isAR = mode === 'immersive-ar';
+  scene.background = isAR ? null : VR_BACKGROUND;
+  if (vrEnvironment) vrEnvironment.visible = !isAR;
+}
+
+createXRButtons(renderer, { onModeChange: applyMode });
+renderer.xr.addEventListener('sessionend', () => applyMode(null));
 
 const balls = Array.from({ length: BALL_POOL_SIZE }, () => new Ball());
 for (const b of balls) scene.add(b.mesh);

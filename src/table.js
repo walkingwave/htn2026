@@ -68,11 +68,13 @@ export function createTable() {
     }
   }
 
-  // Floor
+  // Floor — VR-only environment; hidden in AR where the real floor shows
+  // through passthrough (name lets main.js toggle it per mode).
   const floor = new THREE.Mesh(
     new THREE.CircleGeometry(6, 48),
     new THREE.MeshStandardMaterial({ color: 0x2b2b33, roughness: 0.9 })
   );
+  floor.name = 'vr-environment';
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   group.add(floor);

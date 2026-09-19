@@ -27,11 +27,20 @@ Open `https://localhost:5173`, accept the cert warning. You get an orbit-camera 
 2. Find your laptop's LAN IP (`ipconfig getifaddr en0` on macOS). Vite also prints the Network URL on startup.
 3. In the Meta Quest Browser, go to `https://<laptop-ip>:5173`.
 4. Accept the self-signed certificate warning (Advanced → Proceed).
-5. Click **Enter VR**.
+5. Click **Enter AR** for passthrough mixed reality (virtual table in your real room), or **Enter VR** for a fully virtual space.
 
 Controls:
 - Paddles are attached to both controllers.
 - **Trigger** toggles the ball machine on/off.
+
+### AR vs VR
+
+| Mode | Background | Floor |
+| ---- | ---------- | ----- |
+| AR (`immersive-ar`) | Camera passthrough | Your real floor |
+| VR (`immersive-vr`) | Dark room | Virtual floor disc |
+
+Both modes use the `local-floor` reference space, so the table sits at real floor height.
 
 ## Project structure
 
@@ -53,4 +62,4 @@ src/
 - Scoring + drill modes (target zones on the table)
 - Spin (Magnus effect) in `physics.js`
 - Hand tracking fallback (Quest Browser supports WebXR hand input)
-- Passthrough mixed reality (`immersive-ar` session on Quest 3S)
+- AR table placement via hit-test (anchor the table to a real surface)
