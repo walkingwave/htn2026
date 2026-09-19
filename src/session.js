@@ -5,10 +5,6 @@ export const DIFFICULTIES = {
 };
 
 export const TARGET_REPETITIONS = 5;
-
-// Targets are expressed in table coordinates on the fly's side. The sequence
-// moves from directional control to touch and depth, so each stage teaches a
-// distinct shot rather than rewarding five attempts at one static target.
 export const TARGET_MOVES = [
   { id: 'forehand-cross', label: 'Forehand cross-court', shortLabel: 'FH cross', cue: 'Turn your shoulders and finish toward the far right corner.', x: 0.42, z: -0.82, radius: 0.23 },
   { id: 'backhand-line', label: 'Backhand down the line', shortLabel: 'BH line', cue: 'Keep the face quiet and send it straight down the left line.', x: -0.47, z: -1.05, radius: 0.22 },
@@ -21,7 +17,7 @@ export const TARGET_MOVES = [
 export const DRILLS = {
   target: { label: 'Hit the zone', detail: 'Complete six coached shots, five clean repetitions of each.', coach: 'Follow the gold target. Complete five clean shots before the next move unlocks.' },
   rally: { label: 'Rally builder', detail: 'Keep the exchange alive and build clean consecutive returns.', coach: 'Small, early movements beat big swings. Reset after every contact.' },
-  fly: { label: 'Face the fly', detail: 'Read the fly boss and return its changing placements.', coach: 'Watch the fly paddle, not the ball. Prepare before it crosses the net.' },
+  fly: { label: 'Face the fly', detail: 'Play a real exchange: the fly intercepts returns and sends them back.', coach: 'Watch the fly paddle, prepare early, and place your next ball away from it.' },
 };
 
 export class TrainerSession {
@@ -37,10 +33,12 @@ export class TrainerSession {
     this.rally = 0;
     this.longestRally = 0;
     this.returns = 0;
+    this.flyReturns = 0;
     this.serves = 0;
     this.tableBounces = 0;
     this.netErrors = 0;
     this.misses = 0;
+    this.flyMisses = 0;
     this.targetHits = 0;
     this.targetAttempts = 0;
     this.targetMoveIndex = 0;
@@ -52,44 +50,30 @@ export class TrainerSession {
     this.finished = false;
   }
 
-  start(now = performance.now()) {
-    this.startedAt = now;
-    this.lastHitAt = now;
-    this.active = true;
-    this.finished = false;
-  }
-
-  update(now = performance.now()) {
-    if (this.active) this.elapsedMs = now - this.startedAt;
-  }
-
-  serve() {
-    if (this.active) this.serves += 1;
-  }
-
-  getCurrentTargetMove() {
-    return this.drill === 'target' ? TARGET_MOVES[this.targetMoveIndex] ?? null : null;
-  }
-
+  start(now = performance.now()) { this.startedAt = now; this.lastHitAt = now; this.active = true; this.finished = false; }
+  update(now = performance.now()) { if (this.active) this.elapsedMs = now - this.startedAt; }
+  serve() { if (this.active) this.serves += 1; }
+  getCurrentTargetMove() { return this.drill === 'target' ? TARGET_MOVES[this.targetMoveIndex] ?? null : null; }
   isTargetHit(position, move = this.getCurrentTargetMove()) {
     if (!position || !move || position.z >= 0) return false;
-    const dx = position.x - move.x;
-    const dz = position.z - move.z;
-    return Math.hypot(dx, dz) <= move.radius;
+    return Math.hypot(position.x - move.x, position.z - move.z) <= move.radius;
   }
 
   record(event, details = {}, now = performance.now()) {
     const result = { event, targetHit: false, targetMiss: false, moveAdvanced: false, drillComplete: false };
     if (!this.active) return result;
     this.update(now);
-
     if (event === 'paddle') {
-      this.rally += 1;
-      this.returns += 1;
-      this.longestRally = Math.max(this.longestRally, this.rally);
-      this.score += 10 + Math.min(this.rally, 20);
-      this.hits.push(now - this.lastHitAt);
-      this.lastHitAt = now;
+      if (details.owner === 'fly') {
+        this.flyReturns += 1;
+      } else {
+        this.rally += 1;
+        this.returns += 1;
+        this.longestRally = Math.max(this.longestRally, this.rally);
+        this.score += 10 + Math.min(this.rally, 20);
+        this.hits.push(now - this.lastHitAt);
+        this.lastHitAt = now;
+      }
     } else if (event === 'table') {
       this.tableBounces += 1;
       const move = this.getCurrentTargetMove();
@@ -118,27 +102,17 @@ export class TrainerSession {
         }
       }
     } else if (event === 'net') {
-      this.netErrors += 1;
-      this.endRally();
+      if (details.owner === 'fly' || details.position?.z < 0) this.flyMisses += 1;
+      else { this.netErrors += 1; this.endRally(); }
     } else if (event === 'floor') {
-      this.misses += 1;
-      this.endRally();
+      if (details.owner === 'fly' || details.position?.z < 0) this.flyMisses += 1;
+      else { this.misses += 1; this.endRally(); }
     }
     return result;
   }
 
-  endRally() {
-    this.longestRally = Math.max(this.longestRally, this.rally);
-    this.rally = 0;
-  }
-
-  finish(now = performance.now()) {
-    this.update(now);
-    this.endRally();
-    this.active = false;
-    this.finished = true;
-    return this.summary();
-  }
+  endRally() { this.longestRally = Math.max(this.longestRally, this.rally); this.rally = 0; }
+  finish(now = performance.now()) { this.update(now); this.endRally(); this.active = false; this.finished = true; return this.summary(); }
 
   summary() {
     const attempts = Math.max(this.serves, this.returns + this.misses + this.netErrors);
@@ -149,30 +123,16 @@ export class TrainerSession {
     const survivalSeconds = Math.round(this.elapsedMs / 100) / 10;
     const currentMove = this.getCurrentTargetMove();
     return {
-      difficulty: this.difficulty,
-      drill: this.drill,
-      score: this.score,
-      rally: this.rally,
-      longestRally: this.longestRally,
-      returns: this.returns,
-      serves: this.serves,
-      tableBounces: this.tableBounces,
-      netErrors: this.netErrors,
-      misses: this.misses,
-      accuracy,
-      reactionMs,
-      survivalSeconds,
-      bossLevel: this.bossLevel,
-      targetHits: this.targetHits,
-      targetAttempts: this.targetAttempts,
-      targetAccuracy,
-      completedMoves: this.completedMoves,
-      totalMoves: TARGET_MOVES.length,
+      difficulty: this.difficulty, drill: this.drill, score: this.score, rally: this.rally,
+      longestRally: this.longestRally, returns: this.returns, flyReturns: this.flyReturns,
+      serves: this.serves, tableBounces: this.tableBounces, netErrors: this.netErrors,
+      misses: this.misses, flyMisses: this.flyMisses, accuracy, reactionMs, survivalSeconds,
+      bossLevel: this.bossLevel, targetHits: this.targetHits, targetAttempts: this.targetAttempts,
+      targetAccuracy, completedMoves: this.completedMoves, totalMoves: TARGET_MOVES.length,
       currentMoveNumber: currentMove ? this.targetMoveIndex + 1 : TARGET_MOVES.length,
       currentMoveLabel: currentMove?.label ?? 'Sequence complete',
       currentMoveCue: currentMove?.cue ?? 'Great work. Review your consistency, then repeat at the next speed.',
-      moveSuccesses: this.moveSuccesses,
-      moveRequired: TARGET_REPETITIONS,
+      moveSuccesses: this.moveSuccesses, moveRequired: TARGET_REPETITIONS,
       targetComplete: this.drill === 'target' && this.completedMoves === TARGET_MOVES.length,
     };
   }

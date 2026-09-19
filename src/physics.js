@@ -72,7 +72,7 @@ export class PhysicsWorld {
 
     // Paddle collisions
     for (const paddle of paddles) {
-      this._collidePaddle(ball, paddle);
+      if (paddle.enabled !== false) this._collidePaddle(ball, paddle);
     }
   }
 
@@ -92,7 +92,10 @@ export class PhysicsWorld {
 
     // Relative velocity along blade normal; only hit if approaching
     _tmp.copy(ball.velocity).sub(paddle.velocity);
-    const approach = _tmp.dot(_n) * Math.sign(distAlongNormal || 1);
+    // The ball must be moving toward the blade plane. Multiplying the
+    // relative normal velocity by signed separation handles either face of
+    // the paddle without relying on an arbitrary normal-side sign.
+    const approach = _tmp.dot(_n) * distAlongNormal;
     if (approach >= 0) return;
 
     // Face the normal toward the ball side
@@ -109,6 +112,6 @@ export class PhysicsWorld {
       .addScaledVector(_n, halfThick * 1.05)
       .add(_tmp.copy(_rel).addScaledVector(paddle.bladeNormal, -distAlongNormal));
 
-    this.onBounce?.(ball, 'paddle');
+    this.onBounce?.(ball, 'paddle', { owner: paddle.owner });
   }
 }

@@ -17,6 +17,7 @@ The Vite server uses HTTPS because WebXR requires a secure context. Open the pri
 - **Standard** — balanced fundamentals training.
 - **Boss run** — faster, tighter serves; survive as long as possible.
 - **Hit the zone** — a six-move coaching sequence: forehand/backhand cross-court, down-the-line, short touch, and deep drive. Each move requires five successful target bounces before the next move unlocks.
+- **Face the fly** — the fly's paddle predicts incoming ball position, moves to intercept it, and returns it through the same physics engine. The match tracks fly returns and fly misses.
 - Every target move displays a live target, technique cue, repetition counter, and move-completion feedback. A miss keeps the current move active rather than silently advancing.
 
 The HUD tracks score, current and best rally, accuracy, table bounces, boss level, misses, net errors, survival time, estimated reaction timing, and target-sequence progress. Target sessions finish when all six moves are complete or after five missed balls; other sessions finish after five missed balls. Results can be submitted to the fundamentals or boss leaderboard.
@@ -29,7 +30,7 @@ The HUD tracks score, current and best rally, accuracy, table bounces, boss leve
 
 ## Shared Supabase leaderboard
 
-This app reuses the leaderboard model from `../fly` and supports local demo rankings when credentials are absent.
+This app reuses the leaderboard model from `../fly`, persists scores to Supabase when configured, and falls back to a device-local leaderboard plus demo rankings when credentials are absent.
 
 1. Copy `.env.example` to `.env.local`.
 2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the same project used by `../fly`.

@@ -62,13 +62,17 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
         : 'You found your rhythm.';
     $('summary-coach').textContent = summary.drill === 'target'
       ? `${summary.completedMoves}/${summary.totalMoves} moves complete. ${summary.targetComplete ? 'Excellent control—repeat the sequence at the next speed.' : DRILLS.target.coach}`
-      : summary.accuracy >= 70 ? 'Good consistency. Next, reduce swing size and challenge the next speed.' : DRILLS[summary.drill].coach;
+      : summary.drill === 'fly'
+        ? `${summary.flyReturns} fly returns and ${summary.flyMisses} fly misses. ${DRILLS.fly.coach}`
+        : summary.accuracy >= 70 ? 'Good consistency. Next, reduce swing size and challenge the next speed.' : DRILLS[summary.drill].coach;
     $('summary-grid').innerHTML = [
       ['Score', summary.score],
       ['Moves complete', `${summary.completedMoves}/${summary.totalMoves}`],
       ['Longest rally', `${summary.longestRally} hits`],
       ['Accuracy', `${summary.accuracy}%`],
       ['Target hits', `${summary.targetHits}`],
+      ['Fly returns', `${summary.flyReturns ?? 0}`],
+      ['Fly misses', `${summary.flyMisses ?? 0}`],
       ['Survival', `${summary.survivalSeconds}s`],
       ['Reaction', summary.reactionMs ? `${summary.reactionMs}ms` : '—'],
     ].map(([label, value]) => `<div><small>${label}</small><strong>${value}</strong></div>`).join('');
@@ -109,7 +113,7 @@ export function createTrainerUI({ onStart, onPause, onReset, onMachineToggle, on
     $('save-status').textContent = 'Saving…';
     try {
       const result = await submitScore(name, lastSummary, category);
-      $('save-status').textContent = result.persisted === false ? `Saved locally — configure Supabase to publish globally. (${scoreFor(lastSummary, category)} pts)` : 'Score saved to the arena.';
+      $('save-status').textContent = result.storage === 'local' ? `Saved on this device. Configure Supabase to publish globally. (${scoreFor(lastSummary, category)} pts)` : 'Score saved to the arena.';
     } catch { $('save-status').textContent = 'Could not reach the leaderboard. Your session is still safe.'; }
   });
 
