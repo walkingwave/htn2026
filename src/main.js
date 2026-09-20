@@ -18,6 +18,7 @@ import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
+import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
 import { Opponent } from './opponent.js';
 import { Coach, SCENARIOS } from './coach.js';
 import {
@@ -237,11 +238,15 @@ const ui = new UI({
     // machine stays down for it.
     machine.enabled = settings.get('game') !== 'versus';
     game.reset();
+    // The camera only opens once you are actually playing, not while the
+    // setting sits there remembered from last time.
+    if (usingWebcamBat()) startWebcamBat();
   },
   onExit: () => {
     machine.enabled = false;
     leaveVersus();
     clearBalls();
+    stopWebcamBat();
   },
   isInputBlocked: () => vrMenu.open,
   onRecenter: () => recenter(),
@@ -262,6 +267,21 @@ const ui = new UI({
     return { role: 'guest', code, kind: room.kind };
   },
   onVersusLeave: () => leaveVersus(),
+  // What the run was worth, read at the moment you quit. Versus is scored on
+  // what you took off a real opponent; the other two on the trainer's stats.
+  onRunSummary: () => ({
+    hits: game.hits,
+    misses: game.misses,
+    returns: game.returns,
+    bestStreak: game.bestStreak,
+    longestRally: game.longestRally,
+    targetsHit: game.targetsHit,
+    accuracy: game.accuracy,
+    lessonBest: game.lessonBest,
+    lessonAttempts: game.lessonAttempts,
+    pointsWon: netMode === 'guest' ? match.scoreGuest : match.scoreHost,
+    matchWon: Boolean(netMode) && match.winner === netMode,
+  }),
   // A link with ?room=CODE means someone invited you: the lobby opens on the
   // join step with the code already filled in.
   invitedRoom: roomFromUrl(),
@@ -494,6 +514,67 @@ function swingDesktopBat() {
   desktopThrust = DESKTOP_THRUST_TIME;
 }
 
+// --- Webcam bat -------------------------------------------------------------
+// The flat-screen counterpart to hand tracking: a webcam watches your actual
+// paddle and drives the on-screen one, so a laptop player swings a real bat
+// rather than pushing a mouse. The tracker finds the rubber by colour and
+// reads pose off the blob's ellipse — see vision/paddleTracker.js.
+//
+// It feeds the same rig the pointer drives, so everything downstream (swing
+// velocity, spin, versus packets) is identical either way; only where the pose
+// comes from changes.
+let camTracker = null;
+const _camQuat = new THREE.Quaternion();
+const _camBase = new THREE.Quaternion();
+const _camPos = new THREE.Vector3();
+
+function usingWebcamBat() {
+  return settings.get('paddleSource') === PADDLE_SOURCE.CAMERA;
+}
+
+function startWebcamBat() {
+  if (camTracker) return;
+  camTracker = new PaddleTracker();
+  camTracker.onState = (state, error) => {
+    if (state === TRACKER_STATE.ERROR) ui.toast(error ?? 'Camera unavailable');
+    else if (state === TRACKER_STATE.CALIBRATING) {
+      ui.toast('Hold your bat up, face on — then click to calibrate');
+    } else if (state === TRACKER_STATE.TRACKING) ui.toast('Webcam bat live');
+    else if (state === TRACKER_STATE.LOST) ui.toast('Lost the bat — hold it up again');
+  };
+  camTracker.start().catch((err) => {
+    ui.toast(err?.message ?? 'Camera failed');
+    stopWebcamBat();
+  });
+}
+
+function stopWebcamBat() {
+  camTracker?.stop();
+  camTracker = null;
+}
+
+// Pose the rig from the tracker. Camera space is +X right, +Y up, −Z away
+// from the viewer, with the origin at the lens; the desktop camera sits at eye
+// height on the rig, so the shift is a single offset. Depth and height are
+// clamped to the volume the bat can usefully be in, because a lost frame or a
+// red shirt in the background would otherwise throw it across the room.
+function poseWebcamBat() {
+  _camPos.copy(camTracker.position);
+  _camPos.y = THREE.MathUtils.clamp(_camPos.y + 1.62, TABLE.HEIGHT + 0.03, 1.6);
+  _camPos.x = THREE.MathUtils.clamp(_camPos.x, -0.8, 0.8);
+  _camPos.z = THREE.MathUtils.clamp(_camPos.z, -1.35, -0.2);
+
+  // The tracker reports how the real bat is tilted; the quarter turn that
+  // squares a blade to the table is ours to add.
+  _camBase.setFromAxisAngle(UP, Math.PI / 2);
+  _camQuat.copy(camTracker.quaternion).multiply(_camBase);
+  desktopRig.quaternion.copy(_camQuat);
+  _bladeOffset
+    .copy(desktopPaddle.mesh.getObjectByName('blade').position)
+    .applyQuaternion(_camQuat);
+  desktopRig.position.copy(_camPos).sub(_bladeOffset);
+}
+
 placeDesktopBat(window.innerWidth / 2, window.innerHeight * 0.55);
 
 window.addEventListener('pointermove', (e) => placeDesktopBat(e.clientX, e.clientY), {
@@ -501,6 +582,12 @@ window.addEventListener('pointermove', (e) => placeDesktopBat(e.clientX, e.clien
 });
 window.addEventListener('pointerdown', (e) => {
   if (!ui.menu.hidden) return; // the menu owns its own clicks
+  // The webcam tracker has to be shown the bat's colour once. Any click while
+  // it is waiting is that gesture, so there is no separate key to learn.
+  if (camTracker?.state === TRACKER_STATE.CALIBRATING) {
+    if (!camTracker.calibrateColour()) ui.toast('Nothing bright enough — try better light');
+    return;
+  }
   placeDesktopBat(e.clientX, e.clientY);
   swingDesktopBat();
 });
@@ -546,6 +633,14 @@ function updateDesktopBat(dt) {
   }
 
   if (inXR) return;
+
+  // A webcam bat, once it has locked on, owns the rig outright: the pose is
+  // the real bat's. Until it locks on — or if it loses the bat — the pointer
+  // stays in charge, so you are never left with nothing to play with.
+  if (usingWebcamBat() && camTracker?.state === TRACKER_STATE.TRACKING) {
+    poseWebcamBat();
+    return;
+  }
 
   // Held arrow keys slide the blade at a steady rate; the mouse overrides on
   // its next move, which is what you'd expect from whichever you touched last.
@@ -958,6 +1053,12 @@ function applyGame() {
 }
 
 settings.onChange((key) => {
+  if (key === 'paddleSource') {
+    // Hold the camera open only while it is the chosen input. Nobody wants a
+    // webcam light on because they tried a menu option once.
+    if (usingWebcamBat()) startWebcamBat();
+    else stopWebcamBat();
+  }
   if (key === 'hand') applyHandedness();
   if (key === 'difficulty') opponent.setSkill(settings.get('difficulty'));
   if (key === 'scenario') applyScenario();
@@ -1180,7 +1281,8 @@ if (import.meta.env.DEV) {
   window.__probe = {
     balls, machine, physics, game, paddles, targetZone,
     settings, ui, vrMenu, opponent, coach, scene, camera, tick,
-    match, remotePaddle,
+    match, remotePaddle, desktopPaddle,
+    get camTracker() { return camTracker; },
     get netMode() { return netMode; },
     get room() { return room; },
   };

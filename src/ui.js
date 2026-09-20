@@ -1,5 +1,6 @@
 import './ui.css';
 import { buildPauseMenu } from './menuModel.js';
+import { getLeaderboard, submitScore, isWorthRecording } from './leaderboard.js';
 
 // The flat-screen shell: a retro start menu, a one-line status bar, and a
 // settings screen built from the shared menu model.
@@ -8,6 +9,15 @@ import { buildPauseMenu } from './menuModel.js';
 // the 3D scene — so the same menu model is drawn again in world space by
 // vrMenu.js. This file is what you use before putting the headset on, and
 // what the on-screen preview runs on.
+
+// Names come from other players through the leaderboard, so they are text to
+// display, never markup to run.
+function escapeHtml(text) {
+  return String(text ?? '').replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
+}
 
 export class UI {
   // `isInputBlocked` lets the caller veto keyboard commands — the in-headset
@@ -26,6 +36,7 @@ export class UI {
     onVersusCreate,
     onVersusJoin,
     onVersusLeave,
+    onRunSummary,
     invitedRoom = null,
     realtimeAvailable = false,
   }) {
@@ -41,6 +52,7 @@ export class UI {
       onVersusCreate,
       onVersusJoin,
       onVersusLeave,
+      onRunSummary,
       realtimeAvailable,
     });
     this.isInputBlocked = isInputBlocked ?? (() => false);
@@ -56,6 +68,7 @@ export class UI {
     this._buildSettings();
     this._buildToast();
     this._buildVersusHud();
+    this._buildScores();
 
     window.addEventListener('keydown', (e) => this._onKey(e));
     this.showMenu();
@@ -108,7 +121,7 @@ export class UI {
         </div>
       </div>
       <div class="hint">
-        ↑ ↓ select &nbsp;·&nbsp; enter start<br />
+        ↑ ↓ select &nbsp;·&nbsp; enter start &nbsp;·&nbsp; L scores<br />
         <span data-menu-note></span>
       </div>
     `;
@@ -459,7 +472,11 @@ export class UI {
   }
 
   quitToMenu() {
+    // Record before tearing anything down — onExit resets the match state
+    // this reads from.
+    this.recordRun?.(this.onRunSummary?.() ?? {});
     this.settingsEl.hidden = true;
+    this.scoresEl.hidden = true;
     this.versusHud.hidden = true;
     this.hideCountdown();
     this._hideVersusWin();
@@ -478,6 +495,8 @@ export class UI {
       if (e.code === 'Digit1') this.setGame('arcade');
       else if (e.code === 'Digit2') this.setGame('coach');
       else if (e.code === 'Digit3') this.setGame('versus');
+      else if (e.code === 'KeyL') this.toggleScores();
+      else if (e.code === 'Escape' && !this.scoresEl.hidden) this.toggleScores(false);
       else if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);
       else if (e.code === 'Enter' || e.code === 'Space') {
@@ -595,6 +614,74 @@ export class UI {
 
   _hideVersusWin() {
     if (this.winEl) this.winEl.hidden = true;
+  }
+
+  // --- Scores -----------------------------------------------------------
+  //
+  // One board per game, because the three ask completely different things of
+  // you and a single number across them would mean nothing.
+
+  _buildScores() {
+    const el = document.createElement('div');
+    el.id = 'scores';
+    el.hidden = true;
+    el.innerHTML = `
+      <div class="settings__title" data-scores-title>Scores</div>
+      <div class="scores__name">
+        <span class="row__label">Name</span>
+        <input class="lobby__code scores__input" data-scores-name maxlength="24" autocomplete="off" />
+      </div>
+      <div class="scores__list" data-scores-list></div>
+      <div class="hint">L / Esc to close</div>
+    `;
+    document.body.appendChild(el);
+    this.scoresEl = el;
+    this.scoresList = el.querySelector('[data-scores-list]');
+    this.scoresName = el.querySelector('[data-scores-name]');
+    this.scoresName.value = this.settings.get('playerName') ?? 'Player';
+    this.scoresName.onkeydown = (e) => e.stopPropagation(); // typing, not commands
+    this.scoresName.onchange = () =>
+      this.settings.set('playerName', this.scoresName.value.trim() || 'Player');
+  }
+
+  async toggleScores(force) {
+    const open = force ?? this.scoresEl.hidden;
+    this.scoresEl.hidden = !open;
+    this.sfx.ui(open);
+    if (!open) return;
+
+    const category = this.settings.get('game');
+    this.scoresEl.querySelector('[data-scores-title]').textContent = `${category} scores`;
+    this.scoresList.innerHTML = '<div class="row"><span class="row__label">Loading…</span></div>';
+
+    const rows = await getLeaderboard(category);
+    if (!rows.length) {
+      this.scoresList.innerHTML =
+        '<div class="row"><span class="row__label">No runs yet — play one</span></div>';
+      return;
+    }
+    this.scoresList.innerHTML = rows
+      .map(
+        (row, i) => `
+        <div class="row scores__row">
+          <span class="row__label">${i + 1}. ${escapeHtml(row.player_name)}</span>
+          <span class="row__value"><b>${row.score}</b></span>
+        </div>`
+      )
+      .join('');
+  }
+
+  // Called when a run ends. Nothing is uploaded unless you actually played.
+  async recordRun(summary) {
+    const category = this.settings.get('game');
+    if (!isWorthRecording(summary, category)) return;
+    const name = this.settings.get('playerName') ?? 'Player';
+    try {
+      const entry = await submitScore(name, summary, category);
+      this.toast(`Scored ${entry.score}`);
+    } catch (err) {
+      console.error('Could not record the run', err);
+    }
   }
 
   // --- Toast ------------------------------------------------------------

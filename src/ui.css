@@ -225,6 +225,60 @@ canvas {
   user-select: all;
 }
 
+/* Scores ----------------------------------------------------------------- */
+
+#scores {
+  position: fixed;
+  inset: 0;
+  /* Above the start menu (z 20): the board is opened from it and has to cover
+     it, not hide behind it. */
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  /* Opaque, not near-opaque: it sits over the start menu, and the menu's own
+     type showing through behind the table of names is unreadable. */
+  background: var(--ink);
+}
+#scores[hidden] {
+  display: none;
+}
+
+.scores__name {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.scores__input {
+  width: 14ch;
+  letter-spacing: 0.16em;
+  text-align: left;
+}
+
+.scores__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: min(420px, calc(100vw - 48px));
+  max-height: 54vh;
+  overflow-y: auto;
+}
+
+.scores__row b {
+  color: var(--paper);
+  font-weight: 700;
+}
+.scores__row:nth-child(1) .row__label,
+.scores__row:nth-child(1) b {
+  color: var(--red);
+}
+
 /* Versus HUD ------------------------------------------------------------- */
 
 /* Top-left, not centred: the in-world board hangs dead centre at the top of

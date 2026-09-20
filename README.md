@@ -110,6 +110,22 @@ The room picks one of three, in this order:
 
 Copy `.env.example` to `.env.local` and fill it in for the Supabase path. Nothing else needs configuring — the LAN relay is on whenever the dev server is.
 
+## Scores
+
+Press <kbd>L</kbd> on the start menu. One board per game, because Arcade, Coach and Versus ask completely different things of you and a single number across them would mean nothing. Set the name you want on the board at the top of that screen.
+
+A run is recorded when you quit to the menu, and only if you actually played one — walking in and straight back out does not put a zero on the board. Scores go to Supabase when `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are set (table `leaderboard_entries`, columns `player_name`, `score`, `best_streak`, `category`), and to this browser's `localStorage` when they aren't. If the backend is unreachable mid-submit the run is kept locally rather than lost.
+
+There is no seeded demo data: an empty board means nobody has played yet.
+
+## Playing with a real bat on a laptop
+
+**Settings → Paddle → Webcam bat.** A webcam watches your actual paddle and drives the on-screen one, so a flat-screen player swings a real bat instead of pushing a mouse — the desktop counterpart to hand tracking in the headset.
+
+It finds the rubber by colour, so it needs to be shown the colour once: hold the bat up face-on and click. From there, the blob's ellipse gives pose — apparent size is depth, the centroid is x/y, and the minor/major axis ratio is tilt. If it loses the bat, or you never calibrate, the pointer stays in charge, so you are never left with nothing to play with.
+
+Good light and a bat whose rubber isn't the same colour as your shirt both help a lot.
+
 ### Limits worth knowing
 
 - A desktop browser has no tracked bat, so a computer player can watch a match but cannot return a ball. Versus is meant to be played in the headset.

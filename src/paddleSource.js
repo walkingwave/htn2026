@@ -22,6 +22,10 @@ export const PADDLE_SOURCE = {
   CONTROLLER: 'controller',
   HAND: 'hand',
   EXTERNAL: 'external',
+  // Flat-screen only: a webcam watching your real bat drives the desktop rig.
+  // Inside a session there is a tracked hand to use instead, so the router
+  // treats this as `controller` and main.js does the rest.
+  CAMERA: 'camera',
 };
 
 const _pos = new THREE.Vector3();
