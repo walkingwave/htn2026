@@ -1,9 +1,11 @@
 import { supabase } from './leaderboard.js';
+import { encodeMessage, MULTIPLAYER_PROTOCOL } from './multiplayerProtocol.js';
 
 // Networking for online versus. Two interchangeable transports sit behind one
 // interface so the game code never cares how bytes move:
 //   - SupabaseTransport: Realtime broadcast + presence. Works cross-device
 //     whenever VITE_SUPABASE_URL/ANON_KEY are configured.
+//   - WebSocketTransport: same-origin LAN relay exposed by the Vite dev server.
 //   - BroadcastChannelTransport: same-origin fallback so two browser tabs on
 //     one machine can play with no backend at all (great for local demos).
 //
@@ -20,11 +22,9 @@ export function makeRoomCode() {
   return code;
 }
 
-export function roomLinkFor(code) {
-  const url = new URL(window.location.href);
-  url.pathname = '/live-game';
+export function roomLinkFor(code, origin = window.location.origin) {
+  const url = new URL('/live-game', origin);
   url.searchParams.set('room', code);
-  url.hash = '';
   return url.toString();
 }
 
@@ -76,6 +76,10 @@ export function clearTourneyFromUrl() {
 }
 
 export function isRealtimeAvailable() {
+  return Boolean(supabase);
+}
+
+export function isProductionTransportAvailable() {
   return Boolean(supabase);
 }
 
@@ -184,11 +188,89 @@ class BroadcastChannelTransport {
   }
 }
 
+class WebSocketTransport {
+  constructor(code, role) {
+    this.code = code;
+    this.role = role;
+    this.handlers = {};
+    this.onOpponent = null;
+    this.socket = null;
+    this.lanUrls = [];
+  }
+
+  async connect() {
+    if (typeof WebSocket === 'undefined') throw new Error('WebSockets are unavailable in this browser.');
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${protocol}//${window.location.host}/__flyball_ws`;
+    this.socket = new WebSocket(url);
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const timeout = setTimeout(() => fail(new Error('LAN relay did not respond. Restart the host with npm run dev and try again.')), 8000);
+      const fail = (error) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          this.socket?.close();
+          reject(error);
+        }
+      };
+      this.socket.addEventListener('open', () => {
+        this.socket.send(encodeMessage('__join', { code: this.code, role: this.role }));
+      });
+      this.socket.addEventListener('message', (event) => {
+        let message;
+        try { message = JSON.parse(event.data); } catch { return; }
+        if (message.protocol !== MULTIPLAYER_PROTOCOL) return;
+        if (message.type === '__joined') {
+          this.lanUrls = Array.isArray(message.data?.lanUrls) ? message.data.lanUrls : [];
+          if (!settled) { settled = true; clearTimeout(timeout); resolve(); }
+          this.onOpponent?.(Boolean(message.data?.present));
+          return;
+        }
+        if (message.type === '__presence') {
+          this.onOpponent?.(Boolean(message.data?.present));
+          return;
+        }
+        const handler = this.handlers[message.type];
+        if (handler) handler(message.data);
+      });
+      this.socket.addEventListener('error', () => fail(new Error('LAN relay connection failed.')));
+      this.socket.addEventListener('close', () => {
+        this.onOpponent?.(false);
+        fail(new Error('LAN relay closed before joining the room.'));
+      });
+    });
+  }
+
+  send(type, data) {
+    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(encodeMessage(type, data));
+  }
+
+  on(type, cb) { this.handlers[type] = cb; }
+
+  close() {
+    if (this.socket) {
+      if (this.socket.readyState === WebSocket.OPEN) this.socket.send(encodeMessage('__leave'));
+      this.socket.close();
+    }
+    this.socket = null;
+  }
+}
+
 // Create a room handle. role is 'host' (created the game) or 'guest' (joined a link).
-export function createRoom({ code, role }) {
-  const transport = supabase
-    ? new SupabaseTransport(code, role)
-    : new BroadcastChannelTransport(code, role);
+export function createRoom({ code, role, transport: requestedTransport = 'auto' }) {
+  if (requestedTransport === 'supabase' && !supabase) {
+    throw new Error('Online multiplayer needs VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  }
+  const useWebSocket = requestedTransport === 'websocket' ||
+    (requestedTransport === 'auto' && import.meta.env.DEV);
+  const useSupabase = requestedTransport === 'supabase' ||
+    (requestedTransport === 'auto' && !useWebSocket && Boolean(supabase));
+  const transport = useWebSocket
+    ? new WebSocketTransport(code, role)
+    : useSupabase
+      ? new SupabaseTransport(code, role)
+      : new BroadcastChannelTransport(code, role);
   let opponentPresent = false;
   const opponentSubscribers = new Set();
   transport.onOpponent = (present) => {
@@ -199,7 +281,7 @@ export function createRoom({ code, role }) {
   return {
     code,
     role,
-    kind: supabase ? 'supabase' : 'local',
+    kind: useWebSocket ? 'websocket' : useSupabase ? 'supabase' : 'local',
     async connect() {
       await transport.connect();
     },
@@ -216,6 +298,9 @@ export function createRoom({ code, role }) {
     },
     get opponentPresent() {
       return opponentPresent;
+    },
+    get lanUrls() {
+      return transport.lanUrls ?? [];
     },
     close() {
       transport.close();

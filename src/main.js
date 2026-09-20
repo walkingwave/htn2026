@@ -188,6 +188,15 @@ const ui = new UI({
   settings,
   sfx,
   // `choice` = { mode, input, background, xrMode } from the setup wizard.
+  onFriendStart: ({ input = 'mouse', background = 'arena' } = {}) => {
+    applyBackground(background);
+    if (input === 'paddle') startCamPaddle();
+    else stopCamPaddle();
+    if (input === 'vr') {
+      const xrMode = xr.support['immersive-vr'] ? 'immersive-vr' : 'immersive-ar';
+      xr.start(xrMode).catch((err) => ui.toast?.(err?.message || 'Headset session failed'));
+    }
+  },
   onStart: (choice = {}) => {
     const { mode = 'bot', input = 'mouse', background = 'arena', botSettings } = choice;
     applyBackground(background);
@@ -241,18 +250,19 @@ const ui = new UI({
   // create/join/leave a networked 1v1; the game logic lives in enterVersus /
   // leaveVersus below. Both are hoisted function declarations, so referencing
   // them here before their definition is safe.
-  onVersusCreate: async () => {
+  onVersusCreate: async ({ transport = 'auto' } = {}) => {
     const code = makeRoomCode();
-    await enterVersus('host', code);
+    const activeRoom = await enterVersus('host', code, transport);
+    const linkOrigin = activeRoom?.lanUrls?.[0] || window.location.origin;
     return {
       role: 'host',
       code,
-      link: roomLinkFor(code),
-      kind: isRealtimeAvailable() ? 'supabase' : 'local',
+      link: roomLinkFor(code, linkOrigin),
+      kind: transport === 'websocket' ? 'websocket' : isRealtimeAvailable() ? 'supabase' : 'local',
     };
   },
-  onVersusJoin: async (code) => {
-    await enterVersus('guest', code);
+  onVersusJoin: async (code, transport = 'auto') => {
+    await enterVersus('guest', code, transport);
   },
   onVersusLeave: () => {
     leaveVersus();
@@ -486,7 +496,15 @@ remotePaddle.enabled = false;
 remotePaddle.networked = true;
 paddles.push(remotePaddle);
 
-function bladePacket(paddle) {
+function getLocalVersusPaddle() {
+  if (renderer.xr.isPresenting) {
+    const tracked = paddles.find((paddle) => paddle !== remotePaddle && paddle.enabled && paddle.tracking);
+    if (tracked) return tracked;
+  }
+  return mousePaddle;
+}
+
+function bladePacket(paddle = getLocalVersusPaddle()) {
   return {
     c: [paddle.bladeCenter.x, paddle.bladeCenter.y, paddle.bladeCenter.z],
     n: [paddle.bladeNormal.x, paddle.bladeNormal.y, paddle.bladeNormal.z],
@@ -531,6 +549,7 @@ function serveVersusBall() {
 
 function broadcastHostState() {
   if (!room) return;
+  const localPaddle = getLocalVersusPaddle();
   const ball =
     versusBall && versusBall.active
       ? {
@@ -538,7 +557,7 @@ function broadcastHostState() {
           p: [versusBall.mesh.position.x, versusBall.mesh.position.y, versusBall.mesh.position.z],
         }
       : { active: false, p: [0, 0, 0] };
-  room.send('state', { match: match.snapshot(), ball, paddle: bladePacket(mousePaddle) });
+  room.send('state', { match: match.snapshot(), ball, paddle: bladePacket(localPaddle) });
 }
 
 function handleVersusHostBounce(ball, event) {
@@ -613,7 +632,7 @@ function runVersusGuest(dt) {
   netSendAccum += dt;
   if (netSendAccum >= NET_TICK) {
     netSendAccum = 0;
-    room?.send('paddle', bladePacket(mousePaddle));
+    room?.send('paddle', bladePacket(getLocalVersusPaddle()));
   }
   if (guestBallActive && versusBall) {
     versusBall.mesh.position.lerp(guestBallTarget, Math.min(1, dt * 16));
@@ -621,7 +640,7 @@ function runVersusGuest(dt) {
   }
 }
 
-async function enterVersus(role, code) {
+async function enterVersus(role, code, transport = 'auto') {
   machine.enabled = false;
   launchCountdown = 0;
   ui.hideCountdown();
@@ -643,7 +662,7 @@ async function enterVersus(role, code) {
     playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
     playerRig.rotation.y = 0;
   }
-  room = createRoom({ code, role });
+  room = createRoom({ code, role, transport });
   if (role === 'host') room.on('paddle', (pkt) => applyRemotePaddle(pkt));
   else room.on('state', (state) => applyHostState(state));
   room.onOpponent((present) => {
@@ -654,6 +673,7 @@ async function enterVersus(role, code) {
     }
   });
   await room.connect();
+  return room;
 }
 
 function leaveVersus() {

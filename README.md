@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-The default Vite server uses plain HTTP for desktop play and webcam CV, so open `http://localhost:5173`. WebXR requires HTTPS; when testing on a headset, run `npm run dev:https`, open the printed HTTPS LAN URL, and accept the development certificate. Desktop users do not need VR or HTTPS.
+The default Vite server uses plain HTTP for desktop play, webcam CV, and same-machine development. Run `npm run dev:https` for WebXR or same-WiFi multiplayer, open the printed HTTPS LAN URL on both devices, and accept the development certificate. Desktop users do not need VR or HTTPS. Run `npm test` for the unit suite.
 
 ## Product flow
 
@@ -38,11 +38,32 @@ The HUD tracks score, current and best rally, accuracy, table bounces, boss leve
 - **Browser CV:** `@mediapipe/tasks-vision` tracks the wrist/index pose from the webcam and drives a virtual paddle through the same physics path. Camera access works on localhost during development; deployed/non-localhost sites require HTTPS.
 - **Future referee mode:** the OpenCV approach from [Computer-Vision-Ping-Pong](https://github.com/dsaha04/Computer-Vision-Ping-Pong) is represented as a future service seam for HSV ball segmentation, table calibration, homography, and real-camera event validation. It is Python/OpenCV code and is intentionally not bundled into the browser runtime.
 
+## Multiplayer
+
+Choose **Play a Friend**, then select **Yes — same WiFi** to use the Vite server's capped two-peer WebSocket relay. Both players must open the host's LAN URL and be on the same WiFi network; HTTPS mode is recommended for headset/browser security requirements. The relay is intended for development and local demos, not production hosting. Choose the online option when Supabase Realtime is configured for cross-network play.
+
+Paddle synchronization is input-agnostic: mouse, webcam, and tracked XR paddles all publish their active world-space pose and velocity through the same versus transport.
+
+### Future telemetry decision
+
+Keep Supabase as the live multiplayer and leaderboard backend for now. Do not add Tiger Data to the runtime yet. A future Tiger Data/Tiger Cloud integration should be reserved for high-volume time-series coaching telemetry, including paddle velocity, ball trajectories, reaction timing, miss locations, rally replay, and long-term session analytics. When that feature is defined, gameplay events should be batched from the browser rather than writing every physics tick directly to the database.
+
+## Deploy to Vercel
+
+This is a Vite single-page app and can be deployed directly to Vercel. The included [`vercel.json`](./vercel.json) rewrites shared `/live-game?room=...` and tournament URLs to the app shell.
+
+1. Import the repository into Vercel with the default Vite build settings.
+2. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as Production environment variables.
+3. Deploy and open the HTTPS Vercel URL.
+4. Choose **Play a Friend → No — use online relay**. Both devices can be anywhere on the internet; they do not need to share WiFi.
+
+The production transport is Supabase Realtime Broadcast + Presence. Vercel's WebSocket support is currently beta, and persistent room coordination would still require an external shared state/pub-sub service, which Supabase already provides here. The Vite WebSocket relay remains useful for local LAN development only.
+
 ## Shared Supabase leaderboard
 
 This app reuses the leaderboard model from `../fly`, persists scores to Supabase when configured, and falls back to a device-local leaderboard plus demo rankings when credentials are absent.
 
-1. Copy `.env.example` to `.env.local`.
+1. Copy `.env.example` to `.env.local` for local online testing, or set the same values in Vercel's project environment settings.
 2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the same project used by `../fly`.
 3. Apply [`supabase/schema.sql`](./supabase/schema.sql) to that project.
 
@@ -52,6 +73,8 @@ The production-safe next step is to route score inserts through the existing ser
 
 ```text
 src/main.js          Three.js/WebXR scene and game loop
+src/net.js            Multiplayer transports and room links
+src/multiplayerProtocol.js Shared relay message validation
 src/session.js       Metrics, difficulty profiles, and score summaries
 src/ui.js             Trainer HUD, lobby, results, and leaderboard panels
 src/physics.js        Fixed-step ball/table/net/paddle physics

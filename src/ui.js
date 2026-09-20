@@ -32,9 +32,9 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 // what the on-screen preview runs on.
 
 export class UI {
-  constructor({ xr, machine, game, settings, sfx, onStart, onExit, onVersusCreate, onVersusJoin, onVersusLeave, onTourneyCreate, onTourneyJoin, onTourneySend, onTourneyLeave }) {
+  constructor({ xr, machine, game, settings, sfx, onStart, onFriendStart, onExit, onVersusCreate, onVersusJoin, onVersusLeave, onTourneyCreate, onTourneyJoin, onTourneySend, onTourneyLeave }) {
     Object.assign(this, {
-      xr, machine, game, settings, sfx, onStart, onExit,
+      xr, machine, game, settings, sfx, onStart, onFriendStart, onExit,
       onVersusCreate, onVersusJoin, onVersusLeave,
       onTourneyCreate, onTourneyJoin, onTourneySend, onTourneyLeave,
     });
@@ -43,6 +43,7 @@ export class UI {
     this._entries = [];
     this._toastTimer = null;
     this._lastRevision = -1;
+    this._launching = false;
 
     this._buildMenu();
     this._buildBar();
@@ -100,6 +101,16 @@ export class UI {
           { id: 'friend', label: 'Play a Friend', note: 'beta' },
           { id: 'bot', label: 'Play a Bot' },
           { id: 'drills', label: 'Drills' },
+        ],
+      };
+    }
+    if (step === 'friendTransport') {
+      return {
+        prompt: 'Same WiFi?',
+        note: 'Same WiFi uses the host computer as the game server. Only the host runs Vite; share the host\'s LAN address, never localhost.',
+        entries: [
+          { id: 'same-wifi', label: 'Yes — same WiFi', note: 'direct LAN relay' },
+          { id: 'online', label: 'No — use online relay', note: 'Supabase' },
         ],
       };
     }
@@ -201,20 +212,30 @@ export class UI {
     if (step === 'mode') {
       if (entry.id === 'tournament') { this.openTournament(); return; }
       if (entry.id === 'friend') {
-        const info = await this.onVersusCreate?.();
-        if (info) this.openVersusLobby(info);
+        this._flow.mode = entry.id;
+        this._gotoStep('friendTransport');
         return;
       }
       this._flow.mode = entry.id;
+      this._gotoStep('input');
+    } else if (step === 'friendTransport') {
+      this._flow.friendTransport = entry.id === 'same-wifi' ? 'websocket' : 'supabase';
       this._gotoStep('input');
     } else if (step === 'input') {
       this._flow.input = entry.id;
       this._gotoStep('background');
     } else if (step === 'background') {
       this._flow.background = entry.id;
-      // Drills get a ball-machine settings step; every other mode (including
-      // Play a Bot) launches straight away.
-      if (this._flow.mode === 'drills') this._gotoStep('settings');
+      if (this._flow.mode === 'friend') {
+        try {
+          await this.onFriendStart?.({ input: this._flow.input, background: this._flow.background });
+          const info = await this.onVersusCreate?.({ transport: this._flow.friendTransport });
+          if (info) this.openVersusLobby(info);
+        } catch (error) {
+          this.toast(error?.message || 'Could not create a multiplayer room');
+          this._gotoStep('friendTransport');
+        }
+      } else if (this._flow.mode === 'drills') this._gotoStep('settings');
       else this._launchFlow();
     } else {
       // Settings step: choice rows cycle their value; the launch row plays.
@@ -239,7 +260,8 @@ export class UI {
 
   _stepBack() {
     const step = this._flow.step;
-    if (step === 'input') this._gotoStep('mode');
+    if (step === 'friendTransport') this._gotoStep('mode');
+    else if (step === 'input') this._gotoStep('mode');
     else if (step === 'background') this._gotoStep('input');
     else if (step === 'settings') this._gotoStep('background');
     else return;
@@ -259,6 +281,8 @@ export class UI {
   }
 
   async _launchFlow() {
+    if (this._launching) return;
+    this._launching = true;
     const { mode, input, background } = this._flow;
     // A VR headset starts an immersive session (his XR path); every other
     // input runs the on-screen desktop/pointer build.
@@ -266,35 +290,36 @@ export class UI {
       ? (this._xrSupport['immersive-vr'] ? 'immersive-vr' : 'immersive-ar')
       : null;
 
-    this.sfx.unlock(); // first user gesture — the only moment audio can start
-    this.sfx.ui();
-    this.menu.hidden = true;
-    this.bar.hidden = false;
+    try {
+      this.sfx.unlock(); // first user gesture — the only moment audio can start
+      this.sfx.ui();
+      this.menu.hidden = true;
+      this.bar.hidden = false;
 
-    // Only Drills carry a tuned ball-machine config; other modes launch as-is.
-    const botSettings = mode === 'drills'
-      ? {
-          pace: BOT_SETTING_ROWS[0].options[this._botSel.pace],
-          feedRate: BOT_SETTING_ROWS[1].options[this._botSel.feedRate],
-          placement: BOT_SETTING_ROWS[2].options[this._botSel.placement],
-          modeName: BOT_SETTING_ROWS[3].options[this._botSel.shot],
-        }
-      : null;
+      // Only Drills carry a tuned ball-machine config; other modes launch as-is.
+      const botSettings = mode === 'drills'
+        ? {
+            pace: BOT_SETTING_ROWS[0].options[this._botSel.pace],
+            feedRate: BOT_SETTING_ROWS[1].options[this._botSel.feedRate],
+            placement: BOT_SETTING_ROWS[2].options[this._botSel.placement],
+            modeName: BOT_SETTING_ROWS[3].options[this._botSel.shot],
+          }
+        : null;
 
-    this.onStart?.({ mode, input, background, xrMode, botSettings });
+      await this.onStart?.({ mode, input, background, xrMode, botSettings });
 
-    if (xrMode) {
-      try {
-        await this.xr.start(xrMode);
-      } catch (err) {
-        console.error('Failed to start XR session', err);
-        this.toast('Headset session failed');
-        this.showMenu();
-      }
+      if (xrMode) await this.xr.start(xrMode);
+    } catch (err) {
+      console.error('Failed to start game', err);
+      this.toast(err?.message || 'Could not start the court');
+      this.showMenu();
+    } finally {
+      this._launching = false;
     }
   }
 
   showMenu() {
+    this._launching = false;
     // If a tournament lobby is still open when we bail to the menu, tear down
     // its room so we don't leak the channel.
     if (this._tourney) { this.onTourneyLeave?.(); this._tourney = null; }
@@ -874,9 +899,18 @@ export class UI {
       ? `Joining ${code ?? ''}…`.trim()
       : 'Waiting for opponent…';
 
-    this.versusNote.textContent = kind === 'local'
-      ? 'Local mode: open this link in another tab; add Supabase keys for cross-device play.'
-      : 'Online: send this link to anyone.';
+    const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+    const linkHost = (() => { try { return new URL(this.versusLink.value).hostname; } catch { return ''; } })();
+    const linkIsLocal = ['localhost', '127.0.0.1', '::1'].includes(linkHost);
+    this.versusNote.textContent = kind === 'websocket'
+      ? isGuest
+        ? 'Same WiFi mode: this link must use the host computer\'s LAN address. If it says localhost, ask the host to send the LAN link.'
+        : linkIsLocal
+          ? 'Could not detect a LAN address. Restart Vite, open the printed LAN URL, and create the room again.'
+          : 'LAN link ready. Only the host runs Vite; share this link with your friend on the same WiFi.'
+      : kind === 'local'
+        ? 'Local mode: open this link in another tab; add Supabase keys for cross-device play.'
+        : 'Online: send this link to anyone.';
 
     this.sfx?.ui?.();
   }
