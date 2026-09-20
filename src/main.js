@@ -707,9 +707,6 @@ function meetIncomingBall(aim) {
 // comes from changes.
 let camTracker = null;
 let webcamHasLocked = false; // pointer drives until the first marker lock
-const _camQuat = new THREE.Quaternion();
-const _camBase = new THREE.Quaternion();
-const _camPos = new THREE.Vector3();
 
 function usingWebcamBat() {
   return settings.get('paddleSource') === PADDLE_SOURCE.CAMERA;
@@ -728,7 +725,7 @@ function startWebcamBat() {
       ui.setCamStatus('Show the marker side of the paddle');
       ui.toast('Show the printed markers to the camera — click to set neutral');
     } else if (state === TRACKER_STATE.TRACKING) {
-      ui.setCamStatus('Tracking markers · click to re-zero');
+      ui.setCamStatus('Tracking · flick forward to swing · V re-zeros');
     } else if (state === TRACKER_STATE.LOST) {
       ui.setCamStatus('Lost the markers — show the paddle face');
     }
@@ -742,64 +739,80 @@ function startWebcamBat() {
 
 function stopWebcamBat() {
   webcamHasLocked = false;
+  webcamPrevZ = null;
+  webcamZVel = 0;
   camTracker?.stop();
   camTracker = null;
   ui.showCamPreview(null);
 }
 
-// Pose the rig from the tracker, as a controller: the tracker reports how
-// far the real paddle has moved from its calibrated neutral hold, and that
-// displacement is applied around the same rest pose the mouse paddle uses.
+// The webcam paddle drives the AIM POINT, not the blade.
 //
-// Mapping absolute camera coordinates instead is what parked the virtual
-// paddle at head height — the old +1.62 assumed the tracker's origin was
-// eye level, but it is wherever the webcam happens to sit, so the paddle
-// spawned near its clamp ceiling and stayed there. Relative-to-neutral has
-// no such assumption: wherever you hold the paddle when it locks on IS the
-// rest pose, exactly like recentring a VR controller.
+// The first integration mapped the marker pose straight onto the blade —
+// six degrees of freedom, exactly what the tracker measures. It was
+// unusable, and the reason is instructive: blade angle came from raw board
+// tilt, but holding the paddle at a natural stroke angle foreshortens the
+// markers the tracker needs, so the angle you cannot help changing is the
+// one measured worst. Every contact came off a slightly different, slightly
+// wrong face. Depth had the same flaw — the player cannot perceive their
+// hand's distance to a virtual plane, so measured depth was noise they
+// couldn't correct.
+//
+// The mouse paddle is playable precisely because it synthesises those two
+// channels: the face angle follows the aim, the depth holds a plane, and a
+// swing is a discrete, repeatable thrust. So the hand now does what the
+// mouse does — moves the aim point — through that same proven path, aim
+// assist included. What the hand adds over a mouse is the swing itself:
+// flick the paddle toward the screen and the thrust fires, which is the
+// same motion as an actual stroke.
 const WEBCAM_REST = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
-// Moving the paddle toward the webcam reads as depth decreasing; the bat
-// should push toward the table. Small real depth changes need amplifying —
-// a hand only travels ~25 cm before leaving focus.
-const WEBCAM_DEPTH_GAIN = 2.0;
-const _camTarget = new THREE.Vector3();
+// A push toward the webcam this fast (metres/second of raw displacement) is
+// a swing, not repositioning. Slow drift never fires it.
+const WEBCAM_SWING_SPEED = 0.35;
+const WEBCAM_SWING_COOLDOWN = 0.45;
+let webcamPrevZ = null;
+let webcamZVel = 0;
+let webcamSwingCooldown = 0;
+const _aimWorld = new THREE.Vector3();
 
-function poseWebcamBat(dt, tracking) {
-  if (tracking) {
-    _camTarget.set(
-      THREE.MathUtils.clamp(WEBCAM_REST.x + camTracker.position.x, -REACH_X, REACH_X),
-      THREE.MathUtils.clamp(
-        WEBCAM_REST.y + camTracker.position.y,
-        REACH_Y_BOTTOM,
-        REACH_Y_TOP
-      ),
-      THREE.MathUtils.clamp(
-        WEBCAM_REST.z - camTracker.position.z * WEBCAM_DEPTH_GAIN,
-        DESKTOP_REST_Z - 0.55,
-        DESKTOP_REST_Z + 0.3
-      )
-    );
-    _camPos.copy(_camTarget);
-    // The tracker reports how the real paddle is tilted; the quarter turn
-    // that squares a blade to the table is ours to add.
-    _camBase.setFromAxisAngle(UP, Math.PI / 2);
-    _camQuat.copy(camTracker.quaternion).multiply(_camBase);
-  } else {
-    // Markers gone. Hold where the paddle was and drift gently back toward
-    // the rest pose — the old behaviour snapped straight to the mouse pose
-    // the instant tracking dropped, which read as the paddle glitching out
-    // whenever the board left the frame.
-    const step = 0.8 * dt;
-    _camPos.lerp(WEBCAM_REST, Math.min(step, 1));
-    _camBase.setFromAxisAngle(UP, Math.PI / 2);
-    _camQuat.slerp(_camBase, Math.min(step, 1));
+function driveAimFromWebcam(dt) {
+  const displacement = camTracker.position;
+
+  desktopAim.x = THREE.MathUtils.clamp(WEBCAM_REST.x + displacement.x, -REACH_X, REACH_X);
+  desktopAim.y = THREE.MathUtils.clamp(
+    WEBCAM_REST.y + displacement.y,
+    REACH_Y_BOTTOM,
+    REACH_Y_TOP
+  );
+  desktopYaw = (desktopAim.x / REACH_X) * 0.5;
+
+  // Route the existing aim assist: it compares the predicted crossing with
+  // the cursor on screen, so stand the paddle's own aim point in for the
+  // cursor by projecting it through the camera.
+  _aimWorld.copy(desktopAim);
+  playerRig.localToWorld(_aimWorld);
+  _aimWorld.project(camera);
+  _pointerNdc.set(_aimWorld.x, _aimWorld.y);
+  meetIncomingBall(desktopAim);
+  desktopAim.x = THREE.MathUtils.clamp(desktopAim.x, -REACH_X, REACH_X);
+  desktopAim.y = THREE.MathUtils.clamp(desktopAim.y, REACH_Y_BOTTOM, REACH_Y_TOP);
+
+  // Swing on a forward flick. Displacement +Z is toward the screen (depth
+  // shrinking), so a fast positive z-rate is the stroke gesture.
+  if (webcamPrevZ !== null && dt > 0) {
+    const rate = (displacement.z - webcamPrevZ) / dt;
+    webcamZVel = webcamZVel * 0.6 + rate * 0.4;
   }
-
-  desktopRig.quaternion.copy(_camQuat);
-  _bladeOffset
-    .copy(desktopPaddle.mesh.getObjectByName('blade').position)
-    .applyQuaternion(_camQuat);
-  desktopRig.position.copy(_camPos).sub(_bladeOffset);
+  webcamPrevZ = displacement.z;
+  webcamSwingCooldown -= dt;
+  if (
+    webcamZVel > WEBCAM_SWING_SPEED &&
+    webcamSwingCooldown <= 0 &&
+    camTracker.confidence > 0.4
+  ) {
+    swingDesktopBat();
+    webcamSwingCooldown = WEBCAM_SWING_COOLDOWN;
+  }
 }
 
 placeDesktopBat(window.innerWidth / 2, window.innerHeight * 0.55);
@@ -878,23 +891,22 @@ function updateDesktopBat(dt) {
 
   if (inXR) return;
 
-  // A webcam paddle, once it has locked on, owns the rig for as long as the
-  // mode is selected — including through dropouts, where it holds its last
-  // pose and drifts back to rest. Handing control back to the mouse on every
-  // dropout made the paddle teleport between two unrelated poses, which is
-  // the glitching that made it feel unusable. The pointer only drives before
-  // the very first lock, so there is something to play with while you get
-  // the markers in view.
-  if (usingWebcamBat() && camTracker) {
-    const tracking = camTracker.state === TRACKER_STATE.TRACKING;
-    if (tracking) webcamHasLocked = true;
-    if (webcamHasLocked) {
-      poseWebcamBat(dt, tracking);
-      return;
-    }
+  // Once the webcam paddle has locked on, the hand owns the aim point for as
+  // long as the mode is selected. On a dropout the aim simply stays where it
+  // was — the tracker holds its last displacement — so losing the markers
+  // parks the paddle instead of teleporting it to the mouse pose. Everything
+  // below (plane depth, thrust, face angle, pose) is the same code the mouse
+  // runs, so the two inputs feel identical to hit with.
+  if (usingWebcamBat() && camTracker?.state === TRACKER_STATE.TRACKING) {
+    webcamHasLocked = true;
   }
-
-  aimDesktopBatAtPointer();
+  const webcamDriving = usingWebcamBat() && camTracker && webcamHasLocked;
+  if (webcamDriving) {
+    pointerActive = false; // the mouse no longer fights the hand
+    if (camTracker.state === TRACKER_STATE.TRACKING) driveAimFromWebcam(dt);
+  } else {
+    aimDesktopBatAtPointer();
+  }
 
   // Held arrow keys slide the blade at a steady rate; the mouse overrides on
   // its next move, which is what you'd expect from whichever you touched last.
@@ -1671,6 +1683,9 @@ if (import.meta.env.DEV) {
     settings, ui, vrMenu, opponent, coach, scene, camera, tick,
     match, remotePaddle, desktopPaddle, desktopAim,
     get camTracker() { return camTracker; },
+    set camTracker(t) { camTracker = t; }, // lets tests stand in a fake tracker
+    get webcamHasLocked() { return webcamHasLocked; },
+    set webcamHasLocked(v) { webcamHasLocked = v; },
     get netMode() { return netMode; },
     get room() { return room; },
   };
