@@ -137,8 +137,12 @@ export const SCENARIOS = [
   },
 ];
 
-const RIBBON_WIDTH = 0.13;
-const RIBBON_SAMPLES = 90;
+// The guide is a single tube — a string through space — rather than a flat
+// ribbon. The ribbon twisted as the face angle changed along the stroke and
+// read as a warped sheet; a string has no facing to get wrong.
+const TUBE_RADIUS = 0.014;
+const TUBE_RADIAL = 10;
+const RIBBON_SAMPLES = 90; // tube segments and progress-paint resolution
 
 const MAX_DEVIATION = 0.28; // metres; beyond this you are not on the line
 const MAX_SYNC = 0.4; // metres behind or ahead of the demonstrated pace
@@ -159,7 +163,6 @@ const ROWS_TOP = 76; // px; top edge of the first scenario row
 const ROW_PITCH = 52;
 
 const _tangent = new THREE.Vector3();
-const _side = new THREE.Vector3();
 const _local = new THREE.Vector3();
 const _curvePoint = new THREE.Vector3();
 
@@ -434,74 +437,62 @@ export class Coach {
     this._paintProgress(0);
   }
 
-  // --- Ribbon -------------------------------------------------------------
+  // --- Guide string ---------------------------------------------------------
 
+  // The stroke drawn as one tube, coloured per ring so the string turns
+  // green behind the bat as it is traced. TubeGeometry lays its vertices
+  // out ring by ring along the curve — (radial + 1) vertices per ring,
+  // (segments + 1) rings — which is what lets a per-ring paint work.
   _buildRibbon() {
-    const positions = [];
-    const colors = [];
-    const indices = [];
-
-    for (let i = 0; i <= RIBBON_SAMPLES; i++) {
-      const t = i / RIBBON_SAMPLES;
-      const point = this.curve.getPointAt(t);
-      this.curve.getTangentAt(t, _tangent);
-
-      _side
-        .crossVectors(_tangent, this.contactNormal)
-        .normalize()
-        .multiplyScalar(RIBBON_WIDTH / 2);
-
-      positions.push(
-        point.x - _side.x, point.y - _side.y, point.z - _side.z,
-        point.x + _side.x, point.y + _side.y, point.z + _side.z
-      );
-      colors.push(1, 1, 1, 1, 1, 1);
-
-      if (i < RIBBON_SAMPLES) {
-        const a = i * 2;
-        indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-      }
-    }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geo.setIndex(indices);
-    geo.computeVertexNormals();
-
+    const geo = new THREE.TubeGeometry(
+      this.curve,
+      RIBBON_SAMPLES,
+      TUBE_RADIUS,
+      TUBE_RADIAL,
+      false
+    );
+    const count = geo.getAttribute('position').count;
+    geo.setAttribute(
+      'color',
+      new THREE.Float32BufferAttribute(new Float32Array(count * 3).fill(1), 3)
+    );
     return new THREE.Mesh(
       geo,
       new THREE.MeshBasicMaterial({
         vertexColors: true,
         transparent: true,
-        opacity: 0.7,
-        side: THREE.DoubleSide,
+        opacity: 0.85,
         depthWrite: false,
         toneMapped: false,
       })
     );
   }
 
-  // Colours the ribbon green up to how far you have traced, so the line
+  // Colours the string green up to how far you have traced, so the line
   // fills in behind the bat as the stroke is completed.
   _paintProgress(progress) {
     const attr = this.ribbon?.geometry.getAttribute('color');
     if (!attr) return;
+    const ringSize = TUBE_RADIAL + 1;
     for (let i = 0; i <= RIBBON_SAMPLES; i++) {
       const c = i / RIBBON_SAMPLES <= progress ? TRACED : UNTRACED;
-      attr.setXYZ(i * 2, c.r, c.g, c.b);
-      attr.setXYZ(i * 2 + 1, c.r, c.g, c.b);
+      for (let r = 0; r < ringSize; r++) {
+        attr.setXYZ(i * ringSize + r, c.r, c.g, c.b);
+      }
     }
     attr.needsUpdate = true;
   }
 
+  // Faint halo around the string so it stays findable when it runs edge-on
+  // to the eye or against a bright passthrough background.
   _buildCore() {
     return new THREE.Mesh(
-      new THREE.TubeGeometry(this.curve, RIBBON_SAMPLES, 0.005, 8, false),
+      new THREE.TubeGeometry(this.curve, RIBBON_SAMPLES, TUBE_RADIUS * 2.4, 8, false),
       new THREE.MeshBasicMaterial({
         color: 0xf2efe6,
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.12,
+        depthWrite: false,
         toneMapped: false,
       })
     );
@@ -531,7 +522,7 @@ export class Coach {
     });
     for (const u of [0.16, 0.42, 0.72]) {
       const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(0.016, 0.05, 10),
+        new THREE.ConeGeometry(0.022, 0.06, 10),
         material
       );
       // Cones point +Y; rotate the geometry so lookAt's +Z convention works.
