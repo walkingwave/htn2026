@@ -594,7 +594,7 @@ export class UI {
 
   phoneCvReady() {
     if (this._phoneStarted) return;
-    this.phoneStatus.textContent = 'CV locked · confirm on the phone to start.';
+    this.phoneStatus.textContent = 'CV locked · aim assist active · confirm on the phone to start.';
     this.phoneStatus.dataset.tone = 'good';
   }
 

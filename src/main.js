@@ -1056,6 +1056,39 @@ const _aimWorld = new THREE.Vector3();
 // staying inside a frame or two of a real swing — and because a solve spike
 // now moves the aim at a bounded rate instead of teleporting it, it doubles
 // as the last line against jump glitches.
+function driveAimFromPhone(dt) {
+  if (!phoneCamTracker) return;
+  const displacement = phoneCamTracker.position;
+  const targetX = THREE.MathUtils.clamp(
+    WEBCAM_REST.x + displacement.x * webcamTuning.gainX,
+    -REACH_X,
+    REACH_X
+  );
+  const targetY = THREE.MathUtils.clamp(
+    WEBCAM_REST.y + displacement.y * webcamTuning.gainY,
+    REACH_Y_BOTTOM,
+    REACH_Y_TOP
+  );
+  const ease = 1 - Math.exp(-Math.max(webcamTuning.stiffness, 18) * dt);
+  const maxStep = Math.max(webcamTuning.maxSpeed, 6) * dt;
+  desktopAim.x += THREE.MathUtils.clamp((targetX - desktopAim.x) * ease, -maxStep, maxStep);
+  desktopAim.y += THREE.MathUtils.clamp((targetY - desktopAim.y) * ease, -maxStep, maxStep);
+
+  // Once CV has identified the phone marker board, reuse the existing bounded
+  // ball-catching assist. The phone position remains authoritative; assist
+  // only closes the small final gap to an incoming ball.
+  _aimWorld.copy(desktopAim);
+  playerRig.localToWorld(_aimWorld);
+  _aimWorld.project(camera);
+  _pointerNdc.set(_aimWorld.x, _aimWorld.y);
+  assist = ASSIST_PROFILES.webcam;
+  meetIncomingBall(desktopAim);
+  assist = ASSIST_PROFILES.mouse;
+  desktopAim.x = THREE.MathUtils.clamp(desktopAim.x, -REACH_X, REACH_X);
+  desktopAim.y = THREE.MathUtils.clamp(desktopAim.y, REACH_Y_BOTTOM, REACH_Y_TOP);
+  desktopYaw = (desktopAim.x / REACH_X) * 0.5;
+}
+
 function driveAimFromWebcam(dt) {
   camTracker.predictionLead = webcamTuning.lead;
   const displacement = camTracker.position;
@@ -1277,11 +1310,25 @@ function updateDesktopBat(dt) {
   const phoneDriving = settings.get('paddleSource') === PADDLE_SOURCE.PHONE;
   if (phoneDriving) {
     pointerActive = false;
-    // CV owns location. Its assist-only tracker returns camera-relative x/y;
-    // map that measured position into the same playable desktop volume.
-    if (phoneCamTracker?.state === TRACKER_STATE.TRACKING) {
+    const identified =
+      phoneCamTracker?.state === TRACKER_STATE.TRACKING &&
+      phoneCamTracker.markerCount >= 2 &&
+      phoneCamTracker.confidence >= 0.65;
+    if (identified) phoneAimLockTime = Math.min(phoneAimLockTime + dt, 1);
+    else phoneAimLockTime = Math.max(0, phoneAimLockTime - dt * 2.5);
+    phoneAimAssistActive = phoneAimLockTime >= 0.25;
+
+    if (phoneAimAssistActive) {
+      driveAimFromPhone(dt);
+    } else if (phoneCamTracker?.state === TRACKER_STATE.TRACKING) {
+      // Before the object is identified, CV may only park the paddle at the
+      // measured centre. Aim assist stays completely off during this phase.
       desktopAim.x = THREE.MathUtils.clamp(phoneCamTracker.position.x * 2.2, -REACH_X, REACH_X);
       desktopAim.y = THREE.MathUtils.clamp(0.95 + phoneCamTracker.position.y * 1.65, REACH_Y_BOTTOM, REACH_Y_TOP);
+      assistOffset.set(0, 0);
+    } else {
+      phoneAimAssistActive = false;
+      assistOffset.set(0, 0);
     }
     // Phone orientation owns the face direction/tilt, while flick still owns
     // the stroke gesture. CV never tries to infer wrist rotation.
@@ -1367,6 +1414,8 @@ let phoneRoom = null;
 let phoneConnected = false;
 let phoneConfirmed = false;
 let phoneCvLocked = false;
+let phoneAimAssistActive = false;
+let phoneAimLockTime = 0;
 let phoneLastPose = null;
 let phoneCamTracker = null;
 const match = new VersusMatch();
@@ -1495,7 +1544,15 @@ function maybeStartPhone() {
 
 function startPhoneCv() {
   if (phoneCamTracker) return;
-  phoneCamTracker = new MarkerPaddleTracker({ assistOnly: true });
+  try {
+    phoneCamTracker = new MarkerPaddleTracker({ assistOnly: true });
+  } catch (error) {
+    phoneCamTracker = null;
+    phoneCvLocked = false;
+    ui.phoneCvWaiting();
+    ui.toast(error?.message ?? 'Phone CV is unavailable in this browser');
+    return;
+  }
   phoneCamTracker.onState = (state, error) => {
     if (state === TRACKER_STATE.TRACKING) {
       phoneCvLocked = true;
@@ -1519,6 +1576,9 @@ function startPhoneCv() {
 function stopPhoneCv() {
   phoneCamTracker?.stop();
   phoneCamTracker = null;
+  phoneAimAssistActive = false;
+  phoneAimLockTime = 0;
+  assistOffset.set(0, 0);
 }
 
 function closePhonePair() {
