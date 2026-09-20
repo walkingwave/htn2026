@@ -25,6 +25,37 @@ export const OPTIONS = {
     { label: 'Left', value: 'left' },
     { label: 'Both', value: 'both' },
   ],
+  // What drives the bat. `hand` lets you hold your own real paddle and have
+  // the headset track your hand instead of a controller.
+  // `hand` tracks the hand holding your own real bat inside a session.
+  // `camera` is the flat-screen equivalent: a webcam watches the real bat and
+  // drives the on-screen one, so a laptop player swings a physical paddle.
+  paddleSource: [
+    { label: 'Controller', value: 'controller' },
+    { label: 'Real paddle', value: 'hand' },
+    { label: 'Webcam bat', value: 'camera' },
+  ],
+  // Arcade is the drills and rally; Coach teaches strokes one at a time;
+  // Versus is a networked match against another player.
+  game: [
+    { label: 'Arcade', value: 'arcade' },
+    { label: 'Coach', value: 'coach' },
+    { label: 'Versus', value: 'versus' },
+  ],
+  // Which situation Coach drills.
+  scenario: [
+    { label: 'Serve', value: 'serve' },
+    { label: 'Drive', value: 'drive' },
+    { label: 'Push', value: 'push' },
+    { label: 'Return', value: 'return' },
+    { label: 'Block', value: 'block' },
+  ],
+  // How hard the rally opponent is to beat.
+  difficulty: [
+    { label: 'Easy', value: 'easy' },
+    { label: 'Normal', value: 'normal' },
+    { label: 'Hard', value: 'hard' },
+  ],
 };
 
 const DEFAULTS = {
@@ -32,8 +63,13 @@ const DEFAULTS = {
   feedRate: 1,
   placement: 1,
   hand: 'right',
+  paddleSource: 'controller',
+  difficulty: 'normal',
+  scenario: 'serve',
+  game: 'arcade', // 'arcade' | 'coach' | 'versus'
   sound: true,
   aimMarker: true,
+  playerName: 'Player', // shown on the leaderboard
 };
 
 const STORAGE_KEY = 'pingpong-trainer-settings';

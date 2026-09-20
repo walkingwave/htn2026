@@ -74,6 +74,14 @@ export class PhysicsWorld {
 
     _prev.copy(p);
 
+    // A frozen ball hangs where it was put: no gravity, no drag, no bounce.
+    // It is still collidable, because the whole point is to hit it — the
+    // strike is what releases it.
+    if (ball.frozen) {
+      for (const paddle of paddles) this._collidePaddle(ball, paddle, _prev);
+      return;
+    }
+
     // --- Aerodynamics -----------------------------------------------------
     const speed = v.length();
     _accel.set(0, PHYSICS.GRAVITY, 0);
@@ -299,8 +307,13 @@ export class PhysicsWorld {
       null
     );
 
+    // Struck: a held ball is released by the hit and flies from here.
+    ball.frozen = false;
     ball.touchedByPaddle = true;
+    ball.lastHitBy = paddle;
     ball.retireIn = null;
-    this.onBounce?.(ball, 'paddle');
+    // Pass the bat along: the game has to tell your hits from the
+    // opponent's, and they arrive through the same contact path.
+    this.onBounce?.(ball, 'paddle', paddle);
   }
 }

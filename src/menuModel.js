@@ -10,7 +10,7 @@ import { MODES } from './ballMachine.js';
 //   cycle  — a value with ‹ › affordances, stepped by `step(delta)`
 //   toggle — an on/off value, flipped by `step()`
 
-export function buildPauseMenu({ machine, settings, game, onExit, onResume }) {
+export function buildPauseMenu({ machine, settings, game, onExit, onResume, onRecenter }) {
   const cycle = (key) => {
     const choices = OPTIONS[key];
     const index = Math.max(
@@ -30,19 +30,29 @@ export function buildPauseMenu({ machine, settings, game, onExit, onResume }) {
 
   const modeIndex = machine.modeIndex;
 
+  // Coach and Arcade want different second rows: one picks a situation to
+  // drill, the other picks which drill is running.
+  const coaching = settings.get('game') === 'coach';
+  const modeRow = coaching
+    ? { ...cycle('scenario'), label: 'Scenario' }
+    : {
+        id: 'mode',
+        kind: 'cycle',
+        label: 'Mode',
+        value: MODES[modeIndex].name,
+        step: (delta) => {
+          machine.modeIndex = (modeIndex + delta + MODES.length) % MODES.length;
+          game.revision++;
+        },
+      };
+
   return [
     { id: 'resume', kind: 'action', label: 'Resume', activate: onResume },
-    {
-      id: 'mode',
-      kind: 'cycle',
-      label: 'Mode',
-      value: MODES[modeIndex].name,
-      step: (delta) => {
-        machine.modeIndex =
-          (modeIndex + delta + MODES.length) % MODES.length;
-        game.revision++;
-      },
-    },
+    modeRow,
+    { ...cycle('game'), label: 'Game' },
+    { ...cycle('paddleSource'), label: 'Bat follows' },
+    { ...cycle('difficulty'), label: 'Opponent' },
+
     { ...cycle('hand'), label: 'Paddle hand' },
     { ...cycle('pace'), label: 'Ball pace' },
     { ...cycle('feedRate'), label: 'Feed rate' },
@@ -60,6 +70,12 @@ export function buildPauseMenu({ machine, settings, game, onExit, onResume }) {
       label: 'Aim marker',
       value: settings.get('aimMarker') ? 'On' : 'Off',
       step: () => settings.set('aimMarker', !settings.get('aimMarker')),
+    },
+    {
+      id: 'recenter',
+      kind: 'action',
+      label: 'Recentre table',
+      activate: () => onRecenter?.(),
     },
     {
       id: 'reset',

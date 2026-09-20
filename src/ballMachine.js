@@ -29,6 +29,18 @@ export const MODES = [
     spread: 0.62,
   },
   { name: 'Target practice', type: 'target', interval: 3.0, feedHeight: 0.55 },
+  // Rally: the machine puts one ball in play and then goes quiet. From there
+  // the opponent keeps it going, so the interval only governs how quickly a
+  // dead rally is restarted.
+  {
+    name: 'Rally',
+    type: 'rally',
+    spin: 90,
+    axis: 'x',
+    speed: 4.4,
+    interval: 2.4,
+    spread: 0.34,
+  },
 ];
 
 const MUZZLE_HEIGHT = TABLE.HEIGHT + 0.26;
@@ -43,11 +55,12 @@ export class BallMachine {
   constructor(balls, settings) {
     this.balls = balls; // pooled Ball instances
     this.settings = settings;
+    this.server = null; // set to the opponent, who serves in rally mode
+    this.coachActive = false; // true while the Coach game is running
     this.enabled = true;
     this.spread = 0.5; // lateral spread of the target point (m)
     this.modeIndex = 0;
     this.servedCount = 0;
-    this.lastServed = null; // the ball produced by the most recent serve()
 
     this._timer = 1.2; // small delay before the first serve
     this._flash = 0; // indicator lamp decay
@@ -67,8 +80,14 @@ export class BallMachine {
     this.aim = new THREE.Vector3(0, TABLE.HEIGHT, TABLE.LENGTH / 4);
   }
 
+  // Clamped, because an out-of-range index does not fail quietly: every
+  // `mode.type` read throws, which kills the whole frame loop. The list has
+  // already changed length once (Coach moved out to its own game), and
+  // anything holding a stale index would have taken the game down with it.
   get mode() {
-    return MODES[this.modeIndex];
+    const i = Math.min(Math.max(this.modeIndex | 0, 0), MODES.length - 1);
+    if (i !== this.modeIndex) this.modeIndex = i;
+    return MODES[i];
   }
 
   // Kept as `drill` for the HUD's benefit — it only ever wants the name.
@@ -83,7 +102,20 @@ export class BallMachine {
   }
 
   get isTargetMode() {
-    return this.mode.type === 'target';
+    return !this.coachActive && this.mode.type === 'target';
+  }
+
+  // Coach suspends the arcade entirely. Without this the rally opponent
+  // stayed live during a lesson — standing at the far end and swinging —
+  // because the arcade mode underneath was still set to rally.
+  get isRallyMode() {
+    return !this.coachActive && this.mode.type === 'rally';
+  }
+
+  // Coach is a separate game rather than one of the rotating arcade modes,
+  // so the machine is told to stand down from outside.
+  get isCoachMode() {
+    return this.coachActive === true;
   }
 
   update(dt) {
@@ -113,6 +145,20 @@ export class BallMachine {
     }
 
     if (!this.enabled) return;
+
+    // Coach mode drives its own lesson; the machine never fires here. Left
+    // to run, it launched from a mode entry with no spin or speed defined,
+    // which served a ball with an undefined velocity — NaN through the
+    // physics, and then a thrown error the moment the audio layer was handed
+    // the result.
+    if (this.isCoachMode) return;
+
+    // In rally mode the opponent sustains the exchange; the machine only
+    // steps in to restart once the ball is dead.
+    if (this.isRallyMode && this.balls.some((b) => b.active)) {
+      this._timer = this._nextInterval();
+      return;
+    }
 
     this._timer -= dt;
     if (this._timer <= 0) {
@@ -148,7 +194,9 @@ export class BallMachine {
         this._roamTarget = rand(-BASELINE_TRAVEL, BASELINE_TRAVEL);
       }
       desiredX = this._roamTarget;
-    } else if (this.isTargetMode) {
+    } else if (this.isTargetMode || this.isRallyMode || this.isCoachMode) {
+      // Stand aside: in target mode it is not firing down the line, and in
+      // rally mode the opponent plays from roughly where it parks.
       desiredX = BASELINE_TRAVEL + 0.45;
       desiredZ = PLAY_AREA.SERVER_Z - 0.1;
     }
@@ -163,96 +211,99 @@ export class BallMachine {
     const ball = this.balls.find((b) => !b.active);
     if (!ball) return; // pool exhausted; a ball will free up shortly
 
+    // In rally mode the opponent puts the ball in play from their own bat,
+    // so the machine hands off rather than firing from the corner.
+    if (this.isRallyMode && this.server) {
+      if (!this.server.serve(ball)) return;
+      this.servedCount++;
+      return;
+    }
+
     if (this.isTargetMode) {
       this._feedToPlayer(ball);
     } else {
       this._launch(ball);
     }
 
-    this.lastServed = ball;
     this.servedCount++;
     this._flash = 1;
   }
 
-  // Play-a-Bot feed. A 2D input (mouse / phone) can only reach a small volume
-  // in front of the player — world x ≈ ±0.6, y ≈ 0.8–1.2, on the fixed paddle
-  // plane at z ≈ 1.05. A fast flat drive from the far end never passes through
-  // that box, so instead we lob the ball up and let it come DOWN through the
-  // window, then bounce once on the player's half. That gives a wide timing
-  // window and a legal receiving bounce (so a genuine miss still counts).
   _launch(ball) {
     const mode = this.mode;
-    const placement = this._setting('placement');
-    const pace = this._setting('pace');
-    const sideX = (mode.type === 'infinite' ? rand(-0.3, 0.3) : rand(-0.15, 0.15)) * placement;
 
-    // Serve from the muzzle to land SHORT on the player's half so the ball
-    // bounces once (satisfying the no-volley rule), then runs slowly up toward
-    // the strike plane where a mouse/phone paddle can meet it. Use Z/X to step
-    // back behind the bounce.
+    // Aim at a point on the player's half, short of the end line. The spread
+    // has to be clamped to the table: a wide mode multiplied by the Wide
+    // placement setting otherwise targets past the side line, and a ball
+    // aimed off the table is unhittable and scores as a miss through no
+    // fault of the player.
+    const maxSpread = TABLE.WIDTH / 2 - BALL.RADIUS - 0.04;
+    const spread = Math.min(
+      (mode.spread ?? this.spread) * this._setting('placement'),
+      maxSpread
+    );
+
+    _target.set(
+      (Math.random() * 2 - 1) * spread,
+      TABLE.HEIGHT + BALL.RADIUS,
+      TABLE.LENGTH * 0.18 + Math.random() * TABLE.LENGTH * 0.22
+    );
+    this.aim.copy(_target);
+
     const origin = new THREE.Vector3(
       this.mesh.position.x,
       MUZZLE_HEIGHT,
       this.mesh.position.z + 0.12
     );
-    const target = new THREE.Vector3(sideX, TABLE.HEIGHT + BALL.RADIUS, rand(0.25, 0.5));
 
-    let spinAmount = mode.type === 'infinite' ? rand(...mode.spinRange) : mode.spin;
-    const axis = mode.type === 'infinite' ? (Math.random() < 0.35 ? 'y' : 'x') : mode.axis;
-    // Scale spin down so a slow feed isn't thrown out of reach by Magnus.
-    spinAmount = THREE.MathUtils.clamp(spinAmount * 0.35, -110, 110);
-    const spin = new THREE.Vector3();
-    if (axis === 'y') spin.set(0, spinAmount, 0);
-    else spin.set(spinAmount, 0, 0);
-
-    // Slow enough that, after the bounce, the ball can be run down rather than
-    // zipping past — a wide timing window for 2D input.
-    const speed = rand(2.9, 3.5) * pace;
-    const velocity = solveLaunch(origin, target, speed, spin);
-    this.aim.copy(target);
-    ball.serve(origin, velocity, spin);
-    ball.isFeed = false; // a real rally feed: it must bounce before you hit it
-  }
-
-  // Target mode: a gentle, spin-free lob into the same reachable window, so
-  // the player can take a full, unhurried swing and drive it at the pad. A
-  // wide timing window is what makes this a placement drill rather than a
-  // reaction one.
-  _feedToPlayer(ball) {
-    this._lobToPlayer(ball, {
-      sideX: rand(-0.12, 0.12),
-      spinAmount: 0,
-      axis: 'x',
-      up: 3.0,
-      forward: 1.15,
-    });
-    ball.isFeed = true;
-  }
-
-  // Shared lob generator. The ball starts low over the middle of the player's
-  // half and arcs up so that, on the way DOWN, it crosses the fixed paddle
-  // plane (world z ≈ 1.05) at roughly y ≈ 1.0–1.15 — inside the reachable box.
-  // If the player whiffs it, it lands (bounces once) on their half, satisfying
-  // the double-bounce rule downstream.
-  _lobToPlayer(ball, { sideX, spinAmount, axis, up, forward }) {
-    const origin = new THREE.Vector3(
-      THREE.MathUtils.clamp(sideX * 0.5, -0.3, 0.3),
-      TABLE.HEIGHT + 0.06,
-      0.5 // mid player-half; ~0.5 m of forward travel reaches the strike plane
-    );
-
-    const velocity = new THREE.Vector3(sideX, up, forward);
-
-    const spin = new THREE.Vector3();
-    if (spinAmount) {
-      if (axis === 'y') spin.set(0, spinAmount, 0);
-      else spin.set(spinAmount, 0, 0);
+    // Infinite mode rolls fresh spin and pace for every ball, including the
+    // spin axis, so you can't settle into one stroke.
+    // Defaults, so a mode that omits these cannot serve a NaN ball. Adding
+    // a mode without them is an easy mistake to make — this file just made
+    // it — and the failure lands far away, in the audio layer.
+    let spinAmount = mode.spin ?? 0;
+    let axis = mode.axis ?? 'x';
+    let speed = mode.speed ?? 4.5;
+    // Only Infinite overrides them; every other mode keeps the defaults
+    // above. Reassigning the raw fields in an else branch here undid the
+    // guard completely, which is how a mode with no spin or speed served a
+    // NaN ball in the first place.
+    if (mode.type === 'infinite') {
+      spinAmount = rand(...mode.spinRange);
+      axis = Math.random() < 0.35 ? 'y' : 'x';
+      speed = rand(...mode.speedRange);
     }
 
-    // Telegraph roughly where the ball will come into reach.
-    this.aim.set(origin.x + sideX * 0.45, TABLE.HEIGHT, 1.0);
+    const spin = new THREE.Vector3();
+    if (axis === 'y') {
+      spin.set(0, spinAmount, 0);
+    } else {
+      spin.set(spinAmount, 0, 0);
+    }
 
+    const velocity = solveLaunch(origin, _target, speed * this._setting('pace'), spin);
     ball.serve(origin, velocity, spin);
+  }
+
+  // Target mode: lob the ball gently upward just in front of the player so
+  // they can take a full swing at it. A near-vertical toss gives a wide
+  // timing window, which is what makes this a placement drill rather than a
+  // reaction one.
+  _feedToPlayer(ball) {
+    const mode = this.mode;
+    const origin = new THREE.Vector3(
+      rand(-0.28, 0.28),
+      TABLE.HEIGHT + 0.06,
+      PLAY_AREA.PLAYER_Z - 0.62
+    );
+
+    // Toss height sets the hang time: v = sqrt(2·g·h)
+    const up = Math.sqrt(2 * 9.81 * mode.feedHeight);
+    const velocity = new THREE.Vector3(rand(-0.06, 0.06), up, rand(-0.12, 0.02));
+
+    this.aim.copy(origin);
+    ball.serve(origin, velocity, new THREE.Vector3(0, 0, 0));
+    ball.isFeed = true;
   }
 }
 
@@ -351,59 +402,145 @@ function solveLaunch(origin, target, speed, spin) {
   return velocity.set(ux * horizontalSpeed, vy, uz * horizontalSpeed);
 }
 
+
+// The machine, built to read as a piece of sports equipment rather than a
+// box on a post. What sells it is the mechanism being legible: a tripod you
+// could actually stand up, a hopper that feeds into something, a turret that
+// visibly aims, and the two friction wheels the ball is squeezed between.
+//
+// Named parts the game animates: `head` (pitches toward the aim point),
+// `wheel-l` / `wheel-r` (spin up), `lamp` (armed indicator).
+
+const COLUMN_TOP = MUZZLE_HEIGHT - 0.1;
+
 function buildMachineMesh() {
   const group = new THREE.Group();
 
   const shell = new THREE.MeshStandardMaterial({
-    color: 0x2a2f38,
-    roughness: 0.45,
-    metalness: 0.35,
+    color: 0x2b2f36,
+    roughness: 0.42,
+    metalness: 0.45,
   });
   const dark = new THREE.MeshStandardMaterial({
-    color: 0x14171c,
-    roughness: 0.7,
+    color: 0x111318,
+    roughness: 0.66,
+    metalness: 0.25,
+  });
+  const rubber = new THREE.MeshStandardMaterial({
+    color: 0x0c0d10,
+    roughness: 0.95,
   });
   const accent = new THREE.MeshStandardMaterial({
     color: COLORS.ACCENT,
-    roughness: 0.4,
-    metalness: 0.2,
+    roughness: 0.35,
+    metalness: 0.25,
+  });
+  const steel = new THREE.MeshStandardMaterial({
+    color: 0x7d858f,
+    roughness: 0.3,
+    metalness: 0.8,
   });
 
-  // Tripod base
-  const base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.2, 0.26, 0.035, 20),
-    dark
-  );
-  base.position.y = 0.018;
-  base.castShadow = true;
-  group.add(base);
-
-  const column = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.065, TABLE.HEIGHT + 0.1, 16),
+  // --- Tripod -------------------------------------------------------------
+  // Three splayed legs read as something that stands up on its own; the
+  // single post it replaces looked like a signpost.
+  const hub = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.055, 0.065, 0.05, 16),
     shell
   );
-  column.position.y = (TABLE.HEIGHT + 0.1) / 2;
-  column.castShadow = true;
-  group.add(column);
+  hub.position.y = 0.30;
+  hub.castShadow = true;
+  group.add(hub);
 
-  // Body
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.32, 0.3), shell);
+  const legGeo = new THREE.CylinderGeometry(0.014, 0.018, 0.42, 10);
+  const footGeo = new THREE.CylinderGeometry(0.026, 0.03, 0.016, 12);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + Math.PI / 6;
+    const spread = 0.26;
+
+    const leg = new THREE.Mesh(legGeo, steel);
+    leg.position.set(Math.cos(a) * spread * 0.5, 0.15, Math.sin(a) * spread * 0.5);
+    // Splay outward: tilt away from the column by a fixed angle
+    leg.rotation.z = -Math.cos(a) * 0.5;
+    leg.rotation.x = Math.sin(a) * 0.5;
+    leg.castShadow = true;
+    group.add(leg);
+
+    const foot = new THREE.Mesh(footGeo, rubber);
+    foot.position.set(Math.cos(a) * spread, 0.008, Math.sin(a) * spread);
+    group.add(foot);
+  }
+
+  // --- Column, in two stages with a clamp, like a real stand --------------
+  const lower = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.036, 0.042, 0.26, 16),
+    shell
+  );
+  lower.position.y = 0.42;
+  lower.castShadow = true;
+  group.add(lower);
+
+  const clamp = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.044, 0.044, 0.035, 16),
+    dark
+  );
+  clamp.position.y = 0.55;
+  group.add(clamp);
+
+  const clampLever = new THREE.Mesh(
+    new THREE.BoxGeometry(0.055, 0.012, 0.014),
+    accent
+  );
+  clampLever.position.set(0.05, 0.55, 0);
+  group.add(clampLever);
+
+  const upper = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.028, 0.028, COLUMN_TOP - 0.55, 16),
+    steel
+  );
+  upper.position.y = 0.55 + (COLUMN_TOP - 0.55) / 2;
+  upper.castShadow = true;
+  group.add(upper);
+
+  // --- Body shell ---------------------------------------------------------
+  const body = new THREE.Mesh(
+    roundedBox(0.34, 0.28, 0.26, 0.035),
+    shell
+  );
   body.position.y = MUZZLE_HEIGHT;
   body.castShadow = true;
   group.add(body);
 
-  // Chamfer plate across the front so it isn't a plain cube
-  const facePlate = new THREE.Mesh(new THREE.BoxGeometry(0.33, 0.22, 0.02), dark);
-  facePlate.position.set(0, MUZZLE_HEIGHT - 0.02, 0.152);
-  group.add(facePlate);
+  // Panel line and accent band, so the shell isn't one undifferentiated mass
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.352, 0.018, 0.272), accent);
+  band.position.y = MUZZLE_HEIGHT + 0.088;
+  group.add(band);
 
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.39, 0.024, 0.014), accent);
-  stripe.position.set(0, MUZZLE_HEIGHT + 0.1, 0.152);
-  group.add(stripe);
+  const vent = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.09, 0.14), dark);
+  for (const sx of [-1, 1]) {
+    const v = vent.clone();
+    v.position.set(sx * 0.172, MUZZLE_HEIGHT - 0.02, 0);
+    group.add(v);
+  }
 
-  // Status lamp
+  // Control panel on the back, angled up toward whoever is loading it
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.02, 0.1), dark);
+  panel.position.set(0, MUZZLE_HEIGHT + 0.03, -0.15);
+  panel.rotation.x = -0.5;
+  group.add(panel);
+
+  for (let i = 0; i < 3; i++) {
+    const btn = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.006, 10),
+      i === 0 ? accent : steel
+    );
+    btn.position.set(-0.04 + i * 0.04, MUZZLE_HEIGHT + 0.045, -0.163);
+    btn.rotation.x = -0.5 + Math.PI / 2;
+    group.add(btn);
+  }
+
   const lamp = new THREE.Mesh(
-    new THREE.SphereGeometry(0.016, 14, 10),
+    new THREE.SphereGeometry(0.014, 14, 10),
     new THREE.MeshStandardMaterial({
       color: 0x0a0a0a,
       emissive: new THREE.Color(COLORS.ACCENT),
@@ -412,90 +549,202 @@ function buildMachineMesh() {
     })
   );
   lamp.name = 'lamp';
-  lamp.position.set(0.14, MUZZLE_HEIGHT + 0.1, 0.152);
+  lamp.position.set(0.12, MUZZLE_HEIGHT + 0.088, 0.1);
   group.add(lamp);
 
-  // Hopper of spare balls on top
-  const hopper = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.15, 0.1, 0.18, 20, 1, true),
+  // --- Hopper -------------------------------------------------------------
+  // A funnel on a collar, with a rim and struts, so it reads as mounted
+  // plumbing rather than a cup left on top of the box.
+  const collar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.085, 0.03, 20),
+    dark
+  );
+  collar.position.y = MUZZLE_HEIGHT + 0.115;
+  group.add(collar);
+
+  const funnel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.155, 0.07, 0.17, 24, 1, true),
     new THREE.MeshStandardMaterial({
       color: 0x9aa4b2,
       transparent: true,
-      opacity: 0.32,
-      roughness: 0.25,
+      opacity: 0.22,
+      roughness: 0.2,
+      metalness: 0.1,
       side: THREE.DoubleSide,
     })
   );
-  hopper.position.y = MUZZLE_HEIGHT + 0.25;
-  group.add(hopper);
+  funnel.position.y = MUZZLE_HEIGHT + 0.215;
+  group.add(funnel);
 
-  const hopperLip = new THREE.Mesh(
-    new THREE.TorusGeometry(0.15, 0.007, 8, 24),
-    shell
-  );
-  hopperLip.rotation.x = Math.PI / 2;
-  hopperLip.position.y = MUZZLE_HEIGHT + 0.34;
-  group.add(hopperLip);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.008, 8, 28), steel);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = MUZZLE_HEIGHT + 0.3;
+  group.add(rim);
+
+  // Struts from the rim down to the collar
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const strut = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.004, 0.004, 0.18, 6),
+      steel
+    );
+    strut.position.set(
+      Math.cos(a) * 0.112,
+      MUZZLE_HEIGHT + 0.215,
+      Math.sin(a) * 0.112
+    );
+    strut.rotation.z = Math.cos(a) * 0.26;
+    strut.rotation.x = -Math.sin(a) * 0.26;
+    group.add(strut);
+  }
 
   const spareGeo = new THREE.SphereGeometry(BALL.RADIUS, 12, 8);
   const spareMat = new THREE.MeshStandardMaterial({
     color: COLORS.BALL,
     roughness: 0.5,
   });
-  // Deterministic scatter so the hopper looks packed but never re-shuffles
-  for (let i = 0; i < 14; i++) {
+  // Deterministic golden-angle scatter: packed, and never re-shuffles
+  for (let i = 0; i < 16; i++) {
     const s = new THREE.Mesh(spareGeo, spareMat);
-    const a = i * 2.399; // golden-angle spiral
-    const rad = 0.03 + (i % 4) * 0.028;
+    const a = i * 2.399;
+    const layer = Math.floor(i / 6);
+    const rad = 0.03 + (i % 6) * 0.016 + layer * 0.008;
     s.position.set(
       Math.cos(a) * rad,
-      MUZZLE_HEIGHT + 0.19 + (i % 5) * 0.02,
+      MUZZLE_HEIGHT + 0.175 + layer * 0.032,
       Math.sin(a) * rad
     );
     group.add(s);
   }
 
-  // Aiming head with the launch wheels
+  // --- Turret -------------------------------------------------------------
+  // The head pitches to aim. Object3D.lookAt aims an object's +Z at the
+  // target — three swaps the arguments for non-cameras, so it is the
+  // opposite of the camera convention — which means everything in here is
+  // built along +Z. Built along −Z, as it was, the barrel pointed away from
+  // the table and sat buried inside the body.
   const head = new THREE.Group();
   head.name = 'head';
-  head.position.set(0, MUZZLE_HEIGHT - 0.02, 0.17);
+  head.position.set(0, MUZZLE_HEIGHT - 0.005, 0.1);
   group.add(head);
 
-  const barrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.045, 0.055, 0.14, 18, 1, true),
-    dark
-  );
-  // lookAt() aims an object's −Z axis, so lay the barrel along −Z
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.z = -0.07;
-  head.add(barrel);
+  // Yoke cheeks, so the barrel visibly hangs in a mount rather than being a
+  // hole in the shell.
+  for (const sx of [-1, 1]) {
+    const cheek = new THREE.Mesh(roundedBox(0.02, 0.15, 0.1, 0.028), shell);
+    cheek.position.set(sx * 0.082, 0, -0.005);
+    cheek.castShadow = true;
+    head.add(cheek);
 
-  const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.007, 8, 20), accent);
-  muzzle.position.z = -0.14;
-  head.add(muzzle);
+    const pivot = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.014, 0.014, 0.012, 12),
+      steel
+    );
+    pivot.rotation.z = Math.PI / 2;
+    pivot.position.set(sx * 0.094, 0, -0.005);
+    head.add(pivot);
+  }
 
-  const wheelGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.018, 18);
-  const wheelMat = new THREE.MeshStandardMaterial({
-    color: 0x3c4450,
-    roughness: 0.5,
-    metalness: 0.4,
-  });
-  for (const [name, sx] of [
-    ['wheel-l', -1],
-    ['wheel-r', 1],
+  // The friction wheels sit proud of the barrel, between the cheeks, where
+  // you can actually see them turn. Tucked inside the tube — which is where
+  // a real one hides them — the machine loses the one detail that explains
+  // how it throws a ball.
+  const wheelGeo = new THREE.CylinderGeometry(0.052, 0.052, 0.022, 22);
+  const treadGeo = new THREE.TorusGeometry(0.052, 0.007, 8, 24);
+  for (const [name, sy] of [
+    ['wheel-l', 1],
+    ['wheel-r', -1],
   ]) {
-    // The wheel spins on its own axis, so it sits inside a holder that does
-    // the tilting. Putting both rotations on one object would make it wobble
-    // about the parent's axis instead of turning in place.
+    // Holder does the tilting; the wheel spins on its own axis inside it, so
+    // the two rotations cannot fight each other.
     const holder = new THREE.Group();
     holder.rotation.z = Math.PI / 2;
-    holder.position.set(sx * 0.055, 0, -0.03);
+    holder.position.set(0, sy * 0.056, -0.01);
 
-    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    const wheel = new THREE.Mesh(wheelGeo, steel);
     wheel.name = name;
+    wheel.castShadow = true;
+
+    const tread = new THREE.Mesh(treadGeo, rubber);
+    tread.rotation.x = Math.PI / 2;
+    wheel.add(tread);
+
+    // Spokes, so the spin is legible instead of a smooth grey disc
+    for (let i = 0; i < 3; i++) {
+      const spoke = new THREE.Mesh(
+        new THREE.BoxGeometry(0.09, 0.024, 0.008),
+        dark
+      );
+      spoke.rotation.y = (i / 3) * Math.PI;
+      wheel.add(spoke);
+    }
+
     holder.add(wheel);
     head.add(holder);
   }
 
+  // Short barrel ahead of the wheels, in shell grey so it reads against the
+  // dark body instead of disappearing into it.
+  const barrel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.048, 0.055, 0.1, 22, 1, true),
+    shell
+  );
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.z = 0.065;
+  barrel.castShadow = true;
+  head.add(barrel);
+
+  const muzzle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.0105, 12, 26), accent);
+  muzzle.position.z = 0.115;
+  head.add(muzzle);
+
+  // Dark throat inside the muzzle, so it reads as an opening
+  const throat = new THREE.Mesh(
+    new THREE.CircleGeometry(0.044, 22),
+    new THREE.MeshBasicMaterial({ color: 0x05060a })
+  );
+  throat.position.z = 0.112;
+  head.add(throat);
+
+  // Feed tube from the hopper collar into the back of the turret
+  const feed = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.026, 0.026, 0.12, 12),
+    dark
+  );
+  feed.position.set(0, MUZZLE_HEIGHT + 0.07, 0.07);
+  feed.rotation.x = 0.5;
+  group.add(feed);
+
   return group;
+}
+
+// A box with softened edges. Plain BoxGeometry catches light along a hard
+// seam that reads as untextured geometry; a small bevel is most of what
+// makes a shell look moulded.
+function roundedBox(width, height, depth, radius) {
+  const shape = new THREE.Shape();
+  const w = width / 2 - radius;
+  const h = height / 2 - radius;
+  shape.moveTo(-w, -height / 2);
+  shape.lineTo(w, -height / 2);
+  shape.quadraticCurveTo(width / 2, -height / 2, width / 2, -h);
+  shape.lineTo(width / 2, h);
+  shape.quadraticCurveTo(width / 2, height / 2, w, height / 2);
+  shape.lineTo(-w, height / 2);
+  shape.quadraticCurveTo(-width / 2, height / 2, -width / 2, h);
+  shape.lineTo(-width / 2, -h);
+  shape.quadraticCurveTo(-width / 2, -height / 2, -w, -height / 2);
+  shape.closePath();
+
+  const bevel = Math.min(radius * 0.6, depth * 0.22);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: depth - bevel * 2,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 3,
+    curveSegments: 8,
+  });
+  geo.translate(0, 0, -(depth - bevel * 2) / 2);
+  return geo;
 }

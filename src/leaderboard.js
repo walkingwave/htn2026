@@ -1,61 +1,110 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient.js';
 
-const url = import.meta.env.VITE_SUPABASE_URL;
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const supabase = url && key ? createClient(url, key) : null;
+// Scores worth keeping after you take the headset off.
+//
+// Supabase when it is configured, localStorage when it isn't — the same
+// arrangement the rest of the networking uses, and for the same reason: the
+// feature should work at a table with no accounts and no keys, and reach
+// further when someone has set it up.
+//
+// There is no seeded demo data. An empty board says nobody has played yet,
+// which is true and useful; inventing rivals would not be.
 
-const LOCAL_KEY = 'flyball.leaderboard.v1';
-const demo = [
-  { player_name: 'Ada', score: 1840, max_rally: 42, difficulty: 'boss', category: 'boss', created_at: new Date().toISOString() },
-  { player_name: 'Ravi', score: 1320, max_rally: 31, difficulty: 'standard', category: 'fundamentals', created_at: new Date().toISOString() },
-  { player_name: 'Mina', score: 980, max_rally: 24, difficulty: 'beginner', category: 'fundamentals', created_at: new Date().toISOString() },
-];
+const LOCAL_KEY = 'pingpong-trainer.scores.v1';
+const TABLE = 'leaderboard_entries';
+const LIMIT = 25;
 
-function readLocalScores() {
+function readLocal() {
   try {
     const stored = JSON.parse(localStorage.getItem(LOCAL_KEY) ?? '[]');
     return Array.isArray(stored) ? stored : [];
   } catch {
-    return [];
+    return []; // private browsing, or a corrupt entry
   }
 }
 
-function writeLocalScore(entry) {
+function writeLocal(entry) {
   try {
-    const scores = [entry, ...readLocalScores()].slice(0, 100);
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(scores));
+    localStorage.setItem(LOCAL_KEY, JSON.stringify([entry, ...readLocal()].slice(0, 200)));
   } catch {
-    // Private browsing or blocked storage should not prevent a session result.
+    // Blocked storage shouldn't cost you the run you just played.
   }
 }
 
+// What a run was worth. Each game is scored on what it is actually asking of
+// you, so the numbers are only ever compared within a category.
 export function scoreFor(summary, category) {
-  if (category === 'boss') return Math.max(0, Math.round(summary.survivalSeconds * 20 + summary.longestRally * 25 + summary.accuracy * 5 + (summary.flyReturns ?? 0) * 20 - (summary.flyMisses ?? 0) * 35 + summary.bossLevel * 100));
-  const fundamentals = summary.returns * 12 + summary.longestRally * 30 + summary.accuracy * 8 - summary.netErrors * 10 - summary.misses * 15;
-  const targetBonus = (summary.targetHits ?? 0) * 18 + (summary.completedMoves ?? 0) * 100;
-  return Math.max(0, Math.round(fundamentals + targetBonus));
+  if (category === 'coach') {
+    // A lesson is graded out of 100 per stroke; reward the best trace you
+    // managed, and a little for the work of getting there.
+    return Math.max(0, Math.round(summary.lessonBest * 12 + summary.lessonAttempts * 3));
+  }
+  if (category === 'versus') {
+    // Points you took off a real opponent, and the match if you won it.
+    return Math.max(0, Math.round(summary.pointsWon * 100 + (summary.matchWon ? 500 : 0)));
+  }
+  // Arcade: returns are the thing, streaks show control, misses cost.
+  return Math.max(
+    0,
+    Math.round(
+      summary.returns * 12 +
+        summary.bestStreak * 30 +
+        summary.longestRally * 20 +
+        summary.accuracy * 8 +
+        summary.targetsHit * 18 -
+        summary.misses * 15
+    )
+  );
 }
 
-export async function submitScore(playerName, summary, category = 'fundamentals') {
-  const entry = { player_name: playerName.trim().slice(0, 32), score: scoreFor(summary, category), max_rally: summary.longestRally, difficulty: summary.difficulty, category };
-  if (!supabase) {
-    writeLocalScore({ ...entry, created_at: new Date().toISOString() });
-    return { ...entry, persisted: true, storage: 'local' };
-  }
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data, error } = await supabase.from('leaderboard_entries').insert({ ...entry, user_id: user?.id ?? null }).select().single();
-  if (error) throw error;
-  return { ...data, persisted: true };
+// Whether a run is worth recording at all. Walking into the menu and straight
+// back out should not put a zero on the board.
+export function isWorthRecording(summary, category) {
+  if (category === 'coach') return summary.lessonAttempts > 0;
+  if (category === 'versus') return summary.pointsWon > 0 || summary.matchWon;
+  return summary.hits > 0;
 }
 
-export async function getLeaderboard(category = 'fundamentals') {
+export async function submitScore(playerName, summary, category) {
+  const entry = {
+    player_name: (playerName || 'Player').trim().slice(0, 24) || 'Player',
+    score: scoreFor(summary, category),
+    best_streak: summary.bestStreak ?? 0,
+    category,
+  };
+
   if (!supabase) {
-    const local = readLocalScores().filter((entry) => entry.category === category);
-    return [...local, ...demo.filter((entry) => entry.category === category)]
-      .sort((a, b) => b.score - a.score || b.max_rally - a.max_rally)
-      .slice(0, 25);
+    const local = { ...entry, created_at: new Date().toISOString() };
+    writeLocal(local);
+    return { ...local, storage: 'local' };
   }
-  const { data, error } = await supabase.from('leaderboard_entries').select('*').eq('category', category).order('score', { ascending: false }).order('max_rally', { ascending: false }).limit(25);
-  if (error) return demo.filter((entry) => entry.category === category);
-  return data;
+
+  const { data, error } = await supabase.from(TABLE).insert(entry).select().single();
+  if (error) {
+    // A network blip shouldn't lose the run: keep it locally and say so.
+    const local = { ...entry, created_at: new Date().toISOString() };
+    writeLocal(local);
+    return { ...local, storage: 'local', error };
+  }
+  return { ...data, storage: 'supabase' };
+}
+
+export async function getLeaderboard(category) {
+  const local = readLocal()
+    .filter((entry) => entry.category === category)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, LIMIT);
+
+  if (!supabase) return local;
+
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('*')
+    .eq('category', category)
+    .order('score', { ascending: false })
+    .limit(LIMIT);
+
+  // Falling back to what's on this machine beats an empty screen when the
+  // backend is unreachable.
+  return error ? local : data;
 }

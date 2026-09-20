@@ -3,3 +3,13 @@ dist/
 .DS_Store
 *.local
 .vite/
+
+# Throwaway local vite configs used for one-off dev servers
+vite.*.config.js
+
+# Self-signed dev certificate (kept out of node_modules so it survives a
+# cache clear; see vite.config.js)
+.certs/
+
+# Graph/analysis tool output, not source
+graphify-out/

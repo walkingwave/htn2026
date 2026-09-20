@@ -29,8 +29,17 @@ export class VersusMatch {
     else this.scoreGuest += 1;
     this.server = scorer;
     this.rally = 0;
-    if (this.scoreHost >= this.target && this.scoreHost - this.scoreGuest >= VERSUS_WIN_BY) this.winner = 'host';
-    else if (this.scoreGuest >= this.target && this.scoreGuest - this.scoreHost >= VERSUS_WIN_BY) this.winner = 'guest';
+    if (
+      this.scoreHost >= this.target &&
+      this.scoreHost - this.scoreGuest >= VERSUS_WIN_BY
+    ) {
+      this.winner = 'host';
+    } else if (
+      this.scoreGuest >= this.target &&
+      this.scoreGuest - this.scoreHost >= VERSUS_WIN_BY
+    ) {
+      this.winner = 'guest';
+    }
     return this.winner;
   }
 

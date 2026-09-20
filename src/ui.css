@@ -110,11 +110,6 @@ canvas {
   letter-spacing: 0.14em;
   color: var(--dim);
 }
-/* Play-a-Bot settings step: the note holds the current value, so brighten it
-   on the selected row to signal it's what ← → will change. */
-.item[aria-selected='true'] .item__note {
-  color: var(--paper);
-}
 
 .hint {
   font-size: 11px;
@@ -132,6 +127,252 @@ canvas {
   50% {
     opacity: 0;
   }
+}
+
+.game-pick {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.game-pick__label {
+  color: var(--dim);
+}
+.game-pick .key[aria-pressed='true'] {
+  color: var(--red);
+}
+.game-pick .key[aria-pressed='true'] b {
+  color: var(--red);
+}
+
+/* Versus lobby ----------------------------------------------------------- */
+
+.lobby {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.lobby[hidden] {
+  display: none;
+}
+
+.lobby__row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.lobby__or {
+  color: var(--dim);
+}
+
+/* A room code is read aloud and typed back in, so it is set wide and in the
+   same face as everything else rather than as a form field. */
+.lobby__code {
+  width: 10ch; /* six tracked characters, plus the tracking itself */
+  padding: 6px 8px;
+  border: 0;
+  border-bottom: 1px solid rgba(242, 239, 230, 0.35);
+  background: none;
+  color: var(--paper);
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.3em;
+  text-align: center;
+  text-transform: uppercase;
+  outline: none;
+}
+.lobby__code:focus {
+  border-bottom-color: var(--red);
+}
+.lobby__code::placeholder {
+  color: rgba(242, 239, 230, 0.25);
+  letter-spacing: 0.3em;
+}
+
+.lobby__status {
+  color: var(--dim);
+  max-width: min(560px, calc(100vw - 48px));
+  line-height: 1.8;
+}
+.lobby__status[data-tone='bad'] {
+  color: var(--red);
+}
+
+.lobby__share {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.lobby__share[hidden] {
+  display: none;
+}
+
+.lobby__link {
+  color: var(--paper);
+  text-transform: none;
+  letter-spacing: 0.06em;
+  user-select: all;
+}
+
+/* Scores ----------------------------------------------------------------- */
+
+#scores {
+  position: fixed;
+  inset: 0;
+  /* Above the start menu (z 20): the board is opened from it and has to cover
+     it, not hide behind it. */
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  /* Opaque, not near-opaque: it sits over the start menu, and the menu's own
+     type showing through behind the table of names is unreadable. */
+  background: var(--ink);
+}
+#scores[hidden] {
+  display: none;
+}
+
+.scores__name {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.scores__input {
+  width: 14ch;
+  letter-spacing: 0.16em;
+  text-align: left;
+}
+
+.scores__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: min(420px, calc(100vw - 48px));
+  max-height: 54vh;
+  overflow-y: auto;
+}
+
+.scores__row b {
+  color: var(--paper);
+  font-weight: 700;
+}
+.scores__row:nth-child(1) .row__label,
+.scores__row:nth-child(1) b {
+  color: var(--red);
+}
+
+/* Versus HUD ------------------------------------------------------------- */
+
+/* Top-left, not centred: the in-world board hangs dead centre at the top of
+   the view, and two scoreboards on top of each other is one too many. */
+#versus {
+  position: fixed;
+  top: 14px;
+  left: 16px;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  pointer-events: none;
+}
+#versus[hidden] {
+  display: none;
+}
+
+.versus__score {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font-size: 20px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.versus__score b {
+  color: var(--paper);
+  font-size: 30px;
+  margin: 0 6px;
+}
+.versus__dash {
+  color: rgba(242, 239, 230, 0.3);
+}
+
+.versus__state {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.versus__state[data-live='true'] {
+  color: var(--red);
+}
+
+/* Serve countdown: the one thing that must be readable without looking. */
+#countdown {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(90px, 22vw, 240px);
+  font-weight: 700;
+  color: rgba(242, 239, 230, 0.16);
+  pointer-events: none;
+}
+#countdown[hidden] {
+  display: none;
+}
+
+#versus-win {
+  position: fixed;
+  inset: 0;
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: rgba(11, 11, 12, 0.94);
+  text-align: center;
+}
+#versus-win[hidden] {
+  display: none;
+}
+
+.win__result {
+  font-size: clamp(28px, 7vw, 56px);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.win__result[data-won='true'] {
+  color: var(--red);
+}
+
+.win__score {
+  font-size: 15px;
+  letter-spacing: 0.3em;
+  color: var(--dim);
 }
 
 /* Bottom status line ----------------------------------------------------- */
@@ -290,382 +531,3 @@ canvas {
     display: none;
   }
 }
-
-/* 3-2-1 launch countdown ------------------------------------------------- */
-#countdown {
-  position: fixed;
-  inset: 0;
-  /* Sit above every HUD/menu/overlay (max app z-index is ~30) and the
-     WebGL canvas so the number is never occluded. */
-  z-index: 9999;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  /* Dim the scene so the numeral reads on bright arena backgrounds. */
-  background: radial-gradient(
-    circle at center,
-    rgba(11, 11, 12, 0.35),
-    rgba(11, 11, 12, 0.72)
-  );
-}
-#countdown.is-visible { display: flex; }
-#countdown[hidden] { display: none; }
-
-/* A solid, glowing chip guarantees contrast against any background. */
-.countdown-num {
-  display: grid;
-  place-items: center;
-  width: clamp(170px, 34vw, 320px);
-  height: clamp(170px, 34vw, 320px);
-  border-radius: 50%;
-  border: 4px solid var(--red);
-  background: rgba(11, 11, 12, 0.72);
-  font-family: var(--mono);
-  font-weight: 800;
-  font-size: clamp(96px, 22vw, 220px);
-  line-height: 1;
-  color: var(--paper);
-  text-shadow: 0 0 26px rgba(226, 35, 26, 0.9), 0 4px 22px rgba(0, 0, 0, 0.85);
-  box-shadow: 0 0 60px rgba(226, 35, 26, 0.55),
-    inset 0 0 40px rgba(226, 35, 26, 0.25);
-}
-/* `both` fill-mode holds the final frame so the digit stays fully opaque
-   between ticks instead of fading out mid-count. */
-.countdown-num.pop {
-  animation: countdown-pop 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-@keyframes countdown-pop {
-  0% { transform: scale(2.2); opacity: 0; }
-  20% { opacity: 1; }
-  70% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-
-/* Tournament screen -------------------------------------------------------- */
-#tournament {
-  position: fixed;
-  inset: 0;
-  z-index: 25;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
-  padding: 40px 24px;
-  overflow-y: auto;
-  background: var(--ink);
-  color: var(--paper);
-  text-align: center;
-}
-#tournament[hidden] { display: none; }
-.tourney-head { text-align: center; }
-.tourney-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: min(560px, 100%);
-}
-.tourney-prompt {
-  font-size: 13px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--dim);
-  margin: 8px 0 4px;
-}
-.tourney-sizes { display: flex; flex-direction: column; gap: 4px; align-items: center; }
-.tourney-round {
-  margin-top: 14px;
-  font-size: 11px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  color: var(--red);
-  border-bottom: 1px solid rgba(242, 239, 230, 0.12);
-  padding-bottom: 4px;
-}
-.tourney-match {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 6px 8px;
-  font-size: 14px;
-  letter-spacing: 0.06em;
-}
-.tourney-match.playable {
-  background: rgba(226, 35, 26, 0.08);
-  border-radius: 4px;
-}
-.tourney-vs { color: var(--dim); font-size: 11px; }
-.tourney-name {
-  appearance: none;
-  border: 0;
-  background: none;
-  color: var(--paper);
-  font: inherit;
-  letter-spacing: 0.06em;
-  padding: 4px 8px;
-  min-width: 92px;
-  cursor: pointer;
-  border-radius: 4px;
-}
-.tourney-match.playable .tourney-name:not(:disabled):hover { color: var(--red); background: rgba(242, 239, 230, 0.06); }
-.tourney-name:disabled { cursor: default; color: rgba(242, 239, 230, 0.7); }
-.tourney-name.is-winner { color: var(--red); font-weight: 700; }
-.tourney-tag { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
-.tourney-champion {
-  margin-top: 20px;
-  font-size: 20px;
-  letter-spacing: 0.12em;
-  color: var(--red);
-  font-weight: 700;
-}
-.tourney-sim, .tourney-again { margin-top: 16px; justify-content: center; }
-
-/* Versus screen ------------------------------------------------------------ */
-#versus {
-  position: fixed;
-  inset: 0;
-  z-index: 26;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 26px;
-  padding: 40px 24px;
-  overflow-y: auto;
-  background: var(--ink);
-  color: var(--paper);
-  text-align: center;
-}
-#versus[hidden] { display: none; }
-.versus-head { text-align: center; }
-
-.versus-lobby {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  width: min(560px, 100%);
-}
-.versus-lobby[hidden] { display: none; }
-
-.versus-label {
-  margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
-.versus-code {
-  font-family: var(--mono);
-  font-weight: 800;
-  font-size: clamp(40px, 9vw, 80px);
-  letter-spacing: 0.28em;
-  color: var(--red);
-  text-shadow: 0 0 26px rgba(226, 35, 26, 0.5);
-  padding-left: 0.28em;
-}
-
-.versus-share {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  max-width: 480px;
-}
-.versus-link {
-  flex: 1;
-  appearance: none;
-  background: rgba(242, 239, 230, 0.06);
-  border: 1px solid rgba(242, 239, 230, 0.18);
-  border-radius: 4px;
-  color: var(--paper);
-  font: inherit;
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  padding: 9px 12px;
-}
-.versus-link:focus { outline: 1px solid var(--red); }
-.versus-copy { padding: 7px 10px; }
-
-.versus-status {
-  margin: 6px 0 0;
-  font-size: 13px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--paper);
-}
-.versus-note {
-  margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--dim);
-  max-width: 480px;
-  line-height: 1.8;
-}
-
-/* Versus scoreboard -------------------------------------------------------- */
-.versus-scoreboard {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  width: min(560px, 100%);
-}
-.versus-scoreboard[hidden] { display: none; }
-
-.vs-grid {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 28px;
-}
-.vs-side {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  min-width: 120px;
-}
-.vs-name {
-  font-size: 11px;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
-.vs-score {
-  font-family: var(--mono);
-  font-weight: 800;
-  font-size: clamp(56px, 13vw, 120px);
-  line-height: 1;
-  color: var(--paper);
-}
-.vs-dash {
-  font-size: clamp(40px, 8vw, 72px);
-  color: var(--red);
-  font-weight: 700;
-}
-
-/* Versus win overlay ------------------------------------------------------- */
-#versus-win {
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(11, 11, 12, 0.94);
-  color: var(--paper);
-  text-align: center;
-}
-#versus-win[hidden] { display: none; }
-.versus-win-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
-}
-.versus-win-score {
-  margin: 0;
-  font-family: var(--mono);
-  font-weight: 800;
-  font-size: clamp(40px, 9vw, 80px);
-  letter-spacing: 0.12em;
-  color: var(--red);
-}
-.versus-win-leave { justify-content: center; }
-
-
-/* Tournament lobby (Kahoot-style) ---------------------------------------- */
-.tourney-code-row { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 10px; }
-.tourney-code-label { font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--dim); }
-.tourney-code { font-size: clamp(34px, 7vw, 52px); letter-spacing: 0.22em; color: var(--red); font-weight: 700; }
-.tourney-share { display: flex; gap: 8px; width: min(420px, 100%); margin: 0 auto 6px; }
-.tourney-link {
-  flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid rgba(242, 239, 230, 0.2);
-  border-radius: 6px; background: rgba(242, 239, 230, 0.04); color: var(--paper);
-  font: inherit; font-size: 12px;
-}
-.tourney-copy {
-  appearance: none; border: 1px solid var(--red); border-radius: 6px; background: none;
-  color: var(--red); font: inherit; font-size: 12px; letter-spacing: 0.08em; padding: 9px 14px; cursor: pointer;
-}
-.tourney-copy:hover { background: rgba(226, 35, 26, 0.12); }
-.tourney-note { font-size: 11px; letter-spacing: 0.1em; color: var(--dim); line-height: 1.6; margin: 8px 0 0; }
-.tourney-roster { list-style: none; margin: 6px auto 12px; padding: 0; width: min(360px, 100%); text-align: left; }
-.tourney-roster-item {
-  display: flex; align-items: center; gap: 12px; padding: 7px 10px;
-  border-bottom: 1px solid rgba(242, 239, 230, 0.08); font-size: 15px; letter-spacing: 0.05em;
-}
-.tourney-roster-item.muted { color: var(--dim); justify-content: center; }
-.roster-idx { color: var(--red); font-size: 12px; min-width: 20px; }
-.tourney-roster-item .tourney-tag { margin-left: auto; }
-.tourney-lobby-actions { display: flex; flex-direction: column; gap: 4px; align-items: center; margin-top: 8px; }
-.tourney-join { display: flex; flex-direction: column; gap: 10px; align-items: center; margin-top: 10px; }
-#tourney-name {
-  width: min(280px, 90%); text-align: center; padding: 11px 12px; border: 1px solid rgba(242, 239, 230, 0.25);
-  border-radius: 6px; background: rgba(242, 239, 230, 0.04); color: var(--paper); font: inherit;
-  font-size: 16px; letter-spacing: 0.08em;
-}
-#tourney-name:focus { outline: none; border-color: var(--red); }
-
-
-/* Desktop controls legend (bottom, above the status bar) ------------------ */
-#controls-hint {
-  position: fixed;
-  left: 50%;
-  bottom: 46px;
-  transform: translateX(-50%);
-  z-index: 11;
-  display: flex;
-  gap: 18px;
-  padding: 6px 14px;
-  background: rgba(11, 11, 12, 0.72);
-  border: 1px solid rgba(242, 239, 230, 0.12);
-  border-radius: 8px;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--dim);
-  pointer-events: none;
-  white-space: nowrap;
-}
-#controls-hint b { color: var(--red); font-weight: 700; margin-right: 5px; }
-@media (max-width: 720px) { #controls-hint { display: none !important; } }
-
-
-
-/* Live-match HUD: during a rally the versus panel must NOT cover the 3D game.
-   Make it transparent, click-through, and shrink the scoreboard to a small bar
-   pinned at the top (clear of the centered 3-2-1 countdown). */
-#versus.versus--playing {
-  background: none;
-  pointer-events: none;
-  justify-content: flex-start;
-  padding: 14px;
-  overflow: visible;
-}
-#versus.versus--playing .versus-head,
-#versus.versus--playing .hint { display: none; }
-#versus.versus--playing .versus-scoreboard {
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 6px 18px;
-  width: auto;
-  padding: 8px 20px;
-  background: rgba(11, 11, 12, 0.72);
-  border: 1px solid rgba(242, 239, 230, 0.15);
-  border-radius: 12px;
-}
-#versus.versus--playing .vs-grid { gap: 14px; }
-#versus.versus--playing .vs-side { min-width: 52px; gap: 1px; }
-#versus.versus--playing .vs-name { font-size: 9px; letter-spacing: 0.16em; }
-#versus.versus--playing .vs-score { font-size: 34px; }
-#versus.versus--playing .vs-dash { font-size: 22px; }
-#versus.versus--playing .versus-status,
-#versus.versus--playing .versus-note { margin: 0; font-size: 10px; }

@@ -12,6 +12,11 @@ export class Game {
     this.streak = 0;
     this.bestStreak = 0;
     this.targetsHit = 0; // target-practice mode only
+    this.rally = 0; // exchanges in the rally currently in play
+    this.longestRally = 0;
+    this.lessonScore = 0; // last coached stroke, as a percentage
+    this.lessonBest = 0;
+    this.lessonAttempts = 0;
     this.lastEvent = 'Ready';
     this.revision = 0; // bumped whenever a displayed value changes
   }
@@ -32,81 +37,67 @@ export class Game {
   }
 
   // Called for every physics contact.
+  // Touching the ball is not the same as putting it back on the table, so a
+  // hit only opens the question — the shot stays unresolved until it either
+  // lands on the far half or doesn't. The streak counts good returns, and
+  // breaks the moment one goes astray.
   onContact(ball, event) {
     if (event === 'paddle') {
-      // No-volley (games only): you must let the ball bounce on your half
-      // before hitting it. Target-practice feeds (isFeed) are a toss you drive
-      // on the full, so they're exempt.
-      if (!ball.isFeed && !ball.everBouncedPlayerHalf && !ball.countedMiss && !ball.countedHit) {
-        ball.countedMiss = true;
-        this.misses++;
-        this.streak = 0;
-        this._changed('No volley — let it bounce');
-        return;
-      }
-      // A return resets the double-bounce counter: the "second bounce" rule
-      // only fires when the player *failed* to put a paddle on it in between.
-      ball.playerHalfBouncesSincePaddle = 0;
       if (ball.countedHit) return;
       ball.countedHit = true;
+      ball.awaitingOutcome = true; // resolved on the next bounce
       this.hits++;
-      this.streak++;
-      this.bestStreak = Math.max(this.bestStreak, this.streak);
       this._changed('Hit');
       return;
     }
 
-    if (event === 'table') {
-      const onPlayerHalf = ball.mesh.position.z > 0;
-      if (onPlayerHalf) {
-        // This is a legal receiving bounce, so the feed can no longer be
-        // written off as a dead feed. Track how many have landed since the
-        // last paddle touch to enforce the double-bounce rule.
-        ball.everBouncedPlayerHalf = true;
-        ball.playerHalfBouncesSincePaddle++;
-
-        if (
-          ball.playerHalfBouncesSincePaddle >= 2 &&
-          !ball.countedMiss &&
-          !ball.countedHit
-        ) {
-          // Second bounce on the player's half with no return between them:
-          // the point is lost. main.js recycles the ball and runs the 3-2-1.
-          ball.countedMiss = true;
-          this.misses++;
-          this.streak = 0;
-          this._changed('Double bounce');
-        }
-        return;
-      }
-
-      // A bounce on the far half after the player struck it is a good return.
-      if (ball.touchedByPaddle && !ball.countedReturn) {
+    if (event === 'table' && ball.awaitingOutcome) {
+      ball.awaitingOutcome = false;
+      if (ball.mesh.position.z < 0) {
+        // Over the net and down on their side: a good return.
         ball.countedReturn = true;
         this.returns++;
+        this.streak++;
+        this.bestStreak = Math.max(this.bestStreak, this.streak);
         this._changed('On the table');
+      } else {
+        // Came down on your own half — it never crossed.
+        this.streak = 0;
+        this._changed('Not over');
       }
       return;
     }
 
-    // Reaching the floor untouched is a miss, whichever mode we're in. This
-    // catches balls that drop short as well as ones that fly past — the
-    // fly-past check in update() alone would never fire on a dropped feed.
-    // Exception: a ball that never made a legal bounce on the player's half
-    // is a dead feed (the machine sent it off the table), not a player miss,
-    // so it leaves the streak untouched and main.js recycles it silently.
-    if (
-      event === 'floor' &&
-      !ball.touchedByPaddle &&
-      !ball.countedMiss &&
-      !ball.countedHit
-    ) {
-      if (!ball.everBouncedPlayerHalf) return; // dead feed — not the player's fault
-      ball.countedMiss = true;
-      this.misses++;
-      this.streak = 0;
-      this._changed('Missed');
+    if (event === 'floor') {
+      // A struck ball that reaches the floor without having landed on the
+      // far half went long, wide, or into the net. Either way the streak is
+      // over; it is not a miss, because you did make contact.
+      if (ball.awaitingOutcome) {
+        ball.awaitingOutcome = false;
+        this.streak = 0;
+        this._changed('Off the table');
+        return;
+      }
+
+      // Reaching the floor untouched is a miss, whichever mode we're in.
+      // This catches balls that drop short as well as ones that fly past —
+      // the fly-past check in update() alone would never fire on a feed
+      // that was simply left.
+      if (!ball.touchedByPaddle && !ball.countedMiss && !ball.countedHit) {
+        ball.countedMiss = true;
+        this.misses++;
+        this.streak = 0;
+        this._changed('Missed');
+      }
     }
+  }
+
+  // A coached stroke has been traced and graded.
+  onLessonScore(score) {
+    this.lessonScore = score.total;
+    this.lessonBest = Math.max(this.lessonBest, score.total);
+    this.lessonAttempts++;
+    this._changed(`${score.total}% ${score.note}`);
   }
 
   onTargetHit() {
@@ -114,14 +105,24 @@ export class Game {
     this._changed('Target hit!');
   }
 
+  // One exchange: you hit it, the opponent got it back.
+  onRallyExchange() {
+    this.rally++;
+    this.longestRally = Math.max(this.longestRally, this.rally);
+    this._changed(`Rally ${this.rally}`);
+  }
+
+  endRally(reason) {
+    if (this.rally === 0) return;
+    this.rally = 0;
+    this._changed(reason);
+  }
+
   // Called once per frame so balls that sail past unhit register as misses.
   update(balls) {
     for (const ball of balls) {
       if (!ball.active || ball.countedMiss || ball.countedHit) continue;
       if (ball.mesh.position.z > PLAY_AREA.PLAYER_Z + 0.5) {
-        // A ball that sailed straight past without ever bouncing on the
-        // player's half is a dead feed, not a miss — don't punish the streak.
-        if (!ball.everBouncedPlayerHalf) continue;
         ball.countedMiss = true;
         this.misses++;
         this.streak = 0;
@@ -138,6 +139,11 @@ export class Game {
     this.streak = 0;
     this.bestStreak = 0;
     this.targetsHit = 0;
+    this.rally = 0;
+    this.longestRally = 0;
+    this.lessonScore = 0;
+    this.lessonBest = 0;
+    this.lessonAttempts = 0;
     this._changed('Reset');
   }
 }

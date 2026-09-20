@@ -6,30 +6,31 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createTable } from './table.js';
 import { XRManager } from './xr.js';
 import { UI } from './ui.js';
-import { Settings, OPTIONS } from './settings.js';
+import { Settings } from './settings.js';
 import { Sfx } from './audio.js';
 import { VRMenu } from './vrMenu.js';
 import { Paddle } from './paddle.js';
 import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
-import { BallMachine, MODES } from './ballMachine.js';
-import { Game } from './game.js';
+import { BallMachine } from './ballMachine.js';
+import { Game, SCOREBOARD_POSITION } from './game.js';
 import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
-import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
+import { HandPaddleRig } from './handPaddle.js';
+import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
+import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
+import { Opponent } from './opponent.js';
+import { Coach, SCENARIOS } from './coach.js';
 import {
   createRoom,
   makeRoomCode,
   roomLinkFor,
   roomFromUrl,
   clearRoomFromUrl,
-  tourneyLinkFor,
-  tourneyFromUrl,
-  clearTourneyFromUrl,
   isRealtimeAvailable,
 } from './net.js';
-import { VersusMatch, VERSUS_TARGET } from './versus.js';
-import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
+import { VersusMatch } from './versus.js';
+import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
 const DEAD_BALL_LINGER = 1.5; // seconds a dead ball stays visible before recycling
@@ -115,6 +116,40 @@ const machine = new BallMachine(balls, settings);
 machine.enabled = false; // stays idle behind the start menu until a mode is picked
 scene.add(machine.mesh);
 
+// Puts the table in front of you, wherever you happen to be standing and
+// whichever way you are facing.
+//
+// The floor-level origin a headset hands back is wherever the guardian was
+// drawn, which is rarely where you want to stand to play. Rather than ask
+// the player to walk to the right spot, move the world: rotate the rig so
+// the head faces down the table, then slide it so the head lands at the
+// player's end.
+const UP = new THREE.Vector3(0, 1, 0);
+const _headLocal = new THREE.Vector3();
+const _headEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+function recenter() {
+  // Head pose relative to the rig is exactly what the headset reports
+  _headEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+  playerRig.rotation.y = -_headEuler.y;
+
+  _headLocal.copy(camera.position).applyAxisAngle(UP, playerRig.rotation.y);
+  playerRig.position.set(
+    -_headLocal.x,
+    0,
+    PLAY_AREA.PLAYER_Z - _headLocal.z
+  );
+  playerRig.updateMatrixWorld(true);
+  ui.toast('Table recentred');
+}
+
+// Sweep every ball back into the pool. Without this, balls still in flight
+// when you quit stay airborne behind the menu and are still hanging there
+// when the next session starts.
+function clearBalls() {
+  for (const ball of balls) ball.deactivate();
+}
+
 const game = new Game();
 const scoreboard = new Scoreboard(game, machine);
 scene.add(scoreboard.mesh);
@@ -138,6 +173,38 @@ scene.add(targetRing);
 const targetZone = new TargetZone();
 scene.add(targetZone.mesh);
 
+// Rally opponent. Its bat is an ordinary Paddle handed to the physics
+// alongside yours, so its returns come out of the same contact model —
+// real spin, real restitution, and a net cord behaves like a net cord.
+const opponent = new Opponent();
+scene.add(opponent.mesh);
+machine.server = opponent; // in rally mode the opponent puts the ball in play
+
+// Coach mode: a lesson is a path the bat should travel, shown as a ribbon
+// and scored on how closely you trace it.
+const coach = new Coach({
+  sfx,
+  onScore: (score) => {
+    game.onLessonScore(score);
+    ui.toast(`${score.total}% · ${coach.advice}`);
+  },
+});
+scene.add(coach.group);
+scoreboard.coach = coach; // the board shows the lesson's guidance line
+
+// Picking a scenario off the in-world board is the same action as picking
+// it in the menu, so the setting follows along.
+coach.onScenarioPicked = (scenario) => {
+  settings.set('scenario', scenario.id);
+  ui.toast(scenario.name);
+  game.revision++;
+};
+
+// The bottom bar names the running scenario without needing the coach
+Object.defineProperty(machine, 'coachName', {
+  get: () => coach.scenario.name,
+});
+
 // AR: transparent background, no virtual floor, dimmer fill so the real room
 // carries the lighting. VR: full venue.
 function applyMode(mode) {
@@ -149,37 +216,13 @@ function applyMode(mode) {
 }
 
 const xr = new XRManager(renderer);
-xr.onModeChange = applyMode;
-
-// Background choices offered by the setup wizard. Mutating VR_BACKGROUND keeps
-// applyMode() (which reuses it) in sync.
-const BACKGROUNDS = { arena: 0x0a0a0b, sunset: 0x2a1420, neon: 0x06131f, void: 0x000000 };
-function applyBackground(name) {
-  VR_BACKGROUND.setHex(BACKGROUNDS[name] ?? BACKGROUNDS.arena);
-  if (!renderer.xr.isPresenting) scene.background = VR_BACKGROUND;
-}
-
-// 3-2-1 gate: the machine stays idle until the countdown finishes.
-let launchCountdown = 0;
-function startLaunchCountdown() {
-  launchCountdown = 3;
-  ui.showCountdown(3);
-}
-
-// Single-player is point-based: exactly one ball is in play at a time. This
-// holds the ball the current point is being played with; the per-frame loop
-// watches it, and when the point resolves (miss / double bounce / dead feed /
-// a return that settles) it runs the 3-2-1 before the machine feeds again.
-let pointBall = null;
-function endPoint() {
-  if (netMode !== null) return; // versus/tournament run their own scoring
-  if (machine.isTargetMode) return; // drills feed continuously — no per-point 3-2-1
-  if (launchCountdown > 0) return; // a countdown is already queuing the next feed
-  machine.enabled = false; // hold the machine through the countdown
-  if (pointBall && pointBall.active) pointBall.deactivate();
-  pointBall = null;
-  startLaunchCountdown();
-}
+xr.onModeChange = (mode) => {
+  applyMode(mode);
+  // A session can end without warning — headset removed, system menu, battery.
+  // Close the in-world pause menu so it isn't still hanging there, open and
+  // holding input, the next time a session starts.
+  if (!mode) vrMenu.toggle(false);
+};
 
 const ui = new UI({
   xr,
@@ -187,117 +230,93 @@ const ui = new UI({
   game,
   settings,
   sfx,
-  // `choice` = { mode, input, background, xrMode } from the setup wizard.
-  onStart: (choice = {}) => {
-    const { mode = 'bot', input = 'mouse', background = 'arena', botSettings } = choice;
-    applyBackground(background);
-    // Beta endpoints still fall back to a local experience, with a clear note.
-    if (mode === 'friend') ui.toast('Online play is in beta — playing the bot');
-    else if (mode === 'tournament') ui.toast('Tournaments are in beta — playing the bot');
-    else if (input === 'phone') ui.toast('Phone control is coming — using the mouse');
-    // Webcam paddle is a real input now: start the tracker for it, stop it for
-    // any other input so the pointer takes back over.
-    if (input === 'paddle') startCamPaddle();
-    else stopCamPaddle();
-
-    // Play a Bot: a real 1v1 rally against the AI "fly brain" — no ball
-    // machine. The host loop drives the opponent paddle and scoring.
-    if (mode === 'bot' || mode === 'friend' || mode === 'tournament') {
-      startBotGame();
-      return;
-    }
-
-    // Drills: the ball machine feeds CONTINUOUSLY. The wizard's settings step
-    // maps pace/feed/placement onto their Settings multipliers and the shot
-    // type onto a machine mode, defaulting to target practice.
-    machine.modeIndex = MODES.findIndex((m) => m.type === 'target');
-    if (botSettings) {
-      const applyOpt = (key) => {
-        const opt = OPTIONS[key]?.find((o) => o.label === botSettings[key]);
-        if (opt) settings.set(key, opt.value);
-      };
-      applyOpt('pace');
-      applyOpt('feedRate');
-      applyOpt('placement');
-      const shotIndex = MODES.findIndex((m) => m.name === botSettings.modeName);
-      if (shotIndex >= 0) machine.modeIndex = shotIndex;
-    }
+  // `mode` is an XR session mode, or null for the on-screen preview. The
+  // desktop build being developed separately hooks in here.
+  onStart: () => {
+    clearBalls();
+    // A versus match is served by the host over the network, so the ball
+    // machine stays down for it.
+    machine.enabled = settings.get('game') !== 'versus';
     game.reset();
-    game.revision++;
-    pointBall = null;
-    balls.forEach((b) => b.deactivate());
-    // No 3-2-1, no point-based hold: the machine keeps feeding until reset.
-    ui.hideCountdown();
-    machine.enabled = true;
+    // The camera only opens once you are actually playing, not while the
+    // setting sits there remembered from last time.
+    if (usingWebcamBat()) startWebcamBat();
   },
   onExit: () => {
-    stopCamPaddle();
     machine.enabled = false;
-    launchCountdown = 0;
-    pointBall = null;
-    ui.hideCountdown();
+    leaveVersus();
+    clearBalls();
+    stopWebcamBat();
   },
-  // Online versus lobby hooks. The lobby UI (built separately) calls these to
-  // create/join/leave a networked 1v1; the game logic lives in enterVersus /
-  // leaveVersus below. Both are hoisted function declarations, so referencing
-  // them here before their definition is safe.
+  isInputBlocked: () => vrMenu.open,
+  onRecenter: () => recenter(),
+
+  // Online versus. The lobby in the shell calls these; everything about how
+  // the match actually runs lives in enterVersus / leaveVersus below. Both
+  // are hoisted function declarations, so naming them here is safe.
   onVersusCreate: async () => {
     const code = makeRoomCode();
-    await enterVersus('host', code);
-    return {
-      role: 'host',
-      code,
-      link: roomLinkFor(code),
-      kind: isRealtimeAvailable() ? 'supabase' : 'local',
-    };
+    const room = await enterVersus('host', code);
+    // Prefer a LAN address the other device can actually open — `localhost`
+    // means nothing to a headset across the room.
+    const origin = room?.lanUrls?.[0] || window.location.origin;
+    return { role: 'host', code, link: roomLinkFor(code, origin), kind: room.kind };
   },
   onVersusJoin: async (code) => {
-    await enterVersus('guest', code);
+    const room = await enterVersus('guest', code.trim().toUpperCase());
+    return { role: 'guest', code, kind: room.kind };
   },
-  onVersusLeave: () => {
-    leaveVersus();
-  },
-  // Tournament lobby transport. main is a dumb pipe: it opens/joins a room and
-  // forwards every message + presence event to the UI, which owns the roster
-  // and bracket. Channel is namespaced ('T'+code) so it can't collide with a
-  // 1v1 versus room of the same code.
-  onTourneyCreate: async () => {
-    const code = makeRoomCode();
-    tourneyRoom = createRoom({ code: `T${code}`, role: 'host' });
-    wireTourneyRoom(tourneyRoom);
-    await tourneyRoom.connect();
-    return { code, link: tourneyLinkFor(code), kind: isRealtimeAvailable() ? 'supabase' : 'local' };
-  },
-  onTourneyJoin: async (code) => {
-    tourneyRoom = createRoom({ code: `T${code}`, role: `guest-${Math.random().toString(36).slice(2, 8)}` });
-    wireTourneyRoom(tourneyRoom);
-    await tourneyRoom.connect();
-    return { code };
-  },
-  onTourneySend: (type, data) => tourneyRoom?.send(type, data),
-  onTourneyLeave: () => {
-    tourneyRoom?.close();
-    tourneyRoom = null;
-    clearTourneyFromUrl();
-  },
+  onVersusLeave: () => leaveVersus(),
+  // What the run was worth, read at the moment you quit. Versus is scored on
+  // what you took off a real opponent; the other two on the trainer's stats.
+  onRunSummary: () => ({
+    hits: game.hits,
+    misses: game.misses,
+    returns: game.returns,
+    bestStreak: game.bestStreak,
+    longestRally: game.longestRally,
+    targetsHit: game.targetsHit,
+    accuracy: game.accuracy,
+    lessonBest: game.lessonBest,
+    lessonAttempts: game.lessonAttempts,
+    pointsWon: netMode === 'guest' ? match.scoreGuest : match.scoreHost,
+    matchWon: Boolean(netMode) && match.winner === netMode,
+  }),
+  // A link with ?room=CODE means someone invited you: the lobby opens on the
+  // join step with the code already filled in.
+  invitedRoom: roomFromUrl(),
+  realtimeAvailable: isRealtimeAvailable(),
 });
 
 xr.detectSupport().then((support) => ui.applyXRSupport(support));
 
 // --- Physics ----------------------------------------------------------------
 const physics = new PhysicsWorld();
-physics.onBounce = (ball, event) => {
-  // Online versus takes over scoring entirely. The host resolves floor
-  // bounces into points (handleVersusHostBounce); the guest renders only
-  // host-authoritative state, so it ignores its local physics contacts.
-  if (netMode === 'host') {
-    handleVersusHostBounce(ball, event);
+physics.onBounce = (ball, event, paddle) => {
+  sfx.contact(event, ball.velocity.length());
+
+  // Online versus scores itself. The host resolves floor bounces into points;
+  // the guest never simulates the match ball at all, so it has no contacts of
+  // its own to interpret.
+  if (netMode) {
+    if (netMode === 'host') handleVersusHostBounce(ball, event);
     return;
   }
-  if (netMode === 'guest') return;
+
+  // The coach's live drills report where your return actually went, so it
+  // needs to see what happens to the ball it served.
+  coach.onBallEvent(ball, event, paddle);
+
+  // The opponent's returns arrive through the same contact path as yours,
+  // so they have to be told apart: one is an exchange in the rally, the
+  // other is a hit on your scorecard.
+  if (event === 'paddle' && paddle?.isOpponent) {
+    game.onRallyExchange();
+    opponent.onHit();
+    return;
+  }
 
   game.onContact(ball, event);
-  sfx.contact(event, ball.velocity.length());
 
   if (event === 'paddle') {
     pulse(ball);
@@ -319,31 +338,14 @@ physics.onBounce = (ball, event) => {
     sfx.targetHit();
   }
 
-  // Double bounce: a second landing on the player's half with no return in
-  // between loses the point (game.onContact has already logged the miss).
-  // Recycle the ball at once so the per-frame watcher runs the 3-2-1.
-  if (
-    event === 'table' &&
-    ball === pointBall &&
-    !ball.touchedByPaddle &&
-    ball.playerHalfBouncesSincePaddle >= 2
-  ) {
-    ball.deactivate();
-    return;
-  }
-
   // Floor contact means the rally is over for this ball; start a countdown
   // that returns it to the pool. Timed in simulation seconds rather than via
   // setTimeout so it can't drift when the browser throttles the frame loop.
   if (event === 'floor' && ball.retireIn === null) {
-    // Dead feed: the machine launched a ball that never made a legal bounce on
-    // the player's half (and the player never touched it). That's the
-    // machine's fault, not a miss — recycle it silently and immediately, no
-    // lingering, so the next point's 3-2-1 starts right away.
-    if (ball === pointBall && !ball.touchedByPaddle && !ball.everBouncedPlayerHalf) {
-      ball.deactivate();
-    } else {
-      ball.retireIn = DEAD_BALL_LINGER;
+    ball.retireIn = DEAD_BALL_LINGER;
+    // A ball on the floor ends the rally, whoever put it there.
+    if (machine.isRallyMode) {
+      game.endRally(ball.touchedByPaddle ? 'Rally over' : 'Missed');
     }
   }
 };
@@ -361,6 +363,8 @@ const rayGeometry = new THREE.BufferGeometry().setFromPoints([
 ]);
 
 const controllerModels = [];
+const handRigs = [];
+const paddleSources = [];
 
 for (const i of [0, 1]) {
   // Grip space is the controller's physical pose, so a mesh parented here
@@ -375,6 +379,29 @@ for (const i of [0, 1]) {
   const paddle = new Paddle();
   paddle.attachTo(grip);
   paddles.push(paddle);
+
+  // Hand tracking, so the bat can follow your actual hand holding a real
+  // paddle instead of a controller. The hand space is a sibling of the grip;
+  // the router below decides which one the mesh hangs off each frame.
+  const hand = renderer.xr.getHand(i);
+  playerRig.add(hand);
+  const handRig = new HandPaddleRig(hand, i === 0 ? 'right' : 'left');
+  playerRig.add(handRig.group);
+  handRigs.push(handRig);
+
+  // Parent for poses fed in from outside the page — a camera-based tracker
+  // running elsewhere. Nothing writes to it until such a feed connects.
+  const externalRoot = new THREE.Group();
+  playerRig.add(externalRoot);
+
+  paddleSources.push(
+    new PaddleSourceRouter({
+      paddle,
+      controllerGrip: grip,
+      handRig,
+      externalRoot,
+    })
+  );
 
   const controller = renderer.xr.getController(i);
   controller.addEventListener('connected', (e) => {
@@ -415,95 +442,310 @@ for (const i of [0, 1]) {
   playerRig.add(controller);
 }
 
-// --- Desktop mouse paddle ---------------------------------------------------
-// XR gives a paddle only when a headset is attached to a grip. On desktop the
-// player drives a vertical paddle over the near half of the table with the
-// mouse. The rig is parented under playerRig (world Z = PLAYER_Z), so pointer
-// coordinates map to a small volume in front of the player, above the table.
-// The pose is written straight from the pointer event with no smoothing, so
-// the blade stays under the cursor; Paddle.update() then derives swing
-// velocity/spin from the rig's motion between frames, exactly like a grip.
-const mousePaddleRig = new THREE.Group();
-playerRig.add(mousePaddleRig);
-const mousePaddle = new Paddle({ vertical: true });
-mousePaddle.attachTo(mousePaddleRig);
+// --- Desktop bat ------------------------------------------------------------
+// A headset gives you a bat because there is a tracked hand to hang it on. On
+// a screen there is nothing to hang it on, so the pointer drives a rig parented
+// under playerRig: mouse X/Y place the blade in a small volume over the near
+// half of the table, the wheel (or a click, or F) moves it in depth.
+//
+// The pose is written straight from the event with no smoothing of our own, and
+// depth is eased toward a target rather than snapped, so Paddle.update() derives
+// a real swing velocity from the motion between frames — exactly as it does
+// from a grip. A thrust therefore carries momentum into the ball instead of
+// teleporting through it.
+//
+// This is what lets someone at a laptop play a match against someone in a
+// headset; it also means the desktop preview can rally rather than just watch.
+const desktopRig = new THREE.Group();
+playerRig.add(desktopRig);
+const desktopPaddle = new Paddle();
+desktopPaddle.attachTo(desktopRig);
+desktopPaddle.enabled = false; // switched on below whenever we're not in XR
+desktopPaddle.mesh.visible = false;
+paddles.push(desktopPaddle);
 
-// Webcam paddle (ported from main): an HSV colour tracker follows a real
-// paddle and drives the mouse rig. Opt-in via the "A Ping Pong Paddle" menu
-// choice; the pointer is suspended while it's active and takes back over
-// whenever the tracker isn't actually TRACKING.
-let camTracker = null;
-let useCamPaddle = false;
-function startCamPaddle() {
-  if (useCamPaddle) return;
-  useCamPaddle = true;
-  camTracker = new PaddleTracker();
-  camTracker.onState = (state, err) => {
-    if (state === TRACKER_STATE.ERROR) ui.toast?.(err || 'Camera unavailable — using mouse');
-    else if (state === TRACKER_STATE.TRACKING) ui.toast?.('Paddle cam live — move your bat');
-    else if (state === TRACKER_STATE.CALIBRATING) ui.toast?.('Hold your paddle up to calibrate…');
-  };
-  camTracker.start().catch((e) => { ui.toast?.(e?.message || 'Camera failed — using mouse'); stopCamPaddle(); });
+const DESKTOP_REST_Z = -0.72; // blade's resting depth, a little in front of you
+const DESKTOP_THRUST_Z = -1.18; // how far forward a swing reaches
+const DESKTOP_THRUST_TIME = 0.14; // seconds held forward before it returns
+
+let desktopDepthTarget = DESKTOP_REST_Z;
+let desktopThrust = 0;
+
+// Where the player is asking the *blade* to be, in rig space. Kept separate
+// from the rig's own position because the blade sits up and back from the
+// paddle's origin, on the end of a handle: put the rig under the cursor and
+// the blade ends up ten-odd centimetres away, which against an 85 mm blade is
+// the difference between playing the ball and missing everything. The rig
+// position is derived from this each frame — never nudged, or the offset
+// would be subtracted again on every mouse move and the bat would walk off
+// down the table.
+const desktopAim = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
+const _bladeOffset = new THREE.Vector3();
+
+function placeDesktopBat(clientX, clientY) {
+  if (renderer.xr.isPresenting) return; // controllers own the bats in a session
+  const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
+  const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
+  desktopAim.x = (x - 0.5) * 1.25;
+  // Never below the surface, never above about head height.
+  desktopAim.y = Math.max(TABLE.HEIGHT + 0.03, 0.95 + (0.5 - y) * 0.7);
+  desktopYaw = (x - 0.5) * 0.5;
+  poseDesktopBat();
 }
-function stopCamPaddle() {
-  useCamPaddle = false;
+
+// A bat's face is perpendicular to the forearm, so the blade points along the
+// rig's +X, not down its -Z: a quarter turn is what squares it to the table.
+// (Half a turn leaves it edge-on, which passes straight through the ball and
+// is very hard to see.) Horizontal position adds a little steer on top, the
+// way turning your wrist aims a real return.
+let desktopYaw = 0;
+
+function poseDesktopBat() {
+  desktopRig.rotation.set(0, Math.PI / 2 + desktopYaw, 0);
+  desktopRig.quaternion.setFromEuler(desktopRig.rotation);
+  _bladeOffset
+    .copy(desktopPaddle.mesh.getObjectByName('blade').position)
+    .applyQuaternion(desktopRig.quaternion);
+  desktopRig.position.copy(desktopAim).sub(_bladeOffset);
+}
+
+function swingDesktopBat() {
+  if (renderer.xr.isPresenting) return;
+  desktopThrust = DESKTOP_THRUST_TIME;
+}
+
+// --- Webcam bat -------------------------------------------------------------
+// The flat-screen counterpart to hand tracking: a webcam watches your actual
+// paddle and drives the on-screen one, so a laptop player swings a real bat
+// rather than pushing a mouse. The tracker finds the rubber by colour and
+// reads pose off the blob's ellipse — see vision/paddleTracker.js.
+//
+// It feeds the same rig the pointer drives, so everything downstream (swing
+// velocity, spin, versus packets) is identical either way; only where the pose
+// comes from changes.
+let camTracker = null;
+const _camQuat = new THREE.Quaternion();
+const _camBase = new THREE.Quaternion();
+const _camPos = new THREE.Vector3();
+
+function usingWebcamBat() {
+  return settings.get('paddleSource') === PADDLE_SOURCE.CAMERA;
+}
+
+function startWebcamBat() {
+  if (camTracker) return;
+  camTracker = new PaddleTracker();
+  camTracker.onState = (state, error) => {
+    if (state === TRACKER_STATE.ERROR) ui.toast(error ?? 'Camera unavailable');
+    else if (state === TRACKER_STATE.CALIBRATING) {
+      ui.toast('Hold your bat up, face on — then click to calibrate');
+    } else if (state === TRACKER_STATE.TRACKING) ui.toast('Webcam bat live');
+    else if (state === TRACKER_STATE.LOST) ui.toast('Lost the bat — hold it up again');
+  };
+  camTracker.start().catch((err) => {
+    ui.toast(err?.message ?? 'Camera failed');
+    stopWebcamBat();
+  });
+}
+
+function stopWebcamBat() {
   camTracker?.stop();
   camTracker = null;
 }
-paddles.push(mousePaddle);
+
+// Pose the rig from the tracker. Camera space is +X right, +Y up, −Z away
+// from the viewer, with the origin at the lens; the desktop camera sits at eye
+// height on the rig, so the shift is a single offset. Depth and height are
+// clamped to the volume the bat can usefully be in, because a lost frame or a
+// red shirt in the background would otherwise throw it across the room.
+function poseWebcamBat() {
+  _camPos.copy(camTracker.position);
+  _camPos.y = THREE.MathUtils.clamp(_camPos.y + 1.62, TABLE.HEIGHT + 0.03, 1.6);
+  _camPos.x = THREE.MathUtils.clamp(_camPos.x, -0.8, 0.8);
+  _camPos.z = THREE.MathUtils.clamp(_camPos.z, -1.35, -0.2);
+
+  // The tracker reports how the real bat is tilted; the quarter turn that
+  // squares a blade to the table is ours to add.
+  _camBase.setFromAxisAngle(UP, Math.PI / 2);
+  _camQuat.copy(camTracker.quaternion).multiply(_camBase);
+  desktopRig.quaternion.copy(_camQuat);
+  _bladeOffset
+    .copy(desktopPaddle.mesh.getObjectByName('blade').position)
+    .applyQuaternion(_camQuat);
+  desktopRig.position.copy(_camPos).sub(_bladeOffset);
+}
+
+placeDesktopBat(window.innerWidth / 2, window.innerHeight * 0.55);
+
+window.addEventListener('pointermove', (e) => placeDesktopBat(e.clientX, e.clientY), {
+  passive: true,
+});
+window.addEventListener('pointerdown', (e) => {
+  if (!ui.menu.hidden) return; // the menu owns its own clicks
+  // The webcam tracker has to be shown the bat's colour once. Any click while
+  // it is waiting is that gesture, so there is no separate key to learn.
+  if (camTracker?.state === TRACKER_STATE.CALIBRATING) {
+    if (!camTracker.calibrateColour()) ui.toast('Nothing bright enough — try better light');
+    return;
+  }
+  placeDesktopBat(e.clientX, e.clientY);
+  swingDesktopBat();
+});
+window.addEventListener(
+  'wheel',
+  (e) => {
+    if (renderer.xr.isPresenting || !ui.menu.hidden) return;
+    desktopDepthTarget = THREE.MathUtils.clamp(
+      desktopDepthTarget - Math.sign(e.deltaY) * 0.08,
+      -1.3,
+      -0.2
+    );
+  },
+  { passive: true }
+);
+
+// Keyboard alternative, for playing without a mouse. UI owns the single
+// keydown listener for commands; these are movement, so they live here.
+const DESKTOP_KEYS = { ArrowLeft: 0, ArrowRight: 0, ArrowUp: 0, ArrowDown: 0, KeyF: 0 };
+window.addEventListener('keydown', (e) => {
+  if (!(e.code in DESKTOP_KEYS)) return;
+  if (!ui.menu.hidden) return;
+  DESKTOP_KEYS[e.code] = 1;
+  if (e.code === 'KeyF') swingDesktopBat();
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code in DESKTOP_KEYS) DESKTOP_KEYS[e.code] = 0;
+});
+
+function updateDesktopBat(dt) {
+  const inXR = renderer.xr.isPresenting;
+  desktopPaddle.enabled = !inXR;
+  desktopPaddle.mesh.visible = !inXR;
+
+  // Outside a session the controller bats are attached to grips that sit at
+  // the rig origin — on the floor, at the player's feet. They report that pose
+  // perfectly well, so physics treats them as live bats and they swat balls
+  // nobody can see. Stand them down until a session actually poses them.
+  for (const paddle of paddles) {
+    if (paddle === desktopPaddle) continue;
+    paddle.enabled = inXR && (paddle.handHolds ?? true);
+    paddle.mesh.visible = paddle.enabled;
+  }
+
+  if (inXR) return;
+
+  // A webcam bat, once it has locked on, owns the rig outright: the pose is
+  // the real bat's. Until it locks on — or if it loses the bat — the pointer
+  // stays in charge, so you are never left with nothing to play with.
+  if (usingWebcamBat() && camTracker?.state === TRACKER_STATE.TRACKING) {
+    poseWebcamBat();
+    return;
+  }
+
+  // Held arrow keys slide the blade at a steady rate; the mouse overrides on
+  // its next move, which is what you'd expect from whichever you touched last.
+  const speed = 1.1; // m/s
+  const dx = (DESKTOP_KEYS.ArrowRight - DESKTOP_KEYS.ArrowLeft) * speed * dt;
+  const dy = (DESKTOP_KEYS.ArrowUp - DESKTOP_KEYS.ArrowDown) * speed * dt;
+  if (dx || dy) {
+    desktopAim.x = THREE.MathUtils.clamp(desktopAim.x + dx, -0.7, 0.7);
+    desktopAim.y = THREE.MathUtils.clamp(desktopAim.y + dy, TABLE.HEIGHT + 0.03, 1.45);
+    desktopYaw = (desktopAim.x / 1.25) * 0.5;
+  }
+
+  if (desktopThrust > 0) desktopThrust -= dt;
+  const target = desktopThrust > 0 ? DESKTOP_THRUST_Z : desktopDepthTarget;
+  // Eased rather than snapped, so Paddle.update() samples a sustained velocity
+  // and a thrust carries momentum into the ball.
+  desktopAim.z += (target - desktopAim.z) * Math.min(1, dt * 12);
+  poseDesktopBat();
+}
 
 // ---------------------------------------------------------------------------
-// Online versus (1v1). The host is authoritative for the ball and scoring;
-// each side drives its own paddle locally and syncs it to the other as blade
-// center/normal/velocity. When netMode is null everything below is dormant and
-// the single-player trainer (bot/drills/countdown/mouse paddle) is unchanged.
+// Online versus (1v1)
+//
+// One side is authoritative. The host simulates the ball with the same physics
+// the trainer uses and streams its position; the guest renders that and streams
+// only its own bat. That asymmetry is what keeps the two views agreeing: there
+// is exactly one simulation, so there is nothing to reconcile.
+//
+// Each player swings locally with no round trip, which is the part that has to
+// feel immediate. The cost is that the host's bat is authoritative over
+// contact, so a guest's return is resolved against a bat pose that is up to one
+// network tick old — acceptable at 30 Hz over a LAN, and far better than
+// waiting on an ack before the ball moves.
+//
+// While netMode is null every line below is dormant and the trainer behaves
+// exactly as it did before.
 // ---------------------------------------------------------------------------
 let netMode = null; // null | 'host' | 'guest'
-let room = null; // active net room handle
-// Local bot match (tournament): reuses the host loop with no network room.
-// When vsBot is true, runVersusHost drives an AI opponent paddle and the
-// match winner is resolved through endBotMatch instead of the win overlay.
-let vsBot = false;
-let botOpponentName = '';
+let room = null; // active room handle
 const match = new VersusMatch();
-let versusBall = null; // current rally ball (host authoritative)
-let versusServeTimer = 0; // countdown before the next serve (host)
-let netSendAccum = 0; // throttle for outbound network state
+let versusBall = null; // the rally ball (host authoritative)
+let versusServeTimer = 0; // countdown before the host's next serve
+let netSendAccum = 0; // throttle for outbound state
 let guestBallActive = false;
-const NET_TICK = 1 / 30; // ~30 Hz network send rate
+
+const NET_TICK = 1 / 30; // 30 Hz, which is plenty for a ball and one bat
 const VERSUS_SERVE_SECONDS = 3;
+
 const guestBallTarget = new THREE.Vector3();
 const _versusQuat = new THREE.Quaternion();
 const _versusFwd = new THREE.Vector3(0, 0, 1);
 
-// Opponent paddle: driven entirely by network packets, so it skips the local
-// input update path (see the tick paddle loop) and is flagged `networked`.
-const remoteAnchor = new THREE.Group();
-scene.add(remoteAnchor);
-const remotePaddle = new Paddle({ vertical: true });
-remotePaddle.attachTo(remoteAnchor);
+// The opponent's bat, driven entirely by network packets. It is handed to
+// physics like any other paddle, so their shots come out of the same contact
+// model as yours — real spin, real restitution.
+const remotePaddle = new Paddle();
+scene.add(remotePaddle.mesh);
 remotePaddle.enabled = false;
 remotePaddle.networked = true;
-paddles.push(remotePaddle);
+remotePaddle.mesh.visible = false; // nothing to show until a packet arrives
 
-function bladePacket(paddle) {
+// Which bat this player is actually swinging — the one whose pose gets sent.
+//
+// Outside a session that is the pointer-driven bat. The controller bats are
+// still "tracking" on a desktop, because they faithfully report the pose of a
+// grip that is sitting at the rig origin, so picking the first tracked paddle
+// would stream a bat parked at the player's feet.
+function getLocalVersusPaddle() {
+  if (!renderer.xr.isPresenting) return desktopPaddle;
+  return (
+    paddles.find(
+      (paddle) => paddle !== desktopPaddle && paddle.enabled && paddle.tracking
+    ) ?? paddles[0]
+  );
+}
+
+function bladePacket(paddle = getLocalVersusPaddle()) {
   return {
     c: [paddle.bladeCenter.x, paddle.bladeCenter.y, paddle.bladeCenter.z],
     n: [paddle.bladeNormal.x, paddle.bladeNormal.y, paddle.bladeNormal.z],
     v: [paddle.velocity.x, paddle.velocity.y, paddle.velocity.z],
+    // Whether the sender's bat is actually being tracked. Someone watching
+    // from a desktop browser has a paddle object but no pose for it, and
+    // without this flag it would arrive as a phantom bat parked at the origin
+    // — which is on the table, swatting balls its owner can't see.
+    t: paddle.tracking,
   };
 }
 
 function applyRemotePaddle(pkt) {
   if (!pkt) return;
-  remotePaddle.enabled = true;
-  // The networked paddle never runs Paddle.update(), so mark it as tracking
-  // here — otherwise the swept paddle test in physics skips it and the
-  // opponent could never return a ball.
-  remotePaddle.tracking = true;
+  const tracked = pkt.t !== false;
+  remotePaddle.enabled = tracked;
+  // This paddle never runs Paddle.update(), so mark it tracked here —
+  // otherwise the swept contact test skips it and the opponent could never
+  // return a ball.
+  remotePaddle.tracking = tracked;
+  if (!tracked) {
+    remotePaddle.mesh.visible = false;
+    return;
+  }
   remotePaddle.bladeCenter.set(pkt.c[0], pkt.c[1], pkt.c[2]);
   remotePaddle.bladeNormal.set(pkt.n[0], pkt.n[1], pkt.n[2]).normalize();
   remotePaddle.velocity.set(pkt.v[0], pkt.v[1], pkt.v[2]);
+  remotePaddle.mesh.visible = true;
   remotePaddle.mesh.position.copy(remotePaddle.bladeCenter);
   remotePaddle.mesh.quaternion.copy(
     _versusQuat.setFromUnitVectors(_versusFwd, remotePaddle.bladeNormal)
@@ -518,13 +760,13 @@ function startVersusServe() {
 function serveVersusBall() {
   const ball = balls.find((b) => !b.active);
   if (!ball) return;
-  // Server alternates ends: host serves toward -Z (the guest), guest toward +Z.
+  // The server alternates ends: host serves toward -Z, guest toward +Z.
   const dir = match.server === 'host' ? -1 : 1;
   ball.serve(
     new THREE.Vector3((Math.random() * 2 - 1) * 0.3, TABLE.HEIGHT + 0.35, -dir * 0.8),
     new THREE.Vector3((Math.random() * 2 - 1) * 0.6, 1.4, dir * 3.4)
   );
-  ball.floorCounted = false; // ad-hoc flag; Ball.serve() doesn't reset it
+  ball.floorCounted = false; // our own flag; Ball.serve() doesn't know about it
   versusBall = ball;
   broadcastHostState();
 }
@@ -535,50 +777,59 @@ function broadcastHostState() {
     versusBall && versusBall.active
       ? {
           active: true,
-          p: [versusBall.mesh.position.x, versusBall.mesh.position.y, versusBall.mesh.position.z],
+          p: [
+            versusBall.mesh.position.x,
+            versusBall.mesh.position.y,
+            versusBall.mesh.position.z,
+          ],
         }
       : { active: false, p: [0, 0, 0] };
-  room.send('state', { match: match.snapshot(), ball, paddle: bladePacket(mousePaddle) });
+  room.send('state', {
+    match: match.snapshot(),
+    ball,
+    paddle: bladePacket(),
+  });
 }
 
 function handleVersusHostBounce(ball, event) {
   if (event !== 'floor' || ball !== versusBall || ball.floorCounted) return;
   ball.floorCounted = true;
-  // A ball landing on the host's half (z>0) means the host failed to return
-  // it, so the guest scores — and vice versa.
+  // A ball that reaches the floor on the host's half (z>0) is one the host
+  // failed to return, so the guest scores — and the other way around.
   const scorer = ball.mesh.position.z > 0 ? 'guest' : 'host';
   ball.deactivate();
   versusBall = null;
   const winner = match.scorePoint(scorer);
   ui.updateVersusScore(match.snapshot(), 'host');
+  game.revision++; // repaint the in-world board
   broadcastHostState();
-  if (winner) {
-    if (vsBot) endBotMatch(winner);
-    else ui.showVersusWin(winner === 'host', match.snapshot());
-  } else startVersusServe();
+  if (winner) ui.showVersusWin(winner === 'host', match.snapshot());
+  else startVersusServe();
 }
 
 function runVersusHost(dt) {
   if (!match.winner && versusServeTimer > 0) {
-    const prev = Math.ceil(versusServeTimer);
+    const previous = Math.ceil(versusServeTimer);
     versusServeTimer -= dt;
     if (versusServeTimer <= 0) {
       versusServeTimer = 0;
       ui.hideCountdown();
       serveVersusBall();
-    } else if (Math.ceil(versusServeTimer) !== prev) {
+    } else if (Math.ceil(versusServeTimer) !== previous) {
       ui.showCountdown(Math.ceil(versusServeTimer));
     }
   }
-  // Local tournament match: an AI drives the opponent paddle. It must run
-  // before physics.step so the swept collision sees this frame's pose/velocity.
-  if (vsBot) updateBotPaddle(dt);
-  physics.step(dt, balls, paddles);
+
+  versusPaddles.length = 0;
+  versusPaddles.push(...paddles, remotePaddle);
+  physics.step(dt, balls, versusPaddles);
+
   for (const ball of balls) {
     if (!ball.active) continue;
     ball.updateVisualSpin(dt);
     if (ball.mesh.position.length() > 14) ball.deactivate();
   }
+
   netSendAccum += dt;
   if (netSendAccum >= NET_TICK) {
     netSendAccum = 0;
@@ -590,13 +841,15 @@ function applyHostState(state) {
   if (!state) return;
   match.apply(state.match);
   ui.updateVersusScore(match.snapshot(), 'guest');
+  game.revision++;
   applyRemotePaddle(state.paddle);
+
   if (state.ball?.active) {
     guestBallActive = true;
     guestBallTarget.set(state.ball.p[0], state.ball.p[1], state.ball.p[2]);
     if (!versusBall) versusBall = balls[0];
-    // The guest renders the ball but never simulates it: keep it inactive so
-    // physics.step ignores it, and drive its mesh purely from network state.
+    // The guest renders the ball but never simulates it: keeping it inactive
+    // keeps physics away from it, and the mesh is driven from packets.
     versusBall.active = false;
     versusBall.mesh.visible = true;
   } else {
@@ -606,6 +859,7 @@ function applyHostState(state) {
       versusBall = null;
     }
   }
+
   if (match.winner) ui.showVersusWin(match.winner === 'guest', match.snapshot());
 }
 
@@ -613,8 +867,10 @@ function runVersusGuest(dt) {
   netSendAccum += dt;
   if (netSendAccum >= NET_TICK) {
     netSendAccum = 0;
-    room?.send('paddle', bladePacket(mousePaddle));
+    room?.send('paddle', bladePacket());
   }
+  // Smoothed toward the last packet rather than snapped to it, so a late or
+  // dropped one reads as the ball carrying on instead of stuttering.
   if (guestBallActive && versusBall) {
     versusBall.mesh.position.lerp(guestBallTarget, Math.min(1, dt * 16));
     versusBall.updateVisualSpin(dt);
@@ -623,217 +879,81 @@ function runVersusGuest(dt) {
 
 async function enterVersus(role, code) {
   machine.enabled = false;
-  launchCountdown = 0;
-  ui.hideCountdown();
-  game.reset?.();
-  balls.forEach((b) => b.deactivate());
+  coach.setActive(false);
+  opponent.setActive(false);
+  clearBalls();
+  game.reset();
+
   versusBall = null;
   guestBallActive = false;
   versusServeTimer = 0;
   netSendAccum = 0;
   match.reset();
   netMode = role;
-  remotePaddle.enabled = true;
-  // The guest plays from the far (-Z) end; the 180° turn also mirrors the
-  // pointer mapping so left/right feel natural with no extra transforms.
-  if (role === 'guest') {
-    playerRig.position.set(0, 0, -PLAY_AREA.PLAYER_Z);
-    playerRig.rotation.y = Math.PI;
-  } else {
-    playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
-    playerRig.rotation.y = 0;
-  }
+  // Nothing serves in a match, and the launcher stands at the far end —
+  // which is exactly where the guest is standing, so it would otherwise be
+  // parked in their face.
+  machine.mesh.visible = false;
+  opponent.mesh.visible = false;
+
+  // The guest plays from the far end. Turning the rig 180° also mirrors the
+  // pointer mapping, so left and right stay the way round they should be with
+  // no extra transforms anywhere else.
+  playerRig.position.set(0, 0, role === 'guest' ? -PLAY_AREA.PLAYER_Z : PLAY_AREA.PLAYER_Z);
+  playerRig.rotation.y = role === 'guest' ? Math.PI : 0;
+
+  // The board hangs beyond the far end, which for the guest is behind their
+  // head. Move it to the other end and turn it round so both players read the
+  // score off a board in front of them.
+  scoreboard.mesh.position.z =
+    role === 'guest' ? -SCOREBOARD_POSITION.z : SCOREBOARD_POSITION.z;
+  scoreboard.mesh.rotation.y = role === 'guest' ? Math.PI : 0;
+
   room = createRoom({ code, role });
   if (role === 'host') room.on('paddle', (pkt) => applyRemotePaddle(pkt));
   else room.on('state', (state) => applyHostState(state));
+
   room.onOpponent((present) => {
     ui.setVersusOpponent(present);
-    // First time both players are present, the host kicks off the serve.
+    // The first moment both players are in the room, the host puts a ball up.
     if (present && role === 'host' && !match.winner && !versusBall && versusServeTimer <= 0) {
       startVersusServe();
     }
   });
+
   await room.connect();
+  game.revision++;
+  return room;
 }
 
 function leaveVersus() {
+  if (!netMode && !room) return;
   room?.close();
   room = null;
   netMode = null;
-  vsBot = false; // exit any local bot match cleanly
   remotePaddle.enabled = false;
   remotePaddle.tracking = false;
+  remotePaddle.mesh.visible = false;
   versusBall = null;
   guestBallActive = false;
   versusServeTimer = 0;
   netSendAccum = 0;
-  balls.forEach((b) => b.deactivate());
+  clearBalls();
   ui.hideCountdown();
-  // Restore the opponent anchor to identity so networked versus (which poses
-  // remotePaddle relative to this anchor) isn't offset by a prior bot match.
-  remoteAnchor.rotation.set(0, 0, 0);
-  remoteAnchor.position.set(0, 0, 0);
   playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
   playerRig.rotation.y = 0;
+  scoreboard.mesh.position.z = SCOREBOARD_POSITION.z;
+  scoreboard.mesh.rotation.y = 0;
+  applyHandedness(); // restores bat visibility the versus branch took over
+  machine.mesh.visible = true;
+  opponent.mesh.visible = true;
   clearRoomFromUrl();
+  game.revision++;
 }
 
-// --- Tournament lobby net pipe ----------------------------------------------
-// A single room per tournament; every inbound message + presence change is
-// forwarded to the UI, which owns the roster and bracket state.
-let tourneyRoom = null;
-function wireTourneyRoom(roomHandle) {
-  for (const type of ['join', 'roster', 'bracket']) {
-    roomHandle.on(type, (data) => ui._onTourneyMessage?.(type, data));
-  }
-  roomHandle.onOpponent((present) => ui._onTourneyPresence?.(present));
-}
-
-// --- Local AI rally ("fly brain") -------------------------------------------
-// A real 1v1 game to 11 (win by 2) against an AI opponent, built on the host
-// loop with no network room. The AI paddle lives at the far (-Z) end, predicts
-// where incoming balls will cross its plane, and returns them over the net —
-// deliberately imperfect so the player can score.
-
-// Reaction plane for the AI paddle — a little in front of the far baseline.
-const BOT_HOME_Z = -(TABLE.LENGTH / 2 - 0.35);
-
-function startBotGame() {
-  vsBot = true;
-  botOpponentName = 'Bot';
-
-  machine.enabled = false;
-  launchCountdown = 0;
-  ui.hideCountdown();
-  game.reset?.();
-  balls.forEach((b) => b.deactivate());
-  versusBall = null;
-  guestBallActive = false;
-  versusServeTimer = 0;
-  netSendAccum = 0;
-  match.reset();
-
-  // Host loop with no room: broadcastHostState() is a no-op (guards !room).
-  netMode = 'host';
-  room = null;
-
-  remotePaddle.enabled = true;
-  remotePaddle.networked = true;
-
-  // You play from the near (+Z) end, unrotated; the bot faces you from -Z with
-  // its blade turned toward +Z so returns come back over the net.
-  playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
-  playerRig.rotation.y = 0;
-  remoteAnchor.rotation.y = Math.PI; // blade faces +Z (back toward the player)
-  remoteAnchor.position.set(0, TABLE.HEIGHT + 0.2, BOT_HOME_Z);
-
-  // Scoreboard-only view (no lobby/room code), then serve directly — there's
-  // no room to wait on, so we don't rely on room.onOpponent.
-  ui.showBotMatch(botOpponentName);
-  ui.updateVersusScore(match.snapshot(), 'host');
-  startVersusServe();
-}
-
-function updateBotPaddle(dt) {
-  const ball = versusBall;
-  // Reaction gain <1 so the paddle lags the ideal intercept and misses some.
-  const k = Math.min(1, dt * 7);
-  let targetX = remoteAnchor.position.x;
-  let targetY = remoteAnchor.position.y;
-
-  if (ball && ball.active && ball.velocity.z < 0) {
-    const pos = ball.mesh.position;
-    // Linear predict where the ball crosses the paddle plane in x/y.
-    const dz = BOT_HOME_Z - pos.z;
-    const vz = ball.velocity.z;
-    const tHit = Math.abs(vz) > 1e-4 ? dz / vz : 0;
-    targetX = pos.x + ball.velocity.x * tHit;
-    targetY = pos.y + ball.velocity.y * tHit;
-  }
-
-  const minX = -(TABLE.WIDTH / 2 - 0.12);
-  const maxX = TABLE.WIDTH / 2 - 0.12;
-  const minY = TABLE.HEIGHT + 0.05;
-  const maxY = TABLE.HEIGHT + 0.45;
-  targetX = THREE.MathUtils.clamp(targetX, minX, maxX);
-  targetY = THREE.MathUtils.clamp(targetY, minY, maxY);
-
-  remoteAnchor.position.x += (targetX - remoteAnchor.position.x) * k;
-  remoteAnchor.position.y += (targetY - remoteAnchor.position.y) * k;
-  remoteAnchor.position.z = BOT_HOME_Z;
-  remoteAnchor.rotation.y = Math.PI;
-
-  // The networked flag makes the tick loop skip this paddle, so update it here
-  // to derive bladeCenter/normal/velocity for the physics collision.
-  remotePaddle.update(dt);
-
-  // Return bias: the blade faces +Z (back toward the player); tilting its
-  // normal a little upward makes the reflected ball arc up and over the net
-  // instead of driving flat into it. The collision reflects off bladeNormal,
-  // so nudging it here is enough. Tuned conservatively — increase for a
-  // loopier, safer return, decrease for a flatter, more aggressive one.
-  remotePaddle.bladeNormal.y += 0.32;
-  remotePaddle.bladeNormal.normalize();
-}
-
-function endBotMatch(winner) {
-  // The rally ball is already retired by handleVersusHostBounce; freeze the
-  // match on the win overlay. Full teardown (netMode/vsBot/rig/anchor) happens
-  // when the player taps Back-to-menu -> leaveVersus().
-  ui.hideCountdown();
-  versusBall = null;
-  guestBallActive = false;
-  versusServeTimer = 0;
-  balls.forEach((b) => b.deactivate());
-  ui.showVersusWin(winner === 'host', match.snapshot());
-}
-
-// Depth of the mouse paddle along Z. Scrolling sets a TARGET; the render loop
-// eases the rig toward it, so the motion carries real velocity (momentum) into
-// the ball instead of teleporting.
-let mouseDepthTarget = -0.72;
-function setMousePaddlePose(clientX, clientY) {
-  if (renderer.xr.isPresenting) return; // XR controllers own the paddles
-  if (useCamPaddle) return; // the webcam tracker owns the rig while active
-  const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
-  const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
-  // X spans a little more than the table width; Y rides just above the surface
-  // up to head height; Z sits the blade a bit in front of the player over the
-  // near half of the table. All relative to playerRig.
-  mousePaddleRig.position.x = (x - 0.5) * 1.25;
-  // Never let the blade drop below the table surface.
-  mousePaddleRig.position.y = Math.max(TABLE.HEIGHT + 0.03, 0.95 + (0.5 - y) * 0.7);
-  // Z (depth) is eased toward mouseDepthTarget in the render loop so a forward
-  // scroll is a real thrust with momentum, not a one-frame teleport.
-  // A gentle roll with horizontal position gives natural left/right steering.
-  mousePaddleRig.rotation.set(0, 0, -(x - 0.5) * 0.6);
-}
-window.addEventListener('pointermove', (e) => setMousePaddlePose(e.clientX, e.clientY), { passive: true });
-window.addEventListener('pointerdown', (e) => setMousePaddlePose(e.clientX, e.clientY), { passive: true });
-// Scroll wheel moves the paddle back/forward in depth so you can step behind
-// the bounce. (OrbitControls' own wheel-zoom is disabled below so it doesn't
-// fight this.) Scroll down = back toward you; scroll up = forward toward net.
-window.addEventListener('wheel', (e) => {
-  if (renderer.xr.isPresenting || useCamPaddle) return;
-  if (ui.menu && !ui.menu.hidden) return; // let the menu scroll normally
-  e.preventDefault();
-  // Set a target; the render loop eases the paddle toward it so a forward
-  // scroll swings the bat with momentum instead of snapping instantly.
-  mouseDepthTarget = THREE.MathUtils.clamp(mouseDepthTarget + Math.sign(e.deltaY) * 0.12, -1.3, -0.15);
-}, { passive: false });
-
-// The mouse paddle is a desktop-only stand-in for a tracked controller: hide
-// and disable it in XR so it can't swat balls out of the air from a stale
-// pose, and bring it back when the immersive session ends.
-renderer.xr.addEventListener('sessionstart', () => {
-  mousePaddle.enabled = false;
-  mousePaddle.mesh.visible = false;
-  renderer.domElement.style.cursor = '';
-});
-renderer.xr.addEventListener('sessionend', () => {
-  mousePaddle.enabled = true;
-  mousePaddle.mesh.visible = true;
-});
+// The board reads the match straight off these, so it can show a score
+// without knowing anything about the network.
+scoreboard.versus = { match, get role() { return netMode; } };
 
 // In-headset pause menu. The DOM shell is invisible in an immersive session,
 // so this is the only way to reach settings with the headset on.
@@ -843,6 +963,7 @@ const vrMenu = new VRMenu({
   game,
   settings,
   sfx,
+  onRecenter: () => recenter(),
   onExit: () => {
     xr.end();
     machine.enabled = false;
@@ -859,12 +980,29 @@ scene.add(vrMenu.group);
 const MENU_BUTTONS = [4, 5]; // A/X and B/Y
 let menuButtonWasDown = false;
 
-function pollMenuButton() {
+function pollMenuButton(dt) {
   const down = inputSources.some((source) =>
     MENU_BUTTONS.some((b) => source?.gamepad?.buttons?.[b]?.pressed)
   );
   if (down && !menuButtonWasDown) vrMenu.toggle();
   menuButtonWasDown = down;
+
+  if (!vrMenu.open) return;
+
+  // Thumbstick drives the menu too, so reaching a setting never depends on
+  // getting a ray onto the panel. Take whichever stick is pushed furthest.
+  let x = 0;
+  let y = 0;
+  for (const source of inputSources) {
+    const axes = source?.gamepad?.axes;
+    if (!axes) continue;
+    // Quest reports the stick on axes 2 and 3; some runtimes use 0 and 1.
+    const sx = Math.abs(axes[2] ?? 0) > Math.abs(axes[0] ?? 0) ? axes[2] : axes[0];
+    const sy = Math.abs(axes[3] ?? 0) > Math.abs(axes[1] ?? 0) ? axes[3] : axes[1];
+    if (Math.abs(sx ?? 0) > Math.abs(x)) x = sx ?? 0;
+    if (Math.abs(sy ?? 0) > Math.abs(y)) y = sy ?? 0;
+  }
+  vrMenu.handleStick(x, y, dt);
 }
 
 // You hold one bat, not two. The off hand keeps its controller model so you
@@ -873,25 +1011,72 @@ function pollMenuButton() {
 function applyHandedness() {
   const preferred = settings.get('hand');
   paddles.forEach((paddle, i) => {
-    // Handedness only governs the two XR grip paddles; the desktop mouse
-    // paddle isn't held in a hand and must keep its own enabled/visible state.
-    if (paddle === mousePaddle) return;
+    // The desktop bat rides the pointer, not a hand, so handedness has nothing
+    // to say about it. updateDesktopBat owns whether it is live.
+    if (paddle === desktopPaddle) return;
     const handedness = inputSources[i]?.handedness;
     // Before a controller reports its handedness, assume index 0 is the
     // right hand rather than leaving the player with no paddle at all.
     const hand = handedness ?? (i === 0 ? 'right' : 'left');
     const holdsPaddle = preferred === 'both' || hand === preferred;
 
+    // Recorded as well as applied, because updateDesktopBat re-derives
+    // `enabled` every frame and needs to know what handedness decided.
+    paddle.handHolds = holdsPaddle;
     paddle.enabled = holdsPaddle;
     paddle.mesh.visible = holdsPaddle;
     if (controllerModels[i]) controllerModels[i].visible = !holdsPaddle;
   });
 }
 
+function applyScenario() {
+  const index = SCENARIOS.findIndex((s) => s.id === settings.get('scenario'));
+  // Clear first: the previous scenario's ball is held at *its* contact
+  // point, which is somewhere else entirely, so switching left it hanging
+  // over the table while a second one appeared at the new spot.
+  clearBalls();
+  coach.setScenario(index < 0 ? 0 : index);
+}
+
+// Coach is a separate game, so the machine and the rally opponent stand
+// down for it rather than it being one more drill in the rotation.
+function applyGame() {
+  const coaching = settings.get('game') === 'coach';
+  machine.coachActive = coaching;
+  // Clear on every switch, not just into Coach. A held ball never falls and
+  // never recycles, so leaving one behind parked it in mid-air over the
+  // arcade table for good and cost a slot in the pool.
+  clearBalls();
+  game.reset();
+  coach.reset();
+  game.revision++;
+}
+
 settings.onChange((key) => {
+  if (key === 'paddleSource') {
+    // Hold the camera open only while it is the chosen input. Nobody wants a
+    // webcam light on because they tried a menu option once.
+    if (usingWebcamBat()) startWebcamBat();
+    else stopWebcamBat();
+  }
   if (key === 'hand') applyHandedness();
+  if (key === 'difficulty') opponent.setSkill(settings.get('difficulty'));
+  if (key === 'scenario') applyScenario();
+  if (key === 'game') applyGame();
 });
+
 applyHandedness();
+opponent.setSkill(settings.get('difficulty'));
+applyScenario();
+applyGame();
+
+// Guidance buzz while tracing a lesson, on whichever hand holds the bat.
+function hapticGuide(strength) {
+  const index = paddles.findIndex((p) => p.enabled);
+  const actuator =
+    inputSources[index < 0 ? 0 : index]?.gamepad?.hapticActuators?.[0];
+  actuator?.pulse?.(Math.min(strength, 1) * 0.55, 45);
+}
 
 // Short haptic tap on contact, on whichever hand actually struck the ball.
 function pulse(ball) {
@@ -911,141 +1096,172 @@ function pulse(ball) {
 // --- Desktop fallback: orbit controls for dev without a headset -------------
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.target.set(0, TABLE.HEIGHT, 0);
-orbit.enableZoom = false; // the scroll wheel moves the paddle depth instead
 orbit.update();
-
-// On-screen desktop controls legend, shown while playing (hidden on the menu
-// and in XR). Kept in sync with menu visibility in the render loop.
-const controlsHint = document.createElement('div');
-controlsHint.id = 'controls-hint';
-controlsHint.innerHTML =
-  '<span><b>Move</b> paddle</span>' +
-  '<span><b>Scroll</b> depth</span>' +
-  '<span><b>Z</b>/<b>X</b> zoom</span>' +
-  '<span><b>Space</b> pause</span>' +
-  '<span><b>S</b> serve</span>';
-document.body.appendChild(controlsHint);
 renderer.xr.addEventListener('sessionstart', () => (orbit.enabled = false));
 renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
 
 // --- Main loop --------------------------------------------------------------
 const clock = new THREE.Clock();
 let servedSeen = 0;
+const activePaddles = [];
+const versusPaddles = [];
+const ZERO = new THREE.Vector3();
+let lastCoachLine = '';
 
 function tick(dt) {
-  // Webcam paddle: pose the rig from the tracker before paddles sample their
-  // velocity, so the derived swing speed/spin is measured against this pose.
-  if (useCamPaddle && camTracker && camTracker.state === TRACKER_STATE.TRACKING) {
-    mousePaddleRig.position.copy(camTracker.position);
-    mousePaddleRig.quaternion.copy(camTracker.quaternion);
-  } else if (!renderer.xr.isPresenting) {
-    // Ease the paddle depth toward the scroll target. Doing it here (rather
-    // than snapping on the wheel event) means Paddle.update samples a smooth,
-    // sustained Z velocity, so a forward scroll drives the ball with momentum.
-    mousePaddleRig.position.z += (mouseDepthTarget - mousePaddleRig.position.z) * Math.min(1, dt * 10);
+  // Choose what drives each bat before reading its pose, so the velocity
+  // Paddle derives is measured against the parent it is actually on.
+  const wanted = settings.get('paddleSource') ?? PADDLE_SOURCE.CONTROLLER;
+  for (const source of paddleSources) {
+    source.setMode(wanted);
+    source.update(dt);
   }
-  for (const paddle of paddles) {
-    // Networked (opponent) paddles are posed from incoming packets, not from
-    // local input, so they must not run the velocity-sampling update.
-    if (paddle.networked) continue;
-    paddle.update(dt);
+  // A controller model is shown only for a hand that is idle: not holding
+  // the bat, and not being tracked as a hand. Seeing a floating controller
+  // beside your real hand is worse than seeing nothing.
+  paddleSources.forEach((source, i) => {
+    const model = controllerModels[i];
+    if (!model) return;
+    model.visible =
+      !paddles[i].enabled && source.activeSource !== PADDLE_SOURCE.HAND;
+  });
+
+  // Pose the desktop bat before the paddles sample themselves, so the swing
+  // velocity is measured against the pose it actually has this frame.
+  updateDesktopBat(dt);
+
+  for (const paddle of paddles) paddle.update(dt);
+
+  // A networked match replaces the trainer wholesale: no machine, no rally
+  // opponent, no coach, and only one side steps physics. Bail out here rather
+  // than threading `netMode` through every stage below.
+  if (netMode) {
+    pollMenuButton(dt);
+    vrMenu.update(dt, controllers);
+    for (const controller of controllers) {
+      if (controller.userData.ray) controller.userData.ray.visible = vrMenu.open;
+    }
+    targetRing.visible = false;
+    targetZone.visible = false;
+
+    // A browser with no headset has bats that are attached to nothing, parked
+    // at the rig origin. Facing down the table they sit behind the camera and
+    // nobody notices; the guest's rig is turned around, which swings them into
+    // view as two objects floating in front of your face. Hide what isn't
+    // actually being tracked.
+    for (const paddle of paddles) {
+      paddle.mesh.visible = paddle.enabled && paddle.tracking;
+    }
+
+    if (netMode === 'host') runVersusHost(dt);
+    else runVersusGuest(dt);
+
+    scoreboard.update();
+    ui.update();
+    renderer.render(scene, camera);
+    return;
   }
 
-  pollMenuButton();
+  // The opponent only exists in rally mode. It moves before the physics
+  // step so the bat's derived velocity matches the motion this frame.
+  opponent.setActive(machine.isRallyMode && !vrMenu.open);
+  opponent.update(dt, balls);
+
+  coach.setActive(machine.isCoachMode && !vrMenu.open);
+  const guide = coach.update(
+    dt,
+    paddles.find((p) => p.enabled) ?? paddles[0],
+    // Park a ball, held still, where the stroke should meet it.
+    (position, spin) => {
+      const ball = balls.find((b) => !b.active);
+      if (!ball) return;
+      ball.serve(position, ZERO, spin);
+      ball.frozen = true;
+    },
+    () => balls.find((b) => b.active && b.frozen) ?? null,
+    // Serve a live ball for the reaction drills, returned so the coach can
+    // follow what happens to it.
+    (position, velocity, spin) => {
+      const ball = balls.find((b) => !b.active);
+      if (!ball) return null;
+      ball.serve(position, velocity, spin);
+      return ball;
+    }
+  );
+
+  if (guide > 0.08) hapticGuide(guide);
+
+  pollMenuButton(dt);
   vrMenu.update(dt, controllers);
   for (const controller of controllers) {
     if (controller.userData.ray) controller.userData.ray.visible = vrMenu.open;
   }
 
-  if (netMode === 'host') {
-    runVersusHost(dt);
-  } else if (netMode === 'guest') {
-    runVersusGuest(dt);
+  // The menu is a pause screen: hold the machine while it's up, but keep
+  // stepping physics so balls already in the air settle instead of freezing
+  // mid-flight.
+  const wasEnabled = machine.enabled;
+  if (vrMenu.open) machine.enabled = false;
+
+  machine.update(dt);
+  if (machine.servedCount !== servedSeen) {
+    servedSeen = machine.servedCount;
+    game.onServe();
+  }
+
+  if (vrMenu.open) machine.enabled = wasEnabled; // restore; the pause is momentary
+
+  // The opponent's bat joins the paddle list only while it is rallying, so
+  // it cannot swat balls in the other modes.
+  activePaddles.length = 0;
+  activePaddles.push(...paddles);
+  if (opponent.active) activePaddles.push(opponent.paddle);
+
+  physics.step(dt, balls, activePaddles);
+  game.update(balls);
+
+  // The aim ring shows where the machine is about to land a ball; in target
+  // mode there's no incoming shot to telegraph, so the pad takes over.
+  const targeting = machine.isTargetMode;
+  targetRing.visible = !targeting && settings.get('aimMarker');
+  targetZone.visible = targeting;
+  if (targeting) {
+    targetZone.update(dt);
   } else {
-    // --- Single-player trainer (bot / drills / countdown) -----------------
-    // 3-2-1 before the first serve: hold the machine, tick the on-screen count.
-    if (launchCountdown > 0) {
-      const prev = Math.ceil(launchCountdown);
-      launchCountdown -= dt;
-      if (launchCountdown <= 0) {
-        launchCountdown = 0;
-        ui.hideCountdown();
-        machine.enabled = true;
-        machine._timer = Math.min(machine._timer, 0.2);
-      } else if (Math.ceil(launchCountdown) !== prev) {
-        ui.showCountdown(Math.ceil(launchCountdown));
-      }
+    targetRing.position.set(machine.aim.x, TABLE.HEIGHT + 0.002, machine.aim.z);
+  }
+
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    ball.updateVisualSpin(dt);
+
+    // Any ball that has come to rest is out of play, wherever it settled.
+    // Keying retirement off the floor alone strands balls that stop on the
+    // table — which silently drains the pool until the machine can't serve.
+    if (ball.restingOn && ball.retireIn === null) {
+      ball.retireIn = DEAD_BALL_LINGER;
     }
 
-    // The menu is a pause screen: hold the machine while it's up, but keep
-    // stepping physics so balls already in the air settle instead of freezing
-    // mid-flight.
-    const wasEnabled = machine.enabled;
-    if (vrMenu.open) machine.enabled = false;
-
-    machine.update(dt);
-    if (machine.servedCount !== servedSeen) {
-      servedSeen = machine.servedCount;
-      game.onServe();
-      // Drills feed continuously — no point-based hold. The ball machine keeps
-      // launching until the player resets or leaves the mode.
+    if (ball.mesh.position.length() > 14) {
+      retire(ball);
+    } else if (ball.retireIn !== null) {
+      ball.retireIn -= dt;
+      if (ball.retireIn <= 0) retire(ball);
     }
+  }
 
-    if (vrMenu.open) machine.enabled = wasEnabled; // restore; the pause is momentary
-
-    physics.step(dt, balls, paddles);
-    game.update(balls);
-
-    // The aim ring shows where the machine is about to land a ball; in target
-    // mode there's no incoming shot to telegraph, so the pad takes over.
-    const targeting = machine.isTargetMode;
-    targetRing.visible = !targeting && settings.get('aimMarker');
-    targetZone.visible = targeting;
-    if (targeting) {
-      targetZone.update(dt);
-    } else {
-      targetRing.position.set(machine.aim.x, TABLE.HEIGHT + 0.002, machine.aim.z);
-    }
-
-    for (const ball of balls) {
-      if (!ball.active) continue;
-      ball.updateVisualSpin(dt);
-
-      // Any ball that has come to rest is out of play, wherever it settled.
-      // Keying retirement off the floor alone strands balls that stop on the
-      // table — which silently drains the pool until the machine can't serve.
-      if (ball.restingOn && ball.retireIn === null) {
-        ball.retireIn = DEAD_BALL_LINGER;
-      }
-
-      if (ball.mesh.position.length() > 14) {
-        retire(ball);
-      } else if (ball.retireIn !== null) {
-        ball.retireIn -= dt;
-        if (ball.retireIn <= 0) retire(ball);
-      }
-    }
-
-    // The point ends the moment its ball leaves play — a miss, a double
-    // bounce, a dead feed recycled above, or a return that has settled.
-    // Run the 3-2-1 (endPoint guards against firing during a countdown),
-    // then the machine feeds the next single ball when it hits zero.
-    if (pointBall && !pointBall.active && launchCountdown <= 0) {
-      endPoint();
+  // The coach's line changes without the score changing — arming, tracing,
+  // switching lesson — so the board needs to know to repaint.
+  if (machine.isCoachMode) {
+    const line = coach.instruction;
+    if (line !== lastCoachLine) {
+      lastCoachLine = line;
+      game.revision++;
     }
   }
 
   scoreboard.update();
   ui.update();
-  controlsHint.style.display = (!renderer.xr.isPresenting && ui.menu && ui.menu.hidden) ? 'flex' : 'none';
-
-  // Hide the OS cursor while the desktop player is training so it doesn't sit
-  // on top of the paddle, but restore it over the start menu so the buttons
-  // stay clickable. XR owns the cursor state through its session listeners.
-  if (!renderer.xr.isPresenting) {
-    renderer.domElement.style.cursor = ui.menu.hidden ? 'none' : '';
-  }
-
   renderer.render(scene, camera);
 }
 
@@ -1064,7 +1280,11 @@ renderer.setAnimationLoop(() => tick(clock.getDelta()));
 if (import.meta.env.DEV) {
   window.__probe = {
     balls, machine, physics, game, paddles, targetZone,
-    settings, ui, vrMenu, scene, camera, tick,
+    settings, ui, vrMenu, opponent, coach, scene, camera, tick,
+    match, remotePaddle, desktopPaddle,
+    get camTracker() { return camTracker; },
+    get netMode() { return netMode; },
+    get room() { return room; },
   };
 }
 
@@ -1074,51 +1294,7 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Keyboard shortcuts make desktop iteration much faster than reaching for a
-// headset every time.
-window.addEventListener('keydown', (e) => {
-  if (!ui.menu.hidden) return; // menu is up; let the buttons own the input
-
-  if (e.code === 'Space') {
-    e.preventDefault(); // stop the browser scrolling / re-firing a focused button
-    machine.enabled = !machine.enabled;
-    game.revision++;
-    ui.toast(machine.enabled ? 'Machine armed' : 'Paused');
-  } else if (e.code === 'KeyD') {
-    ui.toast(machine.nextDrill().name);
-    game.revision++;
-  } else if (e.code === 'KeyR') {
-    game.reset();
-    ui.toast('Score reset');
-  } else if (e.code === 'KeyS') {
-    machine.serve();
-  } else if (e.code === 'KeyZ') {
-    // Zoom in (narrower field of view).
-    camera.fov = Math.max(40, camera.fov - 4);
-    camera.updateProjectionMatrix();
-  } else if (e.code === 'KeyX') {
-    // Zoom out (wider field of view).
-    camera.fov = Math.min(85, camera.fov + 4);
-    camera.updateProjectionMatrix();
-  }
-});
-
-// If this page was opened from a shared room link (?room=CODE), drop straight
-// into the versus lobby as the guest and connect.
-const autoJoinCode = roomFromUrl();
-if (autoJoinCode) {
-  ui.openVersusLobby({
-    role: 'guest',
-    code: autoJoinCode,
-    link: roomLinkFor(autoJoinCode),
-    kind: isRealtimeAvailable() ? 'supabase' : 'local',
-  });
-  enterVersus('guest', autoJoinCode).catch((err) => ui.toast?.(err?.message ?? 'Could not join room'));
-}
-
-// A shared tournament link (?t=CODE) drops the visitor straight into the
-// tournament lobby's join screen (Kahoot-style: enter a name, then you're in).
-const autoTourneyCode = tourneyFromUrl();
-if (autoTourneyCode) {
-  ui.openTournamentJoin?.(autoTourneyCode);
-}
+// Keyboard shortcuts live entirely in UI, which owns the single keydown
+// listener. A second listener here meant every key fired twice: Space
+// toggled the machine and immediately toggled it back, and D skipped two
+// modes at once.
