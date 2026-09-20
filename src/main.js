@@ -422,6 +422,150 @@ for (const i of [0, 1]) {
   playerRig.add(controller);
 }
 
+// --- Desktop bat ------------------------------------------------------------
+// A headset gives you a bat because there is a tracked hand to hang it on. On
+// a screen there is nothing to hang it on, so the pointer drives a rig parented
+// under playerRig: mouse X/Y place the blade in a small volume over the near
+// half of the table, the wheel (or a click, or F) moves it in depth.
+//
+// The pose is written straight from the event with no smoothing of our own, and
+// depth is eased toward a target rather than snapped, so Paddle.update() derives
+// a real swing velocity from the motion between frames — exactly as it does
+// from a grip. A thrust therefore carries momentum into the ball instead of
+// teleporting through it.
+//
+// This is what lets someone at a laptop play a match against someone in a
+// headset; it also means the desktop preview can rally rather than just watch.
+const desktopRig = new THREE.Group();
+playerRig.add(desktopRig);
+const desktopPaddle = new Paddle();
+desktopPaddle.attachTo(desktopRig);
+desktopPaddle.enabled = false; // switched on below whenever we're not in XR
+desktopPaddle.mesh.visible = false;
+paddles.push(desktopPaddle);
+
+const DESKTOP_REST_Z = -0.72; // blade's resting depth, a little in front of you
+const DESKTOP_THRUST_Z = -1.18; // how far forward a swing reaches
+const DESKTOP_THRUST_TIME = 0.14; // seconds held forward before it returns
+
+let desktopDepthTarget = DESKTOP_REST_Z;
+let desktopThrust = 0;
+
+// Where the player is asking the *blade* to be, in rig space. Kept separate
+// from the rig's own position because the blade sits up and back from the
+// paddle's origin, on the end of a handle: put the rig under the cursor and
+// the blade ends up ten-odd centimetres away, which against an 85 mm blade is
+// the difference between playing the ball and missing everything. The rig
+// position is derived from this each frame — never nudged, or the offset
+// would be subtracted again on every mouse move and the bat would walk off
+// down the table.
+const desktopAim = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
+const _bladeOffset = new THREE.Vector3();
+
+function placeDesktopBat(clientX, clientY) {
+  if (renderer.xr.isPresenting) return; // controllers own the bats in a session
+  const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
+  const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
+  desktopAim.x = (x - 0.5) * 1.25;
+  // Never below the surface, never above about head height.
+  desktopAim.y = Math.max(TABLE.HEIGHT + 0.03, 0.95 + (0.5 - y) * 0.7);
+  desktopYaw = (x - 0.5) * 0.5;
+  poseDesktopBat();
+}
+
+// A bat's face is perpendicular to the forearm, so the blade points along the
+// rig's +X, not down its -Z: a quarter turn is what squares it to the table.
+// (Half a turn leaves it edge-on, which passes straight through the ball and
+// is very hard to see.) Horizontal position adds a little steer on top, the
+// way turning your wrist aims a real return.
+let desktopYaw = 0;
+
+function poseDesktopBat() {
+  desktopRig.rotation.set(0, Math.PI / 2 + desktopYaw, 0);
+  desktopRig.quaternion.setFromEuler(desktopRig.rotation);
+  _bladeOffset
+    .copy(desktopPaddle.mesh.getObjectByName('blade').position)
+    .applyQuaternion(desktopRig.quaternion);
+  desktopRig.position.copy(desktopAim).sub(_bladeOffset);
+}
+
+function swingDesktopBat() {
+  if (renderer.xr.isPresenting) return;
+  desktopThrust = DESKTOP_THRUST_TIME;
+}
+
+placeDesktopBat(window.innerWidth / 2, window.innerHeight * 0.55);
+
+window.addEventListener('pointermove', (e) => placeDesktopBat(e.clientX, e.clientY), {
+  passive: true,
+});
+window.addEventListener('pointerdown', (e) => {
+  if (!ui.menu.hidden) return; // the menu owns its own clicks
+  placeDesktopBat(e.clientX, e.clientY);
+  swingDesktopBat();
+});
+window.addEventListener(
+  'wheel',
+  (e) => {
+    if (renderer.xr.isPresenting || !ui.menu.hidden) return;
+    desktopDepthTarget = THREE.MathUtils.clamp(
+      desktopDepthTarget - Math.sign(e.deltaY) * 0.08,
+      -1.3,
+      -0.2
+    );
+  },
+  { passive: true }
+);
+
+// Keyboard alternative, for playing without a mouse. UI owns the single
+// keydown listener for commands; these are movement, so they live here.
+const DESKTOP_KEYS = { ArrowLeft: 0, ArrowRight: 0, ArrowUp: 0, ArrowDown: 0, KeyF: 0 };
+window.addEventListener('keydown', (e) => {
+  if (!(e.code in DESKTOP_KEYS)) return;
+  if (!ui.menu.hidden) return;
+  DESKTOP_KEYS[e.code] = 1;
+  if (e.code === 'KeyF') swingDesktopBat();
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code in DESKTOP_KEYS) DESKTOP_KEYS[e.code] = 0;
+});
+
+function updateDesktopBat(dt) {
+  const inXR = renderer.xr.isPresenting;
+  desktopPaddle.enabled = !inXR;
+  desktopPaddle.mesh.visible = !inXR;
+
+  // Outside a session the controller bats are attached to grips that sit at
+  // the rig origin — on the floor, at the player's feet. They report that pose
+  // perfectly well, so physics treats them as live bats and they swat balls
+  // nobody can see. Stand them down until a session actually poses them.
+  for (const paddle of paddles) {
+    if (paddle === desktopPaddle) continue;
+    paddle.enabled = inXR && (paddle.handHolds ?? true);
+    paddle.mesh.visible = paddle.enabled;
+  }
+
+  if (inXR) return;
+
+  // Held arrow keys slide the blade at a steady rate; the mouse overrides on
+  // its next move, which is what you'd expect from whichever you touched last.
+  const speed = 1.1; // m/s
+  const dx = (DESKTOP_KEYS.ArrowRight - DESKTOP_KEYS.ArrowLeft) * speed * dt;
+  const dy = (DESKTOP_KEYS.ArrowUp - DESKTOP_KEYS.ArrowDown) * speed * dt;
+  if (dx || dy) {
+    desktopAim.x = THREE.MathUtils.clamp(desktopAim.x + dx, -0.7, 0.7);
+    desktopAim.y = THREE.MathUtils.clamp(desktopAim.y + dy, TABLE.HEIGHT + 0.03, 1.45);
+    desktopYaw = (desktopAim.x / 1.25) * 0.5;
+  }
+
+  if (desktopThrust > 0) desktopThrust -= dt;
+  const target = desktopThrust > 0 ? DESKTOP_THRUST_Z : desktopDepthTarget;
+  // Eased rather than snapped, so Paddle.update() samples a sustained velocity
+  // and a thrust carries momentum into the ball.
+  desktopAim.z += (target - desktopAim.z) * Math.min(1, dt * 12);
+  poseDesktopBat();
+}
+
 // ---------------------------------------------------------------------------
 // Online versus (1v1)
 //
@@ -463,8 +607,19 @@ remotePaddle.enabled = false;
 remotePaddle.networked = true;
 remotePaddle.mesh.visible = false; // nothing to show until a packet arrives
 
+// Which bat this player is actually swinging — the one whose pose gets sent.
+//
+// Outside a session that is the pointer-driven bat. The controller bats are
+// still "tracking" on a desktop, because they faithfully report the pose of a
+// grip that is sitting at the rig origin, so picking the first tracked paddle
+// would stream a bat parked at the player's feet.
 function getLocalVersusPaddle() {
-  return paddles.find((paddle) => paddle.enabled && paddle.tracking) ?? paddles[0];
+  if (!renderer.xr.isPresenting) return desktopPaddle;
+  return (
+    paddles.find(
+      (paddle) => paddle !== desktopPaddle && paddle.enabled && paddle.tracking
+    ) ?? paddles[0]
+  );
 }
 
 function bladePacket(paddle = getLocalVersusPaddle()) {
@@ -761,12 +916,18 @@ function pollMenuButton(dt) {
 function applyHandedness() {
   const preferred = settings.get('hand');
   paddles.forEach((paddle, i) => {
+    // The desktop bat rides the pointer, not a hand, so handedness has nothing
+    // to say about it. updateDesktopBat owns whether it is live.
+    if (paddle === desktopPaddle) return;
     const handedness = inputSources[i]?.handedness;
     // Before a controller reports its handedness, assume index 0 is the
     // right hand rather than leaving the player with no paddle at all.
     const hand = handedness ?? (i === 0 ? 'right' : 'left');
     const holdsPaddle = preferred === 'both' || hand === preferred;
 
+    // Recorded as well as applied, because updateDesktopBat re-derives
+    // `enabled` every frame and needs to know what handedness decided.
+    paddle.handHolds = holdsPaddle;
     paddle.enabled = holdsPaddle;
     paddle.mesh.visible = holdsPaddle;
     if (controllerModels[i]) controllerModels[i].visible = !holdsPaddle;
@@ -863,6 +1024,10 @@ function tick(dt) {
     model.visible =
       !paddles[i].enabled && source.activeSource !== PADDLE_SOURCE.HAND;
   });
+
+  // Pose the desktop bat before the paddles sample themselves, so the swing
+  // velocity is measured against the pose it actually has this frame.
+  updateDesktopBat(dt);
 
   for (const paddle of paddles) paddle.update(dt);
 
