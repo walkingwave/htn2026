@@ -114,7 +114,7 @@ export class UI {
             <span class="game__blurb">Play a friend on another device</span>
           </button>
         </div>
-        <div class="prompt blink">PRESS 1 · 2 · 3 TO SELECT</div>
+        <div class="prompt blink">↑ ↓ SELECT · ENTER CONTINUE</div>
       </div>
 
       <div class="screen" data-screen="play" hidden>
@@ -639,10 +639,16 @@ export class UI {
       else if (e.code === 'Escape' || e.code === 'Backspace') {
         if (this._screen === 'play') this.setScreen('game');
       } else if (this._screen === 'game') {
-        // Enter on the first screen accepts whatever game is highlighted.
-        if (e.code === 'Enter' || e.code === 'Space') {
+        // Arrows walk the cursor down the games; Enter turns the page. The
+        // cursor position IS the game setting, so there is no separate
+        // highlight state to fall out of sync.
+        const games = ['arcade', 'coach', 'versus'];
+        const at = Math.max(0, games.indexOf(this.settings.get('game')));
+        if (e.code === 'ArrowUp') this.setGame(games[(at + games.length - 1) % games.length]);
+        else if (e.code === 'ArrowDown') this.setGame(games[(at + 1) % games.length]);
+        else if (e.code === 'Enter' || e.code === 'Space') {
           e.preventDefault();
-          this.chooseGame(this.settings.get('game') || 'arcade');
+          this.chooseGame(games[at]);
         }
       } else if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);
