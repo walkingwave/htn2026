@@ -145,6 +145,11 @@ export class UI {
             <span class="game__name">Drills</span>
             <span class="game__blurb">Practice shots against the machine</span>
           </button>
+          <button class="game" data-game="coach">
+            <span class="game__key">6</span>
+            <span class="game__name">Coach</span>
+            <span class="game__blurb">Learn one stroke at a time, scored</span>
+          </button>
         </div>
         <div class="prompt blink">↑ ↓ SELECT · ENTER CONTINUE</div>
       </div>
@@ -199,7 +204,7 @@ export class UI {
     };
     this._crumbGame = el.querySelector('[data-crumb-game]');
     this._screen = 'game';
-    this._productChoices = ['tournament', 'friend', 'bot', 'fly', 'drills'];
+    this._productChoices = ['tournament', 'friend', 'bot', 'fly', 'drills', 'coach'];
     this._gameIndex = 0;
     el.querySelector('[data-back]').onclick = () => this.setScreen('game');
 
@@ -281,6 +286,10 @@ export class UI {
       if (rallyIndex >= 0) this.machine.modeIndex = rallyIndex;
     } else if (value === 'friend') {
       this.setGame('versus');
+    } else if (value === 'coach') {
+      // Coach owns its lesson ball and scenario, so do not change the
+      // machine drill or opponent difficulty on the way in.
+      this.setGame('coach');
     } else {
       this.setGame('arcade');
       this.settings.set('difficulty', value === 'fly' ? 'fly' : 'normal');
@@ -297,6 +306,7 @@ export class UI {
       bot: 'PLAY A STANDARD BOT',
       fly: 'PLAY A FLY',
       drills: 'DRILLS',
+      coach: 'COACH',
       tournament: 'CREATE A TOURNAMENT',
     }[value] ?? 'PLAY A STANDARD BOT';
   }
@@ -1129,6 +1139,7 @@ export class UI {
       else if (e.code === 'Digit3') this.chooseGame('bot');
       else if (e.code === 'Digit4') this.chooseGame('fly');
       else if (e.code === 'Digit5') this.chooseGame('drills');
+      else if (e.code === 'Digit6') this.chooseGame('coach');
       else if (e.code === 'KeyL') this.toggleScores();
       else if (e.code === 'Escape' || e.code === 'Backspace') {
         if (this._screen === 'play') this.setScreen('game');
