@@ -16,3 +16,4 @@ vite.*.config.js
 
 # Graph/analysis tool output, not source
 graphify-out/
+.vercel

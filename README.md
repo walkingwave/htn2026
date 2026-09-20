@@ -228,6 +228,50 @@ Baseten
 
 Tiger leaderboard and telemetry setup lives in `tiger/schema.sql` and `tiger/README.md`. Set `TIGER_DATABASE_URL` only in the Vercel/server environment; never expose it with a `VITE_` prefix. The browser calls `/api/leaderboard` and `/api/telemetry`, while Supabase remains the low-latency realtime transport. Baseten post-match analysis is exposed through `/api/coach/postmatch`; the existing Gemini route remains a fallback if Baseten is unavailable.
 
+## Sponsor tracks
+
+Each sponsor API does one job in the product. Every credential stays server-side in Vercel Functions except Supabase's publishable key, which is designed for the browser.
+
+### Supabase — multiplayer across networks
+
+Supabase Realtime is the transport for online versus matches: Broadcast channels carry paddle and ball packets between the two players, and Presence tracks who is in the room. This is what lets two people on different networks play the same point; on one Wi-Fi the built-in dev-server relay handles it instead. The publishable key (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) is the only credential that reaches the browser.
+
+### Tiger Data — leaderboard and telemetry
+
+Tiger Cloud (TimescaleDB) is the durable data plane. `leaderboard_entries` holds the canonical per-category leaderboard, and `coaching_events` is a hypertable of stroke scores and match results for later analytics. Both are read and written only through server-only Vercel Functions over a pooled `pg` client (`TIGER_DATABASE_URL`, `TIGER_DATABASE_SSL`); the schema lives in `tiger/schema.sql`.
+
+### OpenAI — per-shot coaching
+
+Each completed Coach stroke is scored locally, then sent to `/api/coach/shot`, where the OpenAI Responses API turns the numbers into one specific correction. The text appears in the coaching panel and is narrated aloud (`OPENAI_API_KEY`, `OPENAI_MODEL`).
+
+### Baseten — post-match analysis
+
+Baseten's OpenAI-compatible endpoint (`inference.baseten.co/v1`) serves `zai-org/GLM-5.3-Fast` for the post-match breakdown at `/api/coach/postmatch` (`BASETEN_API_KEY`, `BASETEN_MODEL_ID`). The original plan was to train the bot and FlyBrain with reinforcement learning on Baseten H100s; with no GPUs allocated this weekend, we use their hosted inference API for match analysis instead, with Gemini as an automatic fallback.
+
+### Gemini — holistic match summary
+
+Google Gemini writes the holistic post-match summary at `/api/coach/match` (`GEMINI_API_KEY`, `GEMINI_MODEL`). It doubles as the fallback when Baseten is unavailable, which also spreads load across providers.
+
+### Backboard — player memory and recurring trends
+
+Coach scores and versus results are appended to a persistent Backboard thread through `/api/profile/event`; the browser stores only the thread ID. On the next session, `/api/profile/summary` has Backboard review the accumulated history and surface recurring tendencies — timing that runs early, a face that opens on pushes — shown in the panel under "Your recurring trends" (`BACKBOARD_API_KEY`, `BACKBOARD_API_BASE_URL`).
+
+### ElevenLabs — narration
+
+Every LLM response is spoken, not just shown: per-shot feedback, the match summary, and the trends recap all go through `/api/coach/narrate`, which renders speech with two distinct narrator voices. The coaching panel can mute narration or pin a voice, and the choice persists across sessions (`ELEVENLABS_API_KEY`, `ELEVENLABS_MODEL_ID`, `ELEVENLABS_NARRATOR_A_VOICE_ID`, `ELEVENLABS_NARRATOR_B_VOICE_ID`).
+
+### Linq — iMessage invitations
+
+Hosting a match can start with a text. Enter a contact's phone number in the lobby and `/api/contact/invite` uses Linq's Partner API to create (or reuse) an iMessage chat and send the room link, so a friend joins from a message instead of hunting for a URL (`LINQ_INTEGRATION_TOKEN`, `LINQ_SEND_FROM`, `LINQ_API_BASE_URL`).
+
+### Vercel — hosting and the server bridge
+
+The frontend deploys as a static Vite build, and every secret-bearing integration above runs as a Vercel Function under `api/`, so the browser never sees a provider key. `npx vercel dev` serves the same routes locally.
+
+### Devin — planning and end-to-end testing
+
+Devin drove planning, end-to-end testing against the deployed Vercel app, and general assistance throughout the build.
+
 ## Ideas / next steps
 
 - AR table placement via hit-test (anchor the table to a real surface)
