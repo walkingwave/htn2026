@@ -31,10 +31,12 @@ export const OPTIONS = {
     { label: 'Controller', value: 'controller' },
     { label: 'Real paddle', value: 'hand' },
   ],
-  // Arcade is the drills and rally; Coach teaches strokes one at a time.
+  // Arcade is the drills and rally; Coach teaches strokes one at a time;
+  // Versus is a networked match against another player.
   game: [
     { label: 'Arcade', value: 'arcade' },
     { label: 'Coach', value: 'coach' },
+    { label: 'Versus', value: 'versus' },
   ],
   // Which situation Coach drills.
   scenario: [
@@ -60,7 +62,7 @@ const DEFAULTS = {
   paddleSource: 'controller',
   difficulty: 'normal',
   scenario: 'serve',
-  game: 'arcade', // 'arcade' | 'coach'
+  game: 'arcade', // 'arcade' | 'coach' | 'versus'
   sound: true,
   aimMarker: true,
 };

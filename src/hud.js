@@ -132,11 +132,17 @@ export class Scoreboard {
 
     this._brackets();
 
+    // A networked match is neither a drill nor a lesson, so it takes the
+    // board over entirely — score, serve and match state, nothing else.
+    const versusRole = this.versus?.role ?? null;
+
     // --- Header: mode name, and whether the machine is firing -------------
     const title = (
-      machine.isCoachMode && this.coach
-        ? this.coach.scenario.name
-        : machine.drill.name
+      versusRole
+        ? 'Versus'
+        : machine.isCoachMode && this.coach
+          ? this.coach.scenario.name
+          : machine.drill.name
     ).toUpperCase();
     ctx.font = `700 84px ${MONO}`;
     ctx.fillStyle = red;
@@ -148,7 +154,11 @@ export class Scoreboard {
     // weight as the title rather than caption size.
     const armed = machine.enabled;
     ctx.font = `700 60px ${MONO}`;
-    if (machine.isCoachMode) {
+    if (versusRole) {
+      const snap = this.versus.match.snapshot();
+      ctx.fillStyle = snap.server === versusRole ? red : DIM;
+      tracked(ctx, snap.server === versusRole ? 'YOUR SERVE' : 'THEIR SERVE', W - R, 132, 10, 'right');
+    } else if (machine.isCoachMode) {
       ctx.fillStyle = red;
       tracked(ctx, 'COACH', W - R, 132, 10, 'right');
     } else {
@@ -164,9 +174,23 @@ export class Scoreboard {
     // Coach is its own game, not one of the rotating modes, so the board
     // asks the machine whether a lesson is running rather than reading a
     // mode type that no longer exists.
-    const kind = machine.isCoachMode ? 'coach' : machine.mode.type;
+    const kind = versusRole ? 'versus' : machine.isCoachMode ? 'coach' : machine.mode.type;
+    const snap = versusRole ? this.versus.match.snapshot() : null;
+    const yourScore = snap
+      ? versusRole === 'guest'
+        ? snap.scoreGuest
+        : snap.scoreHost
+      : 0;
+    const theirScore = snap
+      ? versusRole === 'guest'
+        ? snap.scoreHost
+        : snap.scoreGuest
+      : 0;
+
     const primary =
-      kind === 'target'
+      kind === 'versus'
+        ? { value: yourScore, label: 'YOU' }
+        : kind === 'target'
         ? { value: game.targetsHit, label: 'TARGETS' }
         : kind === 'rally'
           ? { value: game.rally, label: 'RALLY' }
@@ -186,7 +210,13 @@ export class Scoreboard {
     // Three, not four: a fourth column costs every number ~25% of its width
     // and buys a figure nobody reads mid-drill.
     const stats =
-      kind === 'coach'
+      kind === 'versus'
+        ? [
+            ['THEM', theirScore],
+            ['TO WIN', snap.target],
+            ['', ''],
+          ]
+        : kind === 'coach'
         ? [
             ['BEST', game.lessonBest],
             ['TRIES', game.lessonAttempts],
@@ -227,8 +257,14 @@ export class Scoreboard {
     // --- Accuracy meter ---------------------------------------------------
     // Blocks rather than a bar: a 20 px-tall bar vanishes at this distance,
     // and discrete cells stay legible even when the edge blurs.
+    // In a match the same meter shows how far along the game is — how many of
+    // the points needed to win you already hold — since on-table accuracy is
+    // not what either player is watching.
     const CELLS = 20;
-    const filled = Math.round((CELLS * game.accuracy) / 100);
+    const percent = kind === 'versus'
+      ? Math.min(100, Math.round((yourScore / snap.target) * 100))
+      : game.accuracy;
+    const filled = Math.round((CELLS * percent) / 100);
     const METER_W = 1180; // runs to just short of the percentage readout
     const GAP = 10;
     const cellW = (METER_W - GAP * (CELLS - 1)) / CELLS;
@@ -241,7 +277,9 @@ export class Scoreboard {
     ctx.font = `700 62px ${MONO}`;
     tracked(
       ctx,
-      `${String(game.accuracy).padStart(3, ' ')}% ON-TABLE`,
+      kind === 'versus'
+        ? `${yourScore} — ${theirScore}`
+        : `${String(percent).padStart(3, ' ')}% ON-TABLE`,
       W - R,
       786,
       8,
@@ -255,9 +293,19 @@ export class Scoreboard {
     // or what the last few attempts say you should work on. That is the
     // whole point of the mode, so it gets the status slot rather than a
     // ball-by-ball event nobody is watching for.
-    const coaching = machine.isCoachMode && this.coach;
-    const event = (coaching ? this.coach.instruction : game.lastEvent).toUpperCase();
-    const fault = !coaching && event.startsWith('MISS');
+    const coaching = !versusRole && machine.isCoachMode && this.coach;
+    const event = (
+      versusRole
+        ? snap.winner
+          ? snap.winner === versusRole
+            ? 'You win'
+            : 'You lose'
+          : game.lastEvent
+        : coaching
+          ? this.coach.instruction
+          : game.lastEvent
+    ).toUpperCase();
+    const fault = !coaching && (event.startsWith('MISS') || event === 'YOU LOSE');
     ctx.fillStyle = fault ? red : DIM;
     // The advice runs longer than an event word, so it is set smaller and
     // tighter to stay on one line at this width.
@@ -267,7 +315,14 @@ export class Scoreboard {
     if (!coaching) {
       ctx.fillStyle = FAINT;
       ctx.font = `500 44px ${MONO}`;
-      tracked(ctx, `SERVED ${machine.servedCount}`, W - R, 912, 7, 'right');
+      tracked(
+        ctx,
+        versusRole ? `FIRST TO ${snap.target}` : `SERVED ${machine.servedCount}`,
+        W - R,
+        912,
+        7,
+        'right'
+      );
     }
 
     this.texture.needsUpdate = true;

@@ -86,6 +86,35 @@ Cycle with **grip** (or <kbd>D</kbd>). Stats appear on the in-world scoreboard b
 
 Scoring: a **hit** is any paddle contact, a **return** is a hit that lands back on the far half, and the **streak** counts consecutive hits.
 
+## Versus — play a friend
+
+Pick **Versus** on the start menu (<kbd>3</kbd>), then either host a match or type in the code a friend read out to you. Hosting shows a room code and a link; open that link on the other device and it lands on the join step with the code already filled in. Once both sides are in, pick your entry (VR, passthrough or computer) and the host serves after a three-second countdown.
+
+Games are to 11, win by 2, and the server alternates with the point — the winner of a point serves the next one.
+
+### How it stays in sync
+
+One side simulates. The host runs the same physics the trainer uses and streams the ball's position at 30 Hz; the guest renders that and streams only its own bat back. There is exactly one simulation, so there is nothing to reconcile between the two views.
+
+Each player swings locally with no round trip, which is the part that has to feel immediate. The cost is that contact is resolved on the host against a bat pose up to one tick old — fine on a LAN, and much better than waiting for an acknowledgement before the ball moves.
+
+### Transports
+
+The room picks one of three, in this order:
+
+| Transport | When it is used | Reaches |
+| --- | --- | --- |
+| LAN relay | `npm run dev` (a WebSocket relay built into the dev server) | Anyone on the same Wi-Fi |
+| Supabase Realtime | A built app with `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` set | Anywhere |
+| BroadcastChannel | Neither of the above | Two tabs on one machine |
+
+Copy `.env.example` to `.env.local` and fill it in for the Supabase path. Nothing else needs configuring — the LAN relay is on whenever the dev server is.
+
+### Limits worth knowing
+
+- A desktop browser has no tracked bat, so a computer player can watch a match but cannot return a ball. Versus is meant to be played in the headset.
+- The host drives the simulation from its animation loop, which browsers stop in a backgrounded tab. If the host tabs away, the match pauses for both players until it comes back.
+
 ## Physics
 
 The simulation is hand-rolled rather than a rigid-body engine — the only interesting contact is ball-against-plane, and doing it directly keeps spin tunable.

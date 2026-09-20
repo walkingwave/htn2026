@@ -147,6 +147,180 @@ canvas {
   color: var(--red);
 }
 
+/* Versus lobby ----------------------------------------------------------- */
+
+.lobby {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.lobby[hidden] {
+  display: none;
+}
+
+.lobby__row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.lobby__or {
+  color: var(--dim);
+}
+
+/* A room code is read aloud and typed back in, so it is set wide and in the
+   same face as everything else rather than as a form field. */
+.lobby__code {
+  width: 10ch; /* six tracked characters, plus the tracking itself */
+  padding: 6px 8px;
+  border: 0;
+  border-bottom: 1px solid rgba(242, 239, 230, 0.35);
+  background: none;
+  color: var(--paper);
+  font: inherit;
+  font-size: 15px;
+  letter-spacing: 0.3em;
+  text-align: center;
+  text-transform: uppercase;
+  outline: none;
+}
+.lobby__code:focus {
+  border-bottom-color: var(--red);
+}
+.lobby__code::placeholder {
+  color: rgba(242, 239, 230, 0.25);
+  letter-spacing: 0.3em;
+}
+
+.lobby__status {
+  color: var(--dim);
+  max-width: min(560px, calc(100vw - 48px));
+  line-height: 1.8;
+}
+.lobby__status[data-tone='bad'] {
+  color: var(--red);
+}
+
+.lobby__share {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.lobby__share[hidden] {
+  display: none;
+}
+
+.lobby__link {
+  color: var(--paper);
+  text-transform: none;
+  letter-spacing: 0.06em;
+  user-select: all;
+}
+
+/* Versus HUD ------------------------------------------------------------- */
+
+/* Top-left, not centred: the in-world board hangs dead centre at the top of
+   the view, and two scoreboards on top of each other is one too many. */
+#versus {
+  position: fixed;
+  top: 14px;
+  left: 16px;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  pointer-events: none;
+}
+#versus[hidden] {
+  display: none;
+}
+
+.versus__score {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font-size: 20px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.versus__score b {
+  color: var(--paper);
+  font-size: 30px;
+  margin: 0 6px;
+}
+.versus__dash {
+  color: rgba(242, 239, 230, 0.3);
+}
+
+.versus__state {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.versus__state[data-live='true'] {
+  color: var(--red);
+}
+
+/* Serve countdown: the one thing that must be readable without looking. */
+#countdown {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(90px, 22vw, 240px);
+  font-weight: 700;
+  color: rgba(242, 239, 230, 0.16);
+  pointer-events: none;
+}
+#countdown[hidden] {
+  display: none;
+}
+
+#versus-win {
+  position: fixed;
+  inset: 0;
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: rgba(11, 11, 12, 0.94);
+  text-align: center;
+}
+#versus-win[hidden] {
+  display: none;
+}
+
+.win__result {
+  font-size: clamp(28px, 7vw, 56px);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.win__result[data-won='true'] {
+  color: var(--red);
+}
+
+.win__score {
+  font-size: 15px;
+  letter-spacing: 0.3em;
+  color: var(--dim);
+}
+
 /* Bottom status line ----------------------------------------------------- */
 
 #bar {

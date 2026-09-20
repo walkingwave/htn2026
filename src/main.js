@@ -13,13 +13,22 @@ import { Paddle } from './paddle.js';
 import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
 import { BallMachine } from './ballMachine.js';
-import { Game } from './game.js';
+import { Game, SCOREBOARD_POSITION } from './game.js';
 import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
 import { Opponent } from './opponent.js';
 import { Coach, SCENARIOS } from './coach.js';
+import {
+  createRoom,
+  makeRoomCode,
+  roomLinkFor,
+  roomFromUrl,
+  clearRoomFromUrl,
+  isRealtimeAvailable,
+} from './net.js';
+import { VersusMatch } from './versus.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
@@ -224,15 +233,39 @@ const ui = new UI({
   // desktop build being developed separately hooks in here.
   onStart: () => {
     clearBalls();
-    machine.enabled = true;
+    // A versus match is served by the host over the network, so the ball
+    // machine stays down for it.
+    machine.enabled = settings.get('game') !== 'versus';
     game.reset();
   },
   onExit: () => {
     machine.enabled = false;
+    leaveVersus();
     clearBalls();
   },
   isInputBlocked: () => vrMenu.open,
   onRecenter: () => recenter(),
+
+  // Online versus. The lobby in the shell calls these; everything about how
+  // the match actually runs lives in enterVersus / leaveVersus below. Both
+  // are hoisted function declarations, so naming them here is safe.
+  onVersusCreate: async () => {
+    const code = makeRoomCode();
+    const room = await enterVersus('host', code);
+    // Prefer a LAN address the other device can actually open — `localhost`
+    // means nothing to a headset across the room.
+    const origin = room?.lanUrls?.[0] || window.location.origin;
+    return { role: 'host', code, link: roomLinkFor(code, origin), kind: room.kind };
+  },
+  onVersusJoin: async (code) => {
+    const room = await enterVersus('guest', code.trim().toUpperCase());
+    return { role: 'guest', code, kind: room.kind };
+  },
+  onVersusLeave: () => leaveVersus(),
+  // A link with ?room=CODE means someone invited you: the lobby opens on the
+  // join step with the code already filled in.
+  invitedRoom: roomFromUrl(),
+  realtimeAvailable: isRealtimeAvailable(),
 });
 
 xr.detectSupport().then((support) => ui.applyXRSupport(support));
@@ -241,6 +274,14 @@ xr.detectSupport().then((support) => ui.applyXRSupport(support));
 const physics = new PhysicsWorld();
 physics.onBounce = (ball, event, paddle) => {
   sfx.contact(event, ball.velocity.length());
+
+  // Online versus scores itself. The host resolves floor bounces into points;
+  // the guest never simulates the match ball at all, so it has no contacts of
+  // its own to interpret.
+  if (netMode) {
+    if (netMode === 'host') handleVersusHostBounce(ball, event);
+    return;
+  }
 
   // The coach's live drills report where your return actually went, so it
   // needs to see what happens to the ball it served.
@@ -381,6 +422,289 @@ for (const i of [0, 1]) {
   playerRig.add(controller);
 }
 
+// ---------------------------------------------------------------------------
+// Online versus (1v1)
+//
+// One side is authoritative. The host simulates the ball with the same physics
+// the trainer uses and streams its position; the guest renders that and streams
+// only its own bat. That asymmetry is what keeps the two views agreeing: there
+// is exactly one simulation, so there is nothing to reconcile.
+//
+// Each player swings locally with no round trip, which is the part that has to
+// feel immediate. The cost is that the host's bat is authoritative over
+// contact, so a guest's return is resolved against a bat pose that is up to one
+// network tick old — acceptable at 30 Hz over a LAN, and far better than
+// waiting on an ack before the ball moves.
+//
+// While netMode is null every line below is dormant and the trainer behaves
+// exactly as it did before.
+// ---------------------------------------------------------------------------
+let netMode = null; // null | 'host' | 'guest'
+let room = null; // active room handle
+const match = new VersusMatch();
+let versusBall = null; // the rally ball (host authoritative)
+let versusServeTimer = 0; // countdown before the host's next serve
+let netSendAccum = 0; // throttle for outbound state
+let guestBallActive = false;
+
+const NET_TICK = 1 / 30; // 30 Hz, which is plenty for a ball and one bat
+const VERSUS_SERVE_SECONDS = 3;
+
+const guestBallTarget = new THREE.Vector3();
+const _versusQuat = new THREE.Quaternion();
+const _versusFwd = new THREE.Vector3(0, 0, 1);
+
+// The opponent's bat, driven entirely by network packets. It is handed to
+// physics like any other paddle, so their shots come out of the same contact
+// model as yours — real spin, real restitution.
+const remotePaddle = new Paddle();
+scene.add(remotePaddle.mesh);
+remotePaddle.enabled = false;
+remotePaddle.networked = true;
+remotePaddle.mesh.visible = false; // nothing to show until a packet arrives
+
+function getLocalVersusPaddle() {
+  return paddles.find((paddle) => paddle.enabled && paddle.tracking) ?? paddles[0];
+}
+
+function bladePacket(paddle = getLocalVersusPaddle()) {
+  return {
+    c: [paddle.bladeCenter.x, paddle.bladeCenter.y, paddle.bladeCenter.z],
+    n: [paddle.bladeNormal.x, paddle.bladeNormal.y, paddle.bladeNormal.z],
+    v: [paddle.velocity.x, paddle.velocity.y, paddle.velocity.z],
+    // Whether the sender's bat is actually being tracked. Someone watching
+    // from a desktop browser has a paddle object but no pose for it, and
+    // without this flag it would arrive as a phantom bat parked at the origin
+    // — which is on the table, swatting balls its owner can't see.
+    t: paddle.tracking,
+  };
+}
+
+function applyRemotePaddle(pkt) {
+  if (!pkt) return;
+  const tracked = pkt.t !== false;
+  remotePaddle.enabled = tracked;
+  // This paddle never runs Paddle.update(), so mark it tracked here —
+  // otherwise the swept contact test skips it and the opponent could never
+  // return a ball.
+  remotePaddle.tracking = tracked;
+  if (!tracked) {
+    remotePaddle.mesh.visible = false;
+    return;
+  }
+  remotePaddle.bladeCenter.set(pkt.c[0], pkt.c[1], pkt.c[2]);
+  remotePaddle.bladeNormal.set(pkt.n[0], pkt.n[1], pkt.n[2]).normalize();
+  remotePaddle.velocity.set(pkt.v[0], pkt.v[1], pkt.v[2]);
+  remotePaddle.mesh.visible = true;
+  remotePaddle.mesh.position.copy(remotePaddle.bladeCenter);
+  remotePaddle.mesh.quaternion.copy(
+    _versusQuat.setFromUnitVectors(_versusFwd, remotePaddle.bladeNormal)
+  );
+}
+
+function startVersusServe() {
+  versusServeTimer = VERSUS_SERVE_SECONDS;
+  ui.showCountdown(VERSUS_SERVE_SECONDS);
+}
+
+function serveVersusBall() {
+  const ball = balls.find((b) => !b.active);
+  if (!ball) return;
+  // The server alternates ends: host serves toward -Z, guest toward +Z.
+  const dir = match.server === 'host' ? -1 : 1;
+  ball.serve(
+    new THREE.Vector3((Math.random() * 2 - 1) * 0.3, TABLE.HEIGHT + 0.35, -dir * 0.8),
+    new THREE.Vector3((Math.random() * 2 - 1) * 0.6, 1.4, dir * 3.4)
+  );
+  ball.floorCounted = false; // our own flag; Ball.serve() doesn't know about it
+  versusBall = ball;
+  broadcastHostState();
+}
+
+function broadcastHostState() {
+  if (!room) return;
+  const ball =
+    versusBall && versusBall.active
+      ? {
+          active: true,
+          p: [
+            versusBall.mesh.position.x,
+            versusBall.mesh.position.y,
+            versusBall.mesh.position.z,
+          ],
+        }
+      : { active: false, p: [0, 0, 0] };
+  room.send('state', {
+    match: match.snapshot(),
+    ball,
+    paddle: bladePacket(),
+  });
+}
+
+function handleVersusHostBounce(ball, event) {
+  if (event !== 'floor' || ball !== versusBall || ball.floorCounted) return;
+  ball.floorCounted = true;
+  // A ball that reaches the floor on the host's half (z>0) is one the host
+  // failed to return, so the guest scores — and the other way around.
+  const scorer = ball.mesh.position.z > 0 ? 'guest' : 'host';
+  ball.deactivate();
+  versusBall = null;
+  const winner = match.scorePoint(scorer);
+  ui.updateVersusScore(match.snapshot(), 'host');
+  game.revision++; // repaint the in-world board
+  broadcastHostState();
+  if (winner) ui.showVersusWin(winner === 'host', match.snapshot());
+  else startVersusServe();
+}
+
+function runVersusHost(dt) {
+  if (!match.winner && versusServeTimer > 0) {
+    const previous = Math.ceil(versusServeTimer);
+    versusServeTimer -= dt;
+    if (versusServeTimer <= 0) {
+      versusServeTimer = 0;
+      ui.hideCountdown();
+      serveVersusBall();
+    } else if (Math.ceil(versusServeTimer) !== previous) {
+      ui.showCountdown(Math.ceil(versusServeTimer));
+    }
+  }
+
+  versusPaddles.length = 0;
+  versusPaddles.push(...paddles, remotePaddle);
+  physics.step(dt, balls, versusPaddles);
+
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    ball.updateVisualSpin(dt);
+    if (ball.mesh.position.length() > 14) ball.deactivate();
+  }
+
+  netSendAccum += dt;
+  if (netSendAccum >= NET_TICK) {
+    netSendAccum = 0;
+    broadcastHostState();
+  }
+}
+
+function applyHostState(state) {
+  if (!state) return;
+  match.apply(state.match);
+  ui.updateVersusScore(match.snapshot(), 'guest');
+  game.revision++;
+  applyRemotePaddle(state.paddle);
+
+  if (state.ball?.active) {
+    guestBallActive = true;
+    guestBallTarget.set(state.ball.p[0], state.ball.p[1], state.ball.p[2]);
+    if (!versusBall) versusBall = balls[0];
+    // The guest renders the ball but never simulates it: keeping it inactive
+    // keeps physics away from it, and the mesh is driven from packets.
+    versusBall.active = false;
+    versusBall.mesh.visible = true;
+  } else {
+    guestBallActive = false;
+    if (versusBall) {
+      versusBall.deactivate();
+      versusBall = null;
+    }
+  }
+
+  if (match.winner) ui.showVersusWin(match.winner === 'guest', match.snapshot());
+}
+
+function runVersusGuest(dt) {
+  netSendAccum += dt;
+  if (netSendAccum >= NET_TICK) {
+    netSendAccum = 0;
+    room?.send('paddle', bladePacket());
+  }
+  // Smoothed toward the last packet rather than snapped to it, so a late or
+  // dropped one reads as the ball carrying on instead of stuttering.
+  if (guestBallActive && versusBall) {
+    versusBall.mesh.position.lerp(guestBallTarget, Math.min(1, dt * 16));
+    versusBall.updateVisualSpin(dt);
+  }
+}
+
+async function enterVersus(role, code) {
+  machine.enabled = false;
+  coach.setActive(false);
+  opponent.setActive(false);
+  clearBalls();
+  game.reset();
+
+  versusBall = null;
+  guestBallActive = false;
+  versusServeTimer = 0;
+  netSendAccum = 0;
+  match.reset();
+  netMode = role;
+  // Nothing serves in a match, and the launcher stands at the far end —
+  // which is exactly where the guest is standing, so it would otherwise be
+  // parked in their face.
+  machine.mesh.visible = false;
+  opponent.mesh.visible = false;
+
+  // The guest plays from the far end. Turning the rig 180° also mirrors the
+  // pointer mapping, so left and right stay the way round they should be with
+  // no extra transforms anywhere else.
+  playerRig.position.set(0, 0, role === 'guest' ? -PLAY_AREA.PLAYER_Z : PLAY_AREA.PLAYER_Z);
+  playerRig.rotation.y = role === 'guest' ? Math.PI : 0;
+
+  // The board hangs beyond the far end, which for the guest is behind their
+  // head. Move it to the other end and turn it round so both players read the
+  // score off a board in front of them.
+  scoreboard.mesh.position.z =
+    role === 'guest' ? -SCOREBOARD_POSITION.z : SCOREBOARD_POSITION.z;
+  scoreboard.mesh.rotation.y = role === 'guest' ? Math.PI : 0;
+
+  room = createRoom({ code, role });
+  if (role === 'host') room.on('paddle', (pkt) => applyRemotePaddle(pkt));
+  else room.on('state', (state) => applyHostState(state));
+
+  room.onOpponent((present) => {
+    ui.setVersusOpponent(present);
+    // The first moment both players are in the room, the host puts a ball up.
+    if (present && role === 'host' && !match.winner && !versusBall && versusServeTimer <= 0) {
+      startVersusServe();
+    }
+  });
+
+  await room.connect();
+  game.revision++;
+  return room;
+}
+
+function leaveVersus() {
+  if (!netMode && !room) return;
+  room?.close();
+  room = null;
+  netMode = null;
+  remotePaddle.enabled = false;
+  remotePaddle.tracking = false;
+  remotePaddle.mesh.visible = false;
+  versusBall = null;
+  guestBallActive = false;
+  versusServeTimer = 0;
+  netSendAccum = 0;
+  clearBalls();
+  ui.hideCountdown();
+  playerRig.position.set(0, 0, PLAY_AREA.PLAYER_Z);
+  playerRig.rotation.y = 0;
+  scoreboard.mesh.position.z = SCOREBOARD_POSITION.z;
+  scoreboard.mesh.rotation.y = 0;
+  applyHandedness(); // restores bat visibility the versus branch took over
+  machine.mesh.visible = true;
+  opponent.mesh.visible = true;
+  clearRoomFromUrl();
+  game.revision++;
+}
+
+// The board reads the match straight off these, so it can show a score
+// without knowing anything about the network.
+scoreboard.versus = { match, get role() { return netMode; } };
+
 // In-headset pause menu. The DOM shell is invisible in an immersive session,
 // so this is the only way to reach settings with the headset on.
 const vrMenu = new VRMenu({
@@ -518,6 +842,7 @@ renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
 const clock = new THREE.Clock();
 let servedSeen = 0;
 const activePaddles = [];
+const versusPaddles = [];
 const ZERO = new THREE.Vector3();
 let lastCoachLine = '';
 
@@ -540,6 +865,36 @@ function tick(dt) {
   });
 
   for (const paddle of paddles) paddle.update(dt);
+
+  // A networked match replaces the trainer wholesale: no machine, no rally
+  // opponent, no coach, and only one side steps physics. Bail out here rather
+  // than threading `netMode` through every stage below.
+  if (netMode) {
+    pollMenuButton(dt);
+    vrMenu.update(dt, controllers);
+    for (const controller of controllers) {
+      if (controller.userData.ray) controller.userData.ray.visible = vrMenu.open;
+    }
+    targetRing.visible = false;
+    targetZone.visible = false;
+
+    // A browser with no headset has bats that are attached to nothing, parked
+    // at the rig origin. Facing down the table they sit behind the camera and
+    // nobody notices; the guest's rig is turned around, which swings them into
+    // view as two objects floating in front of your face. Hide what isn't
+    // actually being tracked.
+    for (const paddle of paddles) {
+      paddle.mesh.visible = paddle.enabled && paddle.tracking;
+    }
+
+    if (netMode === 'host') runVersusHost(dt);
+    else runVersusGuest(dt);
+
+    scoreboard.update();
+    ui.update();
+    renderer.render(scene, camera);
+    return;
+  }
 
   // The opponent only exists in rally mode. It moves before the physics
   // step so the bat's derived velocity matches the motion this frame.
@@ -660,6 +1015,9 @@ if (import.meta.env.DEV) {
   window.__probe = {
     balls, machine, physics, game, paddles, targetZone,
     settings, ui, vrMenu, opponent, coach, scene, camera, tick,
+    match, remotePaddle,
+    get netMode() { return netMode; },
+    get room() { return room; },
   };
 }
 
