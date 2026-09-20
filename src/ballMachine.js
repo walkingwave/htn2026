@@ -211,10 +211,11 @@ export class BallMachine {
     const ball = this.balls.find((b) => !b.active);
     if (!ball) return; // pool exhausted; a ball will free up shortly
 
-    // In rally mode the opponent puts the ball in play from their own bat,
-    // so the machine hands off rather than firing from the corner.
-    if (this.isRallyMode && this.server) {
-      if (!this.server.serve(ball)) return;
+    // A rally starts with the player's serve. Keep the ball hovering at the
+    // same spot until it is struck; scripted opponent serves made mouse and
+    // camera play feel like the point had already begun without the player.
+    if (this.isRallyMode) {
+      this._holdServeForPlayer(ball);
       this.servedCount++;
       return;
     }
@@ -283,6 +284,16 @@ export class BallMachine {
 
     const velocity = solveLaunch(origin, _target, speed * this._setting('pace'), spin);
     ball.serve(origin, velocity, spin);
+  }
+
+  _holdServeForPlayer(ball) {
+    const origin = new THREE.Vector3(
+      0,
+      TABLE.HEIGHT + 0.42,
+      PLAY_AREA.PLAYER_Z - 0.62
+    );
+    this.aim.copy(origin);
+    ball.holdForServe(origin);
   }
 
   // Target mode: lob the ball gently upward just in front of the player so
