@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { PADDLE } from './constants.js';
 
+const HAND_PADDLE_SCALE = 1.4;
+
 const _worldPos = new THREE.Vector3();
 const _worldQuat = new THREE.Quaternion();
 const _prevQuatInv = new THREE.Quaternion();
@@ -20,6 +22,8 @@ export class Paddle {
     this.angularVelocity = new THREE.Vector3(); // rad/s
     this.bladeCenter = new THREE.Vector3();
     this.bladeNormal = new THREE.Vector3();
+    this.headRadius = PADDLE.HEAD_RADIUS;
+    this.headThickness = PADDLE.HEAD_THICKNESS;
 
     // False until two frames have been sampled — velocity is meaningless
     // before that, and a bogus first value can launch a ball across the room.
@@ -32,13 +36,57 @@ export class Paddle {
     this.isOpponent = false;
 
     this._blade = this.mesh.getObjectByName('blade');
+    this._profile = this._blade.getObjectByName('paddle-profile');
+    this._gripTransform = {
+      meshQuaternion: this.mesh.quaternion.clone(),
+      bladePosition: this._blade.position.clone(),
+      bladeQuaternion: this._blade.quaternion.clone(),
+      profileQuaternion: this._profile.quaternion.clone(),
+    };
     this._prevPos = new THREE.Vector3();
     this._prevQuat = new THREE.Quaternion();
     this._samples = 0;
+    this._cameraSampleTime = null;
   }
 
   attachTo(controllerGrip) {
     controllerGrip.add(this.mesh);
+  }
+
+  // A palm describes the striking face itself, rather than a controller grip.
+  setPalmTrackingMode(active) {
+    const scale = active ? HAND_PADDLE_SCALE : 1;
+    this.mesh.scale.setScalar(scale);
+    this.headRadius = PADDLE.HEAD_RADIUS * scale;
+    this.headThickness = PADDLE.HEAD_THICKNESS * scale;
+    if (active) {
+      this.mesh.quaternion.identity();
+      this._blade.position.set(0, 0, 0);
+      this._blade.quaternion.identity();
+      this._profile.quaternion.identity();
+    } else {
+      this.mesh.quaternion.copy(this._gripTransform.meshQuaternion);
+      this._blade.position.copy(this._gripTransform.bladePosition);
+      this._blade.quaternion.copy(this._gripTransform.bladeQuaternion);
+      this._profile.quaternion.copy(this._gripTransform.profileQuaternion);
+    }
+    this.resetTracking();
+  }
+
+  resetTracking() {
+    this._samples = 0;
+    this._cameraSampleTime = null;
+    this.tracking = false;
+    this.velocity.set(0, 0, 0);
+    this.angularVelocity.set(0, 0, 0);
+  }
+
+  updateFromCamera(timestamp) {
+    if (!Number.isFinite(timestamp) || (this._cameraSampleTime !== null && timestamp <= this._cameraSampleTime)) return;
+    if (this._cameraSampleTime !== null && timestamp - this._cameraSampleTime > 250) this.resetTracking();
+    const dt = this._cameraSampleTime === null ? 0 : (timestamp - this._cameraSampleTime) / 1000;
+    this.update(dt);
+    this._cameraSampleTime = timestamp;
   }
 
   // Call once per render frame with real elapsed time.
@@ -155,6 +203,7 @@ function buildPaddleMesh() {
   // would compose with the mirroring rotations on the back-facing pieces and
   // throw them onto the wrong axis.
   const art = new THREE.Group();
+  art.name = 'paddle-profile';
   blade.add(art);
 
   // --- The wood blank: blade + throat + tang, one continuous outline ------
@@ -310,4 +359,3 @@ function rubberTexture(hex) {
   rubberTextures.set(hex, tex);
   return tex;
 }
-

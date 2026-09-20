@@ -152,6 +152,7 @@ export class UI {
       { id: 'ar', label: 'Enter passthrough', note: '', disabled: true },
       { id: 'vr', label: 'Enter full VR', note: '', disabled: true },
       { id: 'desktop', label: 'Computer', note: 'preview', disabled: false },
+      { id: 'camera-hand', label: 'Hand Tracking', note: 'preview', disabled: false },
     ];
     this._renderMenu();
     this._syncGamePick();
@@ -325,7 +326,15 @@ export class UI {
   _activateMenu(index) {
     const entry = this._entries[index];
     if (!entry || entry.disabled) return;
-    if (entry.id === 'desktop') this._launch(null);
+    if (entry.id === 'camera-hand') {
+      this.settings.set('paddleSource', 'camera-hand');
+      this._launch(null);
+    } else if (entry.id === 'desktop') {
+      // On desktop, the controller source falls back to the mouse. Do not
+      // reuse a saved webcam/hand selection when Computer was requested.
+      this.settings.set('paddleSource', 'controller');
+      this._launch(null);
+    }
     else this._launch(entry.id === 'ar' ? 'immersive-ar' : 'immersive-vr');
   }
 
