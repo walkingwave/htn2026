@@ -19,6 +19,8 @@ import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
 import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
+import { startHandTracking } from './handTracking.js';
+import { HandPaddlePose } from './vision/handPose.js';
 import { Opponent } from './opponent.js';
 import { Coach, SCENARIOS } from './coach.js';
 import {
@@ -222,6 +224,10 @@ xr.onModeChange = (mode) => {
   // Close the in-world pause menu so it isn't still hanging there, open and
   // holding input, the next time a session starts.
   if (!mode) vrMenu.toggle(false);
+  if (mode) {
+    stopHandPaddle();
+    stopWebcamBat();
+  } else if (ui.menu.hidden) syncCameraInput();
 };
 
 const ui = new UI({
@@ -232,7 +238,7 @@ const ui = new UI({
   sfx,
   // `mode` is an XR session mode, or null for the on-screen preview. The
   // desktop build being developed separately hooks in here.
-  onStart: () => {
+  onStart: (mode) => {
     clearBalls();
     // A versus match is served by the host over the network, so the ball
     // machine stays down for it.
@@ -240,16 +246,24 @@ const ui = new UI({
     game.reset();
     // The camera only opens once you are actually playing, not while the
     // setting sits there remembered from last time.
-    if (usingWebcamBat()) startWebcamBat();
+    if (!mode) syncCameraInput();
   },
   onExit: () => {
     machine.enabled = false;
     leaveVersus();
     clearBalls();
     stopWebcamBat();
+    stopHandPaddle();
   },
   isInputBlocked: () => vrMenu.open,
-  onRecenter: () => recenter(),
+  onRecenter: () => {
+    if (handSession) {
+      if (!handPose.recenter()) return ui.toast('Show your hand before recentering');
+      desktopRig.position.copy(handPose.position);
+      desktopPaddle.resetTracking();
+      ui.toast('Hand paddle recentred');
+    } else recenter();
+  },
 
   // Online versus. The lobby in the shell calls these; everything about how
   // the match actually runs lives in enterVersus / leaveVersus below. Both
@@ -487,7 +501,7 @@ const desktopAim = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
 const _bladeOffset = new THREE.Vector3();
 
 function placeDesktopBat(clientX, clientY) {
-  if (renderer.xr.isPresenting) return; // controllers own the bats in a session
+  if (renderer.xr.isPresenting || handSession) return;
   const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
   const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
   desktopAim.x = (x - 0.5) * 1.25;
@@ -514,7 +528,7 @@ function poseDesktopBat() {
 }
 
 function swingDesktopBat() {
-  if (renderer.xr.isPresenting) return;
+  if (renderer.xr.isPresenting || handSession) return;
   desktopThrust = DESKTOP_THRUST_TIME;
 }
 
@@ -538,15 +552,23 @@ function usingWebcamBat() {
 
 function startWebcamBat() {
   if (camTracker) return;
-  camTracker = new PaddleTracker();
-  camTracker.onState = (state, error) => {
+  const tracker = new PaddleTracker();
+  camTracker = tracker;
+  tracker.onState = (state, error) => {
+    if (camTracker !== tracker) return;
     if (state === TRACKER_STATE.ERROR) ui.toast(error ?? 'Camera unavailable');
     else if (state === TRACKER_STATE.CALIBRATING) {
       ui.toast('Hold your bat up, face on — then click to calibrate');
     } else if (state === TRACKER_STATE.TRACKING) ui.toast('Webcam bat live');
     else if (state === TRACKER_STATE.LOST) ui.toast('Lost the bat — hold it up again');
   };
-  camTracker.start().catch((err) => {
+  tracker.start().then(() => {
+    // A hand session or menu exit may have replaced this input while the
+    // browser was asking permission. Release that late camera stream too.
+    if (camTracker !== tracker) tracker.stop();
+  }).catch((err) => {
+    tracker.stop();
+    if (camTracker !== tracker) return;
     ui.toast(err?.message ?? 'Camera failed');
     stopWebcamBat();
   });
@@ -556,6 +578,69 @@ function stopWebcamBat() {
   camTracker?.stop();
   camTracker = null;
 }
+
+// Keep the computercam pose/filter pipeline intact. Camera poses arrive at
+// 30 Hz, independently of rendering: sample velocity only on fresh poses.
+let handSession = null;
+let handPose = null;
+let handSeenAt = -Infinity;
+
+function syncCameraInput() {
+  const playing = ui.menu.hidden && !renderer.xr.isPresenting;
+  const hand = playing && settings.get('paddleSource') === 'camera-hand';
+  if (!hand) stopHandPaddle();
+  if (!playing || !usingWebcamBat()) stopWebcamBat();
+  if (hand) startHandPaddle();
+  else if (playing && usingWebcamBat()) startWebcamBat();
+}
+
+function startHandPaddle() {
+  if (handSession) return;
+  stopWebcamBat();
+  const session = new AbortController();
+  handSession = session;
+  handPose = new HandPaddlePose();
+  desktopPaddle.setPalmTrackingMode(true);
+  desktopRig.position.copy(handPose.position);
+  desktopRig.quaternion.copy(handPose.quaternion);
+  const fail = (error) => {
+    if (handSession !== session) return;
+    stopHandPaddle();
+    ui.toast(`${error?.message ?? 'Hand camera unavailable'} — using mouse`);
+  };
+  startHandTracking((sample) => {
+    if (handSession !== session) return;
+    const result = sample && handPose.update(sample);
+    if (!result) {
+      handPose.markLost();
+      desktopPaddle.resetTracking();
+      return;
+    }
+    handSeenAt = performance.now();
+    if (result.reacquired) desktopPaddle.resetTracking();
+    desktopRig.position.copy(handPose.position);
+    desktopRig.quaternion.copy(handPose.quaternion);
+    desktopPaddle.updateFromCamera(sample.timestamp);
+  }, (status) => {
+    if (handSession === session) ui.toast(status);
+  }, { signal: session.signal, onError: fail }).catch(fail);
+}
+
+function stopHandPaddle() {
+  if (!handSession) return;
+  const session = handSession;
+  handSession = null;
+  session.abort();
+  handPose = null;
+  handSeenAt = -Infinity;
+  desktopPaddle.setPalmTrackingMode(false);
+  poseDesktopBat();
+}
+
+window.addEventListener('pagehide', () => {
+  stopHandPaddle();
+  stopWebcamBat();
+});
 
 // Pose the rig from the tracker. Camera space is +X right, +Y up, −Z away
 // from the viewer, with the origin at the lens; the desktop camera sits at eye
@@ -598,7 +683,7 @@ window.addEventListener('pointerdown', (e) => {
 window.addEventListener(
   'wheel',
   (e) => {
-    if (renderer.xr.isPresenting || !ui.menu.hidden) return;
+    if (renderer.xr.isPresenting || !ui.menu.hidden || handSession) return;
     desktopDepthTarget = THREE.MathUtils.clamp(
       desktopDepthTarget - Math.sign(e.deltaY) * 0.08,
       -1.3,
@@ -637,6 +722,14 @@ function updateDesktopBat(dt) {
   }
 
   if (inXR) return;
+
+  if (handSession) {
+    if (performance.now() - handSeenAt > 250) {
+      handPose.markLost();
+      desktopPaddle.resetTracking();
+    }
+    return;
+  }
 
   // A webcam bat, once it has locked on, owns the rig outright: the pose is
   // the real bat's. Until it locks on — or if it loses the bat — the pointer
@@ -1136,8 +1229,7 @@ settings.onChange((key) => {
   if (key === 'paddleSource') {
     // Hold the camera open only while it is the chosen input. Nobody wants a
     // webcam light on because they tried a menu option once.
-    if (usingWebcamBat()) startWebcamBat();
-    else stopWebcamBat();
+    syncCameraInput();
   }
   if (key === 'hand') applyHandedness();
   if (key === 'difficulty') opponent.setSkill(settings.get('difficulty'));
@@ -1210,7 +1302,9 @@ function tick(dt) {
   // velocity is measured against the pose it actually has this frame.
   updateDesktopBat(dt);
 
-  for (const paddle of paddles) paddle.update(dt);
+  for (const paddle of paddles) {
+    if (paddle !== desktopPaddle || !handSession) paddle.update(dt);
+  }
 
   // A networked match replaces the trainer wholesale: no machine, no rally
   // opponent, no coach, and only one side steps physics. Bail out here rather

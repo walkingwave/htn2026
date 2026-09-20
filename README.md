@@ -128,9 +128,15 @@ It finds the rubber by colour, so it needs to be shown the colour once: hold the
 
 Good light and a bat whose rubber isn't the same colour as your shirt both help a lot.
 
+### Playing with your hand
+
+Choose **Hand Tracking** on the start menu, or **Settings → Bat follows → Hand Tracking** while playing on a computer. Allow camera access and show an open palm. Move left/right and up/down, move closer/farther for depth, and tilt your palm to angle the paddle. Press **C** to recenter. The hand-controlled paddle is 40% larger, with a matching collision surface.
+
+A small mirrored preview helps keep your hand visible. Tracking loss pauses paddle hits; leaving the mode releases the camera. The hand model downloads on first use, while the matching MediaPipe runtime is bundled locally. Use the HTTPS URL printed by the dev server; deployed camera access also requires HTTPS.
+
 ### Limits worth knowing
 
-- A desktop browser has no tracked bat, so a computer player can watch a match but cannot return a ball. Versus is meant to be played in the headset.
+- Webcam hand control needs a visible palm and a camera permission grant. If the hand leaves the frame, paddle collisions pause until it is tracked again.
 - The host drives the simulation from its animation loop, which browsers stop in a backgrounded tab. If the host tabs away, the match pauses for both players until it comes back.
 
 ## Physics
