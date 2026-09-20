@@ -2,7 +2,7 @@
 
 A browser-based table tennis trainer and versus game, tested on the Meta Quest 3S through **WebXR** — no Unity, app store, or sideloading required. It also runs on a laptop with a mouse, webcam hand tracking, mobile phone, or a physical paddle fitted with printed markers.
 
-Built at Hack the North 2026.
+Built at Hack the North 2026. Check it out here: https://paddlelab-xr.vercel.app/
 
 ## Stack
 
