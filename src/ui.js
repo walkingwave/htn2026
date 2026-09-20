@@ -90,20 +90,38 @@ export class UI {
     el.id = 'menu';
     el.innerHTML = `
       <div>
-        <h1 class="title">Paddle<span>·</span>Lab<br />XR<span class="blink">_</span></h1>
+        <h1 class="title">Paddle<span>·</span>Lab XR<span class="blink">_</span></h1>
         <p class="tagline">Hack the North 2026</p>
       </div>
-      <div class="menu-list" data-list></div>
-      <div class="game-pick">
-        <span class="game-pick__label">Game</span>
-        <button class="key" data-game="arcade"><b>1</b>Arcade</button>
-        <button class="key" data-game="coach"><b>2</b>Coach</button>
-        <button class="key" data-game="versus"><b>3</b>Versus</button>
+      <div class="step">
+        <div class="step__head"><span class="step__num">1</span>Pick a game</div>
+        <div class="game-pick">
+          <button class="game" data-game="arcade">
+            <span class="game__key">1</span>
+            <span class="game__name">Arcade</span>
+            <span class="game__blurb">Drills and rallies against the machine</span>
+          </button>
+          <button class="game" data-game="coach">
+            <span class="game__key">2</span>
+            <span class="game__name">Coach</span>
+            <span class="game__blurb">Learn one stroke at a time, scored</span>
+          </button>
+          <button class="game" data-game="versus">
+            <span class="game__key">3</span>
+            <span class="game__name">Versus</span>
+            <span class="game__blurb">Play a friend on another device</span>
+          </button>
+        </div>
       </div>
-      <div class="lobby" data-lobby hidden>
+      <div class="step">
+        <div class="step__head"><span class="step__num">2</span>Pick how to play</div>
+        <div class="menu-list" data-list></div>
+      </div>
+      <div class="step lobby" data-lobby hidden>
+        <div class="step__head"><span class="step__num">✦</span>Set up the match</div>
         <div class="lobby__row">
-          <button class="key" data-lobby-host><b>▸</b>Host a match</button>
-          <span class="lobby__or">or</span>
+          <button class="key" data-lobby-host><b>▸</b>Start a room</button>
+          <span class="lobby__or">or join one</span>
           <input
             class="lobby__code"
             data-lobby-code
@@ -122,7 +140,8 @@ export class UI {
         </div>
       </div>
       <div class="hint">
-        ↑ ↓ select &nbsp;·&nbsp; enter start &nbsp;·&nbsp; L scores<br />
+        <b>1 2 3</b> game &nbsp;·&nbsp; <b>↑ ↓</b> how to play &nbsp;·&nbsp;
+        <b>Enter</b> begin &nbsp;·&nbsp; <b>L</b> scores<br />
         <span data-menu-note></span>
       </div>
     `;
@@ -149,10 +168,13 @@ export class UI {
       if (e.code === 'Enter') this._joinMatch();
     };
 
+    // Named for where you end up, with the trade-off spelled out, rather than
+    // for the WebXR session mode being requested. "Enter passthrough" means
+    // nothing to someone who has not read the spec.
     this._entries = [
-      { id: 'ar', label: 'Enter passthrough', note: '', disabled: true },
-      { id: 'vr', label: 'Enter full VR', note: '', disabled: true },
-      { id: 'desktop', label: 'Computer', note: 'preview', disabled: false },
+      { id: 'ar', label: 'In my room', note: 'headset · passthrough', disabled: true },
+      { id: 'vr', label: 'In the arena', note: 'headset · full VR', disabled: true },
+      { id: 'desktop', label: 'On this screen', note: 'mouse or webcam bat', disabled: false },
     ];
     this._renderMenu();
     this._syncGamePick();
@@ -292,9 +314,11 @@ export class UI {
       b.className = 'item';
       b.disabled = entry.disabled;
       b.setAttribute('aria-selected', String(i === this._selected));
+      // Three columns, so the caret, the place and the caption line up down
+      // the list instead of drifting with the length of each label.
       b.innerHTML =
         `<span class="item__caret">▸</span><span>${entry.label}</span>` +
-        (entry.note ? `<span class="item__note">${entry.note}</span>` : '');
+        `<span class="item__note">${entry.note ?? ''}</span>`;
       b.onmouseenter = () => {
         this._selected = i;
         this._syncMenuSelection();
@@ -333,13 +357,17 @@ export class UI {
   applyXRSupport(support) {
     this._entries[0].disabled = !support['immersive-ar'];
     this._entries[1].disabled = !support['immersive-vr'];
-    this._entries[0].note = support['immersive-ar'] ? '' : 'unavailable';
-    this._entries[1].note = support['immersive-vr'] ? '' : 'unavailable';
+    this._entries[0].note = support['immersive-ar']
+      ? 'headset · passthrough'
+      : 'needs a headset';
+    this._entries[1].note = support['immersive-vr']
+      ? 'headset · full VR'
+      : 'needs a headset';
 
     const note = this.menu.querySelector('[data-menu-note]');
     note.textContent = support['immersive-ar'] || support['immersive-vr']
       ? 'Headset ready'
-      : 'No headset — open in the Meta Quest Browser for VR';
+      : 'Open this page in the Meta Quest Browser to play in a headset';
 
     this._selected = this._entries.findIndex((e) => !e.disabled);
     if (this._selected < 0) this._selected = 0;

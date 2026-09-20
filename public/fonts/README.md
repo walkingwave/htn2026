@@ -1,24 +1,29 @@
 # The logo face
 
-The wordmark is set in **Ping Pong** — drawn by Elżbieta Krużyńska in 1974,
-digitised and extended by Mateusz Machalski and Małgorzata Bartosik in 2020,
-published by [Capitalics](https://capitalics.wtf/en/font/ping-pong).
+The wordmark is set in **Bowlby One** by vernon adams, under the SIL Open Font
+Licence 1.1 (`OFL-BowlbyOne.txt` beside it). It is committed here as a WOFF2
+rather than pulled from a CDN, because this runs off a laptop on conference
+Wi-Fi with a headset next to it — an outbound request to fetch the logo is a
+request that can fail at the worst moment.
 
-The file is not in this repository. It is free of charge but sits behind an
-account on the foundry's site, so it has to be fetched by a person who has
-agreed to the licence rather than pulled down by a build:
+`RubikMonoOne-Regular.woff2` sits here too, with its licence, as the
+alternative: squarer, more technical, less 1970s. Swap the `src` in the
+`@font-face` at the top of `src/ui.css` to try it.
 
-1. Sign in at <https://capitalics.wtf/en/font/ping-pong> and download it.
-2. Read the licence on their site and check it covers what you are doing with
-   it — a hackathon demo and a public deployment are not the same thing.
-3. Convert to WOFF2 if the download doesn't include one (`fonttools`:
-   `pyftsubset PingPong.otf --flavor=woff2 --output-file=PingPong.woff2`,
-   or any web font converter).
-4. Drop it here as `PingPong.woff2`.
+## The face this actually wants
 
-That is all — `src/ui.css` already declares the `@font-face` and the title
-picks it up on the next reload.
+Capitalics' [Ping Pong](https://capitalics.wtf/en/font/ping-pong) — drawn by
+Elżbieta Krużyńska in 1974, digitised by Mateusz Machalski and Małgorzata
+Bartosik in 2020. It is free of charge but account-gated, so it cannot ship in
+a public repository; it has to be fetched by a person who has agreed to the
+licence. To use it instead:
 
-Without the file the logo falls back to the interface's monospace face. That
-is deliberate: the app should look intentional to anyone who clones it, not
-broken because an asset they cannot legally redistribute is missing.
+1. Sign in at the link above and download it.
+2. Check the licence covers what you are doing — a hackathon demo and a public
+   deployment are not the same thing, and the product page states no terms.
+3. Convert to WOFF2 (`fonttools`: set `font.flavor = 'woff2'` and save) and
+   drop it here.
+4. Point the `@font-face` `src` in `src/ui.css` at it.
+
+Bowlby is standing in for it on purpose: same idea, heavy and geometric with
+circular bowls, unmistakably of that decade — and redistributable.

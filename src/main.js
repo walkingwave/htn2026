@@ -17,7 +17,7 @@ import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
-import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
+import { MarkerPaddleTracker, TRACKER_STATE } from './vision/markerPaddleTracker.js';
 import { Opponent } from './opponent.js';
 import { Coach, SCENARIOS } from './coach.js';
 import {
@@ -729,7 +729,7 @@ function usingWebcamBat() {
 
 function startWebcamBat() {
   if (camTracker) return;
-  camTracker = new PaddleTracker();
+  camTracker = new MarkerPaddleTracker();
   camTracker.onState = (state, error) => {
     // The preview carries the running commentary; toasts are for the moments
     // that change what the player should do.
@@ -737,12 +737,12 @@ function startWebcamBat() {
       ui.setCamStatus(error ?? 'Camera unavailable');
       ui.toast(error ?? 'Camera unavailable');
     } else if (state === TRACKER_STATE.CALIBRATING) {
-      ui.setCamStatus('Hold the bat in the box · click');
-      ui.toast('Hold your bat up, face on — then click to calibrate');
+      ui.setCamStatus('Show the marker side of the bat');
+      ui.toast('Show the printed markers to the camera — click to set neutral');
     } else if (state === TRACKER_STATE.TRACKING) {
-      ui.setCamStatus('Tracking · V to recalibrate');
+      ui.setCamStatus('Tracking markers · click to re-zero');
     } else if (state === TRACKER_STATE.LOST) {
-      ui.setCamStatus('Lost it — hold the bat up');
+      ui.setCamStatus('Lost the markers — show the bat face');
     }
   };
   ui.showCamPreview(camTracker);
@@ -790,7 +790,7 @@ window.addEventListener('pointerdown', (e) => {
   // The webcam tracker has to be shown the bat's colour once. Any click while
   // it is waiting is that gesture, so there is no separate key to learn.
   if (camTracker?.state === TRACKER_STATE.CALIBRATING) {
-    if (!camTracker.calibrateColour()) ui.toast('Nothing bright enough — try better light');
+    if (!camTracker.calibrateColour()) ui.toast('No markers seen yet — bring the bat closer');
     return;
   }
   placeDesktopBat(e.clientX, e.clientY);
@@ -818,8 +818,8 @@ window.addEventListener('keydown', (e) => {
   // Re-learn the bat's colour without leaving the game. Lighting changes as
   // you move around a room, and a key beats going back to the menu for it.
   if (e.code === 'KeyV' && camTracker) {
-    if (camTracker.calibrateColour()) ui.toast('Bat colour re-learned');
-    else ui.toast('Hold the bat in the middle of the frame');
+    if (camTracker.calibrateColour()) ui.toast('Neutral pose re-zeroed');
+    else ui.toast('Show the markers to the camera first');
     return;
   }
   // Which way an ambiguous tilt is read, for the rare case it latches on to
