@@ -232,9 +232,14 @@ const coach = new Coach({
       .then(({ analysis }) => {
         ui.showCoachFeedback(analysis);
         ui.setCoachProfileStatus('OPENAI');
-        narrate(analysis, 'a').catch(() => {});
+        narrateCoach(analysis, 'a');
       })
-      .catch(() => ui.setCoachProfileStatus('LOCAL'));
+      .catch(() => {
+        ui.setCoachProfileStatus('LOCAL');
+        // ElevenLabs can still read the local stroke correction when the
+        // optional OpenAI call is unavailable.
+        narrateCoach(score.note || coach.advice, 'a');
+      });
     const playerId = settings.get('playerName') || 'anonymous';
     recordProfileEvent(
       { type: 'coach_score', scenario: coach.scenario.id, score },
@@ -333,7 +338,7 @@ const ui = new UI({
     getProfileSummary(settings.get('playerName') || 'anonymous')
       .then(({ summary }) => {
         ui.showProfileSummary(summary);
-        narrate(summary, 'b').catch(() => {});
+        narrateCoach(summary, 'b');
       })
       .catch(() => {});
     if (settings.get('difficulty') === 'fly') flyBrainViz.show();
@@ -422,8 +427,27 @@ xr.detectSupport().then((support) => ui.applyXRSupport(support));
 // the player immediate local guidance, then lets the server replace that line
 // with OpenAI's single precise correction when credentials are available.
 let lastLiveCoachAt = -Infinity;
-let liveCoachSequence = 0;
 let liveCoachRequestActive = false;
+let pendingLiveCoachRequest = null;
+let lastNarrationFailureAt = -Infinity;
+
+// Do not hide a broken voice path. In particular, localhost's Vite server
+// does not serve Vercel Functions, and browser autoplay can reject playback.
+function narrateCoach(text, narrator = 'a') {
+  return narrate(text, narrator).catch((error) => {
+    console.warn('[Coach narration]', error);
+    ui.setCoachProfileStatus('VOICE ERROR');
+    const now = performance.now();
+    if (now - lastNarrationFailureAt < 4500) return;
+    lastNarrationFailureAt = now;
+    const message = error?.message?.includes('Vercel dev')
+      ? 'Coach voice needs Vercel dev or the deployed app'
+      : error?.name === 'NotAllowedError'
+        ? 'Coach voice is blocked — click the speaker'
+        : 'Coach voice unavailable — check ElevenLabs';
+    ui.toast(message);
+  });
+}
 
 function percent(value) {
   return Math.round(THREE.MathUtils.clamp(value, 0, 100));
@@ -465,6 +489,36 @@ function assessLiveShot(ball, paddle) {
   };
 }
 
+function requestLiveCoachAnalysis(request) {
+  liveCoachRequestActive = true;
+  const { shot, playerId, game: gameMode, opponent: opponentName } = request;
+  analyzeShot(shot, {
+    game: gameMode,
+    player: playerId,
+    opponent: opponentName,
+  })
+    .then(({ analysis }) => {
+      // A newer stroke arrived while this one was being analyzed. Let the
+      // queued request produce the correction instead of talking about a
+      // ball the player has already moved past.
+      if (pendingLiveCoachRequest || !analysis) return;
+      ui.showCoachFeedback(analysis);
+      ui.setCoachProfileStatus('OPENAI');
+      narrateCoach(analysis, 'a');
+    })
+    .catch(() => {
+      if (pendingLiveCoachRequest) return;
+      ui.setCoachProfileStatus('LOCAL');
+      narrateCoach(shot.note, 'a');
+    })
+    .finally(() => {
+      liveCoachRequestActive = false;
+      const next = pendingLiveCoachRequest;
+      pendingLiveCoachRequest = null;
+      if (next) requestLiveCoachAnalysis(next);
+    });
+}
+
 function coachLiveShot(ball, paddle) {
   // Guided lessons already emit their own richer trace score, and the bot's
   // paddle is not the player we are coaching.
@@ -474,7 +528,6 @@ function coachLiveShot(ball, paddle) {
   lastLiveCoachAt = now;
 
   const shot = assessLiveShot(ball, paddle);
-  const sequence = ++liveCoachSequence;
   const playerId = settings.get('playerName') || 'anonymous';
   ui.showLiveCoachShot(shot);
 
@@ -492,28 +545,20 @@ function coachLiveShot(ball, paddle) {
   recordTelemetry(telemetry).catch(() => {});
   recordProfileEvent({ type: 'live_shot', shot }, playerId).catch(() => {});
 
-  // One request at a time keeps rapid rallies usable and avoids reading an
-  // old correction after the player has already hit the next ball.
-  if (liveCoachRequestActive) return;
-  liveCoachRequestActive = true;
-  analyzeShot(shot, {
+  const request = {
+    shot,
+    playerId,
     game: settings.get('game'),
-    player: playerId,
     opponent: settings.get('game') === 'tournament' ? tournament.opponent?.name : undefined,
-  })
-    .then(({ analysis }) => {
-      if (sequence !== liveCoachSequence || !analysis) return;
-      ui.showCoachFeedback(analysis);
-      ui.setCoachProfileStatus('OPENAI');
-      // The same compact correction in the panel is read through ElevenLabs.
-      narrate(analysis, 'a').catch(() => {});
-    })
-    .catch(() => {
-      if (sequence === liveCoachSequence) ui.setCoachProfileStatus('LOCAL');
-    })
-    .finally(() => {
-      liveCoachRequestActive = false;
-    });
+  };
+  // Keep one analysis in flight, but retain the newest shot rather than
+  // invalidating the one about to speak. That was the reason fast rallies
+  // could result in no ElevenLabs narration at all.
+  if (liveCoachRequestActive) {
+    pendingLiveCoachRequest = request;
+    return;
+  }
+  requestLiveCoachAnalysis(request);
 }
 
 // --- Physics ----------------------------------------------------------------
@@ -1906,7 +1951,7 @@ function handleTournamentFloor(ball) {
     .then(({ summary }) => {
       ui.showMatchSummary(summary);
       ui.setCoachProfileStatus('POST-MATCH');
-      narrate(summary, 'b').catch(() => {});
+      narrateCoach(summary, 'b');
     })
     .catch(() => {});
   recordProfileEvent({ type: 'tournament_result', ...matchResult }, playerId).catch(() => {});
@@ -1963,7 +2008,7 @@ function handleVersusHostBounce(ball, event) {
     })
       .then(({ summary }) => {
         ui.showMatchSummary(summary);
-        narrate(summary, 'b').catch(() => {});
+        narrateCoach(summary, 'b');
       })
       .catch(() => {});
     const playerId = settings.get('playerName') || 'anonymous';

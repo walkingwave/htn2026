@@ -665,6 +665,8 @@ canvas {
   display: inline-flex;
   gap: 7px;
   margin-left: auto;
+  /* The panel itself is informational, but its audio controls need clicks. */
+  pointer-events: auto;
 }
 .coach-panel__controls button {
   appearance: none;
@@ -676,6 +678,7 @@ canvas {
   font-size: 9px;
   letter-spacing: 0.08em;
   cursor: pointer;
+  pointer-events: auto;
 }
 .coach-panel__controls button:hover,
 .coach-panel__controls button[aria-pressed='true'] {

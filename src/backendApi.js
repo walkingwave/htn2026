@@ -70,17 +70,30 @@ export async function narrate(text, narrator = 'a') {
   if (!settings.enabled) return;
   const selectedNarrator = settings.mode === 'auto' ? narrator : settings.mode;
   const response = await request('/api/coach/narrate', { text, narrator: selectedNarrator });
+  const contentType = response.headers.get('content-type') || '';
+  // Vite's SPA fallback can return index.html with a 200 during local
+  // development. Treating that as an MP3 makes playback fail silently.
+  if (!contentType.startsWith('audio/')) {
+    throw new Error('Narration endpoint did not return audio. Use Vercel dev or the deployed app.');
+  }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   activeNarration?.pause();
   if (activeNarration?.src) URL.revokeObjectURL(activeNarration.src);
   const audio = new Audio(url);
   activeNarration = audio;
-  audio.addEventListener('ended', () => {
+  const release = () => {
     URL.revokeObjectURL(url);
     if (activeNarration === audio) activeNarration = null;
-  }, { once: true });
-  await audio.play();
+  };
+  audio.addEventListener('ended', release, { once: true });
+  audio.addEventListener('error', release, { once: true });
+  try {
+    await audio.play();
+  } catch (error) {
+    release();
+    throw error;
+  }
 }
 
 const PROFILE_THREAD_PREFIX = 'paddlelab.backboard.thread.';
