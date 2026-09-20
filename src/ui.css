@@ -123,12 +123,8 @@ canvas {
   gap: 14px;
   text-align: left;
 }
-.item[aria-selected='true'] {
-  border-left-color: var(--red);
-  background: rgba(226, 35, 26, 0.08);
-}
-.item:hover:not(:disabled) {
-  background: rgba(242, 239, 230, 0.04);
+.item:hover:not(:disabled) .item__caret {
+  visibility: visible;
 }
 .item__caret {
   color: var(--red);
@@ -136,9 +132,6 @@ canvas {
 }
 .item[aria-selected='true'] .item__caret {
   visibility: visible;
-}
-.item[aria-selected='true'] {
-  color: var(--red);
 }
 .item:disabled {
   color: rgba(242, 239, 230, 0.22);
@@ -239,12 +232,23 @@ canvas {
   text-align: left;
   cursor: pointer;
 }
-.game:hover {
-  background: rgba(242, 239, 230, 0.04);
+/* The cursor is a red arrow, the way a cabinet menu points — a filled
+   highlight bar reads as a modern web control, not a game. */
+.game {
+  position: relative;
 }
-.game[aria-pressed='true'] {
-  border-left-color: var(--red);
-  background: rgba(226, 35, 26, 0.08);
+.game::before {
+  content: '▶';
+  position: absolute;
+  left: -10px;
+  top: 9px;
+  color: var(--red);
+  font-size: 12px;
+  visibility: hidden;
+}
+.game[aria-pressed='true']::before,
+.game:hover::before {
+  visibility: visible;
 }
 
 .game__key {
@@ -699,4 +703,78 @@ canvas {
   .bar__stats {
     display: none;
   }
+}
+
+/* Two-screen start flow ---------------------------------------------------
+   The menu asks one question per screen, cabinet-style. Each screen snaps in
+   with a single step transform — retro machines cut, they do not fade. */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  width: min(560px, 92vw);
+  padding: 26px 30px 22px;
+  border: 2px solid rgba(242, 239, 230, 0.28);
+  outline: 2px solid rgba(242, 239, 230, 0.1);
+  outline-offset: 5px;
+  background: rgba(11, 11, 12, 0.6);
+  animation: screen-in 0.12s steps(2, end);
+}
+.screen[hidden] {
+  display: none;
+}
+@keyframes screen-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.prompt {
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.crumb {
+  appearance: none;
+  border: 0;
+  background: none;
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+  cursor: pointer;
+}
+.crumb b {
+  color: var(--red);
+}
+.crumb:hover {
+  color: var(--paper);
+}
+
+/* CRT dressing: scanlines and a soft vignette over the whole menu. Faint on
+   purpose — a costume, not a legibility tax. */
+.crt {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.025) 0px,
+      rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    radial-gradient(ellipse at center, transparent 58%, rgba(0, 0, 0, 0.5) 100%);
+}
+#menu > :not(.crt) {
+  position: relative;
+  z-index: 2;
 }

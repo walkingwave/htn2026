@@ -1660,7 +1660,9 @@ scene.add(vrMenu.group);
 // A/X on either controller opens and closes it. There's no WebXR event for
 // face buttons, so the gamepad has to be polled with edge detection.
 const MENU_BUTTONS = [4, 5]; // A/X and B/Y
+const STICK_BUTTON = 3; // thumbstick click
 let menuButtonWasDown = false;
+let stickButtonWasDown = false;
 
 function pollMenuButton(dt) {
   const down = inputSources.some((source) =>
@@ -1668,6 +1670,20 @@ function pollMenuButton(dt) {
   );
   if (down && !menuButtonWasDown) vrMenu.toggle();
   menuButtonWasDown = down;
+
+  // There is no keyboard in a headset, so the one command frequent enough
+  // to deserve its own button — pause/resume the machine, Space on a
+  // keyboard — lives on the thumbstick click. Everything rarer is a row in
+  // the in-world menu, which the face buttons open.
+  const stickDown = inputSources.some(
+    (source) => source?.gamepad?.buttons?.[STICK_BUTTON]?.pressed
+  );
+  if (stickDown && !stickButtonWasDown && !vrMenu.open && renderer.xr.isPresenting) {
+    machine.enabled = !machine.enabled;
+    sfx.ui(machine.enabled);
+    game.revision++; // the scoreboard shows ARMED/PAUSED, so repaint it
+  }
+  stickButtonWasDown = stickDown;
 
   if (!vrMenu.open) return;
 
