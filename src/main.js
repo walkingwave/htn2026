@@ -8,7 +8,7 @@ import { UI } from './ui.js';
 import { Settings } from './settings.js';
 import { Sfx } from './audio.js';
 import { VRMenu } from './vrMenu.js';
-import { Paddle } from './paddle.js';
+import { Paddle, DESKTOP_PADDLE_SCALE } from './paddle.js';
 import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
 import { BallMachine } from './ballMachine.js';
@@ -18,6 +18,8 @@ import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
 import { MarkerPaddleTracker, TRACKER_STATE } from './vision/markerPaddleTracker.js';
+import { startHandTracking } from './handTracking.js';
+import { HandPaddlePose } from './vision/handPose.js';
 import { Opponent } from './opponent.js';
 import { FlyBrain } from './flybrain.js';
 import { Coach, SCENARIOS } from './coach.js';
@@ -246,6 +248,10 @@ xr.onModeChange = (mode) => {
   // Close the in-world pause menu so it isn't still hanging there, open and
   // holding input, the next time a session starts.
   if (!mode) vrMenu.toggle(false);
+  if (mode) {
+    stopHandPaddle();
+    stopWebcamBat();
+  } else if (ui.menu.hidden) syncCameraInput();
 };
 
 const ui = new UI({
@@ -256,7 +262,7 @@ const ui = new UI({
   sfx,
   // `mode` is an XR session mode, or null for the on-screen preview. The
   // desktop build being developed separately hooks in here.
-  onStart: () => {
+  onStart: (mode) => {
     clearBalls();
     // A versus match is served by the host over the network, so the ball
     // machine stays down for it.
@@ -264,16 +270,24 @@ const ui = new UI({
     game.reset();
     // The camera only opens once you are actually playing, not while the
     // setting sits there remembered from last time.
-    if (usingWebcamBat()) startWebcamBat();
+    if (!mode) syncCameraInput();
   },
   onExit: () => {
     machine.enabled = false;
     leaveVersus();
     clearBalls();
     stopWebcamBat();
+    stopHandPaddle();
   },
   isInputBlocked: () => vrMenu.open,
-  onRecenter: () => recenter(),
+  onRecenter: () => {
+    if (handSession) {
+      if (!handPose.recenter()) return ui.toast('Show your hand before recentering');
+      desktopRig.position.copy(handPose.position);
+      desktopPaddle.resetTracking();
+      ui.toast('Hand paddle recentred');
+    } else recenter();
+  },
 
   // Online versus. The lobby in the shell calls these; everything about how
   // the match actually runs lives in enterVersus / leaveVersus below. Both
@@ -487,6 +501,10 @@ for (const i of [0, 1]) {
 const desktopRig = new THREE.Group();
 playerRig.add(desktopRig);
 const desktopPaddle = new Paddle();
+// Mouse, webcam-marker and hand-tracked play all go through this one bat;
+// they all get the enlarged flat-screen size. The grip paddles above stay
+// life-size for the headset.
+desktopPaddle.setScale(DESKTOP_PADDLE_SCALE);
 desktopPaddle.attachTo(desktopRig);
 desktopPaddle.enabled = false; // switched on below whenever we're not in XR
 desktopPaddle.mesh.visible = false;
@@ -551,7 +569,7 @@ const _hit = new THREE.Vector3();
 let pointerActive = false;
 
 function placeDesktopBat(clientX, clientY) {
-  if (renderer.xr.isPresenting) return; // controllers own the bats in a session
+  if (renderer.xr.isPresenting || handSession) return; // controllers or the hand own the bats
   _pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
   _pointerNdc.y = -(clientY / window.innerHeight) * 2 + 1;
   pointerActive = true;
@@ -609,6 +627,9 @@ function poseDesktopBat() {
   desktopRig.quaternion.setFromEuler(desktopRig.rotation);
   _bladeOffset
     .copy(desktopPaddle.mesh.getObjectByName('blade').position)
+    // The blade's local offset scales with the enlarged desktop bat; without
+    // this the aim point sat a handle-length away from the blade.
+    .multiplyScalar(DESKTOP_PADDLE_SCALE)
     .applyQuaternion(desktopRig.quaternion);
   desktopRig.position.copy(desktopAim).sub(_bladeOffset);
 }
@@ -670,7 +691,7 @@ function desktopPlaneDepth() {
 }
 
 function swingDesktopBat() {
-  if (renderer.xr.isPresenting) return;
+  if (renderer.xr.isPresenting || handSession) return;
   // One stroke at a time. Retriggering while a swing is running kept topping
   // the timer up, so a held mouse button parked the bat at the end of its
   // push — stationary, which is the one thing a bat must not be when the ball
@@ -846,6 +867,69 @@ function stopWebcamBat() {
   camTracker = null;
   ui.showCamPreview(null);
 }
+
+// Keep the computercam pose/filter pipeline intact. Camera poses arrive at
+// 30 Hz, independently of rendering: sample velocity only on fresh poses.
+let handSession = null;
+let handPose = null;
+let handSeenAt = -Infinity;
+
+function syncCameraInput() {
+  const playing = ui.menu.hidden && !renderer.xr.isPresenting;
+  const hand = playing && settings.get('paddleSource') === 'camera-hand';
+  if (!hand) stopHandPaddle();
+  if (!playing || !usingWebcamBat()) stopWebcamBat();
+  if (hand) startHandPaddle();
+  else if (playing && usingWebcamBat()) startWebcamBat();
+}
+
+function startHandPaddle() {
+  if (handSession) return;
+  stopWebcamBat();
+  const session = new AbortController();
+  handSession = session;
+  handPose = new HandPaddlePose();
+  desktopPaddle.setPalmTrackingMode(true);
+  desktopRig.position.copy(handPose.position);
+  desktopRig.quaternion.copy(handPose.quaternion);
+  const fail = (error) => {
+    if (handSession !== session) return;
+    stopHandPaddle();
+    ui.toast(`${error?.message ?? 'Hand camera unavailable'} — using mouse`);
+  };
+  startHandTracking((sample) => {
+    if (handSession !== session) return;
+    const result = sample && handPose.update(sample);
+    if (!result) {
+      handPose.markLost();
+      desktopPaddle.resetTracking();
+      return;
+    }
+    handSeenAt = performance.now();
+    if (result.reacquired) desktopPaddle.resetTracking();
+    desktopRig.position.copy(handPose.position);
+    desktopRig.quaternion.copy(handPose.quaternion);
+    desktopPaddle.updateFromCamera(sample.timestamp);
+  }, (status) => {
+    if (handSession === session) ui.toast(status);
+  }, { signal: session.signal, onError: fail }).catch(fail);
+}
+
+function stopHandPaddle() {
+  if (!handSession) return;
+  const session = handSession;
+  handSession = null;
+  session.abort();
+  handPose = null;
+  handSeenAt = -Infinity;
+  desktopPaddle.setPalmTrackingMode(false);
+  poseDesktopBat();
+}
+
+window.addEventListener('pagehide', () => {
+  stopHandPaddle();
+  stopWebcamBat();
+});
 
 // The webcam paddle drives the AIM POINT, not the blade.
 //
@@ -1054,7 +1138,7 @@ window.addEventListener('pointerdown', (e) => {
 window.addEventListener(
   'wheel',
   (e) => {
-    if (renderer.xr.isPresenting || !ui.menu.hidden) return;
+    if (renderer.xr.isPresenting || !ui.menu.hidden || handSession) return;
     desktopDepthBias = THREE.MathUtils.clamp(
       desktopDepthBias - Math.sign(e.deltaY) * 0.05,
       -0.25,
@@ -1114,6 +1198,14 @@ function updateDesktopBat(dt) {
   }
 
   if (inXR) return;
+
+  if (handSession) {
+    if (performance.now() - handSeenAt > 250) {
+      handPose.markLost();
+      desktopPaddle.resetTracking();
+    }
+    return;
+  }
 
   // Once the webcam paddle has locked on, the hand owns the aim point for as
   // long as the mode is selected. On a dropout the aim simply stays where it
@@ -1646,8 +1738,7 @@ settings.onChange((key) => {
   if (key === 'paddleSource') {
     // Hold the camera open only while it is the chosen input. Nobody wants a
     // webcam light on because they tried a menu option once.
-    if (usingWebcamBat()) startWebcamBat();
-    else stopWebcamBat();
+    syncCameraInput();
   }
   if (key === 'hand') applyHandedness();
   if (key === 'difficulty') opponent.setSkill(settings.get('difficulty'));
@@ -1777,7 +1868,9 @@ function tick(dt) {
   updateDesktopCamera(dt);
   updateDesktopBat(dt);
 
-  for (const paddle of paddles) paddle.update(dt);
+  for (const paddle of paddles) {
+    if (paddle !== desktopPaddle || !handSession) paddle.update(dt);
+  }
 
   // A networked match replaces the trainer wholesale: no machine, no rally
   // opponent, no coach, and only one side steps physics. Bail out here rather
