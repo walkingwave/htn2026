@@ -111,6 +111,7 @@ export class UI {
         entries: [
           { id: 'vr', label: 'A VR Headset', note: vrOk ? '' : 'no headset', disabled: !vrOk },
           { id: 'paddle', label: 'A Ping Pong Paddle', note: 'webcam' },
+          { id: 'hand', label: 'A Hand', note: 'webcam' },
           { id: 'paddle-test', label: 'Paddle Tracking Test', note: 'diagnostic' },
           { id: 'phone', label: 'A Phone', note: 'beta' },
           { id: 'mouse', label: 'Nothing — just the mouse' },

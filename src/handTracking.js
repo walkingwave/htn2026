@@ -1,27 +1,120 @@
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
+const FRAME_INTERVAL_MS = 1000 / 30;
+const LOST_AFTER_MS = 250;
 
-const WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm';
-const MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+async function loadLandmarker() {
+  const { createHandLandmarker } = await import('./vision/handLandmarker.js');
+  return createHandLandmarker();
+}
 
-export async function startHandTracking(onPose, onStatus = () => {}) {
+export async function startHandTracking(onPose, onStatus = () => {}, {
+  signal,
+  onError = () => {},
+  createLandmarker = loadLandmarker,
+} = {}) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera access is unavailable in this browser.');
   const video = document.createElement('video');
-  video.autoplay = true; video.muted = true; video.playsInline = true;
-  video.style.cssText = 'position:fixed;right:18px;bottom:18px;width:150px;border:1px solid #ffffff44;border-radius:10px;z-index:4;transform:scaleX(-1);opacity:.8';
-  document.body.appendChild(video);
-  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 960, height: 720 }, audio: false });
-  video.srcObject = stream; await video.play(); onStatus('Loading hand model…');
-  const vision = await FilesetResolver.forVisionTasks(WASM);
-  const landmarker = await HandLandmarker.createFromOptions(vision, { baseOptions: { modelAssetPath: MODEL, delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 1, minHandDetectionConfidence: .55, minHandPresenceConfidence: .55, minTrackingConfidence: .55 });
-  let frame = 0; let stopped = false; onStatus('Live hand tracking · move your racket hand');
-  const loop = () => {
-    if (stopped) return;
-    if (video.readyState >= 2) {
-      const result = landmarker.detectForVideo(video, performance.now()); const hand = result.landmarks?.[0];
-      if (hand) { const wrist = hand[0]; const index = hand[8]; onPose({ x: (wrist.x + index.x) / 2, y: (wrist.y + index.y) / 2, angle: Math.atan2(index.y - wrist.y, index.x - wrist.x) }); }
-    }
-    frame = requestAnimationFrame(loop);
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute('aria-label', 'Hand tracking camera preview');
+  video.style.cssText = 'position:fixed;right:18px;bottom:54px;width:150px;border:1px solid #ffffff44;border-radius:10px;z-index:4;transform:scaleX(-1);opacity:.8;pointer-events:none';
+  let stream = null;
+  let landmarker = null;
+  let frame = null;
+  let stopped = false;
+  let lastVideoTime = -1;
+  let lastInferenceAt = -Infinity;
+  let lastSeenAt = -Infinity;
+  let tracked = false;
+  let status = '';
+
+  const notify = (message) => {
+    if (message === status || stopped) return;
+    status = message;
+    onStatus(message);
   };
-  frame = requestAnimationFrame(loop);
-  return () => { stopped = true; cancelAnimationFrame(frame); stream.getTracks().forEach((track) => track.stop()); landmarker.close(); video.remove(); onStatus('Camera CV stopped'); };
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    if (frame !== null) cancelAnimationFrame(frame);
+    stream?.getTracks().forEach((track) => track.stop());
+    video.pause();
+    video.srcObject = null;
+    video.remove();
+    landmarker?.close();
+    signal?.removeEventListener('abort', stop);
+  };
+  const loseHand = () => {
+    if (tracked) onPose(null);
+    tracked = false;
+    notify('Show an open hand to the camera');
+  };
+  const fail = (error) => {
+    if (stopped) return;
+    stop();
+    onError(error);
+  };
+  signal?.addEventListener('abort', stop, { once: true });
+  if (signal?.aborted) { stop(); return stop; }
+
+  try {
+    notify('Starting hand camera…');
+    const openedStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+      audio: false,
+    });
+    if (stopped) { openedStream.getTracks().forEach((track) => track.stop()); return stop; }
+    stream = openedStream;
+    stream.getVideoTracks().forEach((track) => track.addEventListener('ended', () => fail(new Error('Hand camera disconnected')), { once: true }));
+    video.srcObject = stream;
+    document.body.appendChild(video);
+    await video.play();
+    if (stopped) return stop;
+    notify('Loading hand tracking…');
+    const loadedLandmarker = await createLandmarker();
+    if (stopped) { loadedLandmarker.close(); return stop; }
+    landmarker = loadedLandmarker;
+    notify('Show an open hand to the camera');
+
+    const loop = (now) => {
+      if (stopped) return;
+      try {
+        // Inference is synchronous: cap it at 30 Hz and never run it twice on
+        // one video frame. The renderer continues using the latest hand pose.
+        if (video.readyState >= 2 && video.currentTime !== lastVideoTime
+          && now - lastInferenceAt >= FRAME_INTERVAL_MS - 1) {
+          lastVideoTime = video.currentTime;
+          lastInferenceAt = now;
+          const result = landmarker.detectForVideo(video, now);
+          const landmarks = result.landmarks?.[0];
+          const worldLandmarks = result.worldLandmarks?.[0];
+          if (landmarks && worldLandmarks) {
+            lastSeenAt = now;
+            tracked = true;
+            onPose({
+              landmarks, worldLandmarks,
+              handedness: result.handedness?.[0]?.[0]?.categoryName,
+              aspect: video.videoWidth / video.videoHeight,
+              timestamp: now,
+            });
+            notify('Hand tracking live — C to recenter');
+          } else {
+            loseHand();
+          }
+        } else if (tracked && now - lastSeenAt > LOST_AFTER_MS) {
+          loseHand();
+        }
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      if (!stopped) frame = requestAnimationFrame(loop);
+    };
+    frame = requestAnimationFrame(loop);
+    return stop;
+  } catch (error) {
+    if (stopped) return stop;
+    stop();
+    throw error;
+  }
 }

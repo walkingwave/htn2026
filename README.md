@@ -35,7 +35,7 @@ The HUD tracks score, current and best rally, accuracy, table bounces, boss leve
 ## Input modes
 
 - **Quest controllers:** paddles attach to controller grips and transfer controller velocity into the physics simulation.
-- **Browser CV:** `@mediapipe/tasks-vision` tracks the wrist/index pose from the webcam and drives a virtual paddle through the same physics path. Camera access works on localhost during development; deployed/non-localhost sites require HTTPS.
+- **A Hand:** choose this webcam input in the setup menu, allow camera access, then show an open palm. Move left/right and up/down, move closer/farther for depth, and tilt your palm to angle the paddle. Press **C** to recenter. A small mirrored camera preview helps keep your hand visible. Tracking loss pauses paddle hits; leaving the mode releases the camera. The hand model downloads on first use, while the matching MediaPipe runtime is bundled locally. Camera access works on HTTP localhost during development; deployed/non-localhost sites require HTTPS.
 - **Future referee mode:** the OpenCV approach from [Computer-Vision-Ping-Pong](https://github.com/dsaha04/Computer-Vision-Ping-Pong) is represented as a future service seam for HSV ball segmentation, table calibration, homography, and real-camera event validation. It is Python/OpenCV code and is intentionally not bundled into the browser runtime.
 
 ## Shared Supabase leaderboard

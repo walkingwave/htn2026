@@ -30,6 +30,8 @@ import {
 } from './net.js';
 import { VersusMatch, VERSUS_TARGET } from './versus.js';
 import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
+import { startHandTracking } from './handTracking.js';
+import { HandPaddlePose } from './vision/handPose.js';
 
 const BALL_POOL_SIZE = 10;
 const DEAD_BALL_LINGER = 1.5; // seconds a dead ball stays visible before recycling
@@ -197,8 +199,12 @@ const ui = new UI({
     else if (input === 'phone') ui.toast('Phone control is coming — using the mouse');
     // Webcam paddle is a real input now: start the tracker for it, stop it for
     // any other input so the pointer takes back over.
-    if (input === 'paddle') startCamPaddle();
-    else stopCamPaddle();
+    if (input === 'hand') startHandPaddle();
+    else {
+      stopHandPaddle();
+      if (input === 'paddle') startCamPaddle();
+      else stopCamPaddle();
+    }
 
     // Play a Bot: a real 1v1 rally against the AI "fly brain" — no ball
     // machine. The host loop drives the opponent paddle and scoring.
@@ -231,6 +237,7 @@ const ui = new UI({
     machine.enabled = true;
   },
   onExit: () => {
+    stopHandPaddle();
     stopCamPaddle();
     machine.enabled = false;
     launchCountdown = 0;
@@ -255,6 +262,8 @@ const ui = new UI({
     await enterVersus('guest', code);
   },
   onVersusLeave: () => {
+    stopHandPaddle();
+    stopCamPaddle();
     leaveVersus();
   },
   // Tournament lobby transport. main is a dumb pipe: it opens/joins a room and
@@ -437,19 +446,91 @@ let useCamPaddle = false;
 function startCamPaddle() {
   if (useCamPaddle) return;
   useCamPaddle = true;
-  camTracker = new PaddleTracker();
-  camTracker.onState = (state, err) => {
+  const tracker = new PaddleTracker();
+  camTracker = tracker;
+  tracker.onState = (state, err) => {
+    if (camTracker !== tracker) return;
     if (state === TRACKER_STATE.ERROR) ui.toast?.(err || 'Camera unavailable — using mouse');
     else if (state === TRACKER_STATE.TRACKING) ui.toast?.('Paddle cam live — move your bat');
     else if (state === TRACKER_STATE.CALIBRATING) ui.toast?.('Hold your paddle up to calibrate…');
   };
-  camTracker.start().catch((e) => { ui.toast?.(e?.message || 'Camera failed — using mouse'); stopCamPaddle(); });
+  tracker.start().then(() => {
+    // A hand session may have replaced this input during camera permission.
+    if (camTracker !== tracker) tracker.stop();
+  }).catch((e) => {
+    if (camTracker !== tracker) { tracker.stop(); return; }
+    ui.toast?.(e?.message || 'Camera failed — using mouse');
+    stopCamPaddle();
+  });
 }
 function stopCamPaddle() {
   useCamPaddle = false;
   camTracker?.stop();
   camTracker = null;
 }
+
+// The hand camera owns the same desktop rig while selected. Aborting the
+// session also handles leaving while permission/model loading is pending.
+let handSession = null;
+let handPose = null;
+let handSeenAt = -Infinity;
+
+async function startHandPaddle() {
+  if (handSession) return;
+  stopCamPaddle();
+  const session = new AbortController();
+  handSession = session;
+  handPose = new HandPaddlePose();
+  mousePaddle.setPalmTrackingMode(true);
+  mousePaddleRig.position.copy(handPose.position);
+  mousePaddleRig.quaternion.copy(handPose.quaternion);
+  handControlHint(true);
+  const fail = (error) => {
+    if (handSession !== session) return;
+    console.error('Hand tracking failed', error);
+    stopHandPaddle();
+    ui.toast('Hand camera unavailable — using mouse. Check camera permission and your connection.');
+  };
+  try {
+    await startHandTracking((sample) => {
+      if (handSession !== session) return;
+      const result = sample && handPose.update(sample);
+      if (!result) {
+        handPose.markLost();
+        mousePaddle.resetTracking();
+        return;
+      }
+      handSeenAt = performance.now();
+      if (result.reacquired) mousePaddle.resetTracking();
+      mousePaddleRig.position.copy(handPose.position);
+      mousePaddleRig.quaternion.copy(handPose.quaternion);
+      // Sample velocities at camera cadence, not once for every render frame.
+      mousePaddle.updateFromCamera(sample.timestamp);
+    }, (status) => {
+      if (handSession === session) ui.toast(status);
+    }, { signal: session.signal, onError: fail });
+  } catch (error) {
+    fail(error);
+  }
+}
+
+function stopHandPaddle() {
+  if (!handSession) return;
+  const session = handSession;
+  handSession = null;
+  session.abort();
+  handPose = null;
+  handSeenAt = -Infinity;
+  mousePaddle.setPalmTrackingMode(false);
+  mousePaddleRig.position.set(0, 1.05, mouseDepthTarget);
+  mousePaddleRig.quaternion.identity();
+  handControlHint(false);
+}
+
+window.addEventListener('pagehide', () => {
+  stopHandPaddle();
+  stopCamPaddle();
+});
 paddles.push(mousePaddle);
 
 // ---------------------------------------------------------------------------
@@ -794,7 +875,7 @@ function endBotMatch(winner) {
 let mouseDepthTarget = -0.72;
 function setMousePaddlePose(clientX, clientY) {
   if (renderer.xr.isPresenting) return; // XR controllers own the paddles
-  if (useCamPaddle) return; // the webcam tracker owns the rig while active
+  if (useCamPaddle || handSession) return; // a webcam tracker owns the rig
   const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
   const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
   // X spans a little more than the table width; Y rides just above the surface
@@ -814,7 +895,7 @@ window.addEventListener('pointerdown', (e) => setMousePaddlePose(e.clientX, e.cl
 // the bounce. (OrbitControls' own wheel-zoom is disabled below so it doesn't
 // fight this.) Scroll down = back toward you; scroll up = forward toward net.
 window.addEventListener('wheel', (e) => {
-  if (renderer.xr.isPresenting || useCamPaddle) return;
+  if (renderer.xr.isPresenting || useCamPaddle || handSession) return;
   if (ui.menu && !ui.menu.hidden) return; // let the menu scroll normally
   e.preventDefault();
   // Set a target; the render loop eases the paddle toward it so a forward
@@ -845,6 +926,8 @@ const vrMenu = new VRMenu({
   sfx,
   onExit: () => {
     xr.end();
+    stopHandPaddle();
+    stopCamPaddle();
     machine.enabled = false;
     ui.showMenu();
   },
@@ -925,6 +1008,10 @@ controlsHint.innerHTML =
   '<span><b>Space</b> pause</span>' +
   '<span><b>S</b> serve</span>';
 document.body.appendChild(controlsHint);
+function handControlHint(active) {
+  controlsHint.children[0].innerHTML = active ? '<b>Move / tilt</b> hand' : '<b>Move</b> paddle';
+  controlsHint.children[1].innerHTML = active ? '<b>C</b> recenter' : '<b>Scroll</b> depth';
+}
 renderer.xr.addEventListener('sessionstart', () => (orbit.enabled = false));
 renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
 
@@ -938,7 +1025,7 @@ function tick(dt) {
   if (useCamPaddle && camTracker && camTracker.state === TRACKER_STATE.TRACKING) {
     mousePaddleRig.position.copy(camTracker.position);
     mousePaddleRig.quaternion.copy(camTracker.quaternion);
-  } else if (!renderer.xr.isPresenting) {
+  } else if (!handSession && !renderer.xr.isPresenting) {
     // Ease the paddle depth toward the scroll target. Doing it here (rather
     // than snapping on the wheel event) means Paddle.update samples a smooth,
     // sustained Z velocity, so a forward scroll drives the ball with momentum.
@@ -948,6 +1035,13 @@ function tick(dt) {
     // Networked (opponent) paddles are posed from incoming packets, not from
     // local input, so they must not run the velocity-sampling update.
     if (paddle.networked) continue;
+    if (paddle === mousePaddle && handSession) {
+      if (performance.now() - handSeenAt > 250) {
+        handPose.markLost();
+        paddle.resetTracking();
+      }
+      continue;
+    }
     paddle.update(dt);
   }
 
@@ -1079,7 +1173,13 @@ window.addEventListener('resize', () => {
 window.addEventListener('keydown', (e) => {
   if (!ui.menu.hidden) return; // menu is up; let the buttons own the input
 
-  if (e.code === 'Space') {
+  if (e.code === 'KeyC' && handSession) {
+    if (handPose.recenter()) {
+      mousePaddleRig.position.copy(handPose.position);
+      mousePaddle.resetTracking();
+      ui.toast('Hand position recentered');
+    }
+  } else if (e.code === 'Space') {
     e.preventDefault(); // stop the browser scrolling / re-firing a focused button
     machine.enabled = !machine.enabled;
     game.revision++;

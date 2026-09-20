@@ -254,7 +254,7 @@ export class PhysicsWorld {
     const p = ball.mesh.position;
     _n.copy(paddle.bladeNormal);
 
-    const halfThick = PADDLE.HEAD_THICKNESS / 2 + BALL.RADIUS;
+    const halfThick = (paddle.headThickness ?? PADDLE.HEAD_THICKNESS) / 2 + BALL.RADIUS;
 
     _rel.copy(prev).sub(paddle.bladeCenter);
     const d0 = _rel.dot(_n);
@@ -275,7 +275,7 @@ export class PhysicsWorld {
     // Radial distance from the blade axis at that point
     _rel.copy(_hit).sub(paddle.bladeCenter);
     _tmp.copy(_rel).addScaledVector(_n, -_rel.dot(_n));
-    if (_tmp.length() > PADDLE.HEAD_RADIUS) return;
+    if (_tmp.length() > (paddle.headRadius ?? PADDLE.HEAD_RADIUS)) return;
 
     // Face the normal toward the side the ball came from
     if (d0 < 0) _n.negate();
