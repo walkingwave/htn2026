@@ -254,6 +254,13 @@ export class UI {
       this._setLobbyStatus('Enter the code your opponent gave you.', 'bad');
       return;
     }
+    // Checked here so a typo reads as a typo. Left to the relay it came back
+    // as "Invalid room join", which is true, unhelpful, and looks like the
+    // game is broken rather than the code being wrong.
+    if (!/^[A-Z0-9]{4,12}$/.test(code)) {
+      this._setLobbyStatus('Room codes are letters and numbers, six of them.', 'bad');
+      return;
+    }
     this.sfx.ui();
     this._setLobbyStatus(`Joining ${code}…`);
     try {
@@ -488,6 +495,7 @@ export class UI {
 
   _menuItems() {
     return buildPauseMenu({
+      inXR: Boolean(this.xr.session),
       machine: this.machine,
       game: this.game,
       settings: this.settings,

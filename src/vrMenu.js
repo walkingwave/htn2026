@@ -138,6 +138,7 @@ export class VRMenu {
 
   _buildItems() {
     return buildPauseMenu({
+      inXR: true, // this panel only exists inside a session
       machine: this.machine,
       game: this.game,
       settings: this.settings,

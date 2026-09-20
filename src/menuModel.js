@@ -10,19 +10,48 @@ import { MODES } from './ballMachine.js';
 //   cycle  — a value with ‹ › affordances, stepped by `step(delta)`
 //   toggle — an on/off value, flipped by `step()`
 
-export function buildPauseMenu({ machine, settings, game, onExit, onResume, onRecenter }) {
+export function buildPauseMenu({
+  machine,
+  settings,
+  game,
+  onExit,
+  onResume,
+  onRecenter,
+  inXR = false,
+}) {
+  // Not every option in a list belongs in this menu.
+  //
+  // Versus is set up in the start menu, where the lobby lives; cycling to it
+  // mid-session left the table empty and the player in a game with nobody in
+  // it. The webcam bat is a flat-screen input — in a headset there is a
+  // tracked hand to use instead, and picking it only opened a camera that
+  // cannot see the bat.
+  const hidden = {
+    game: ['versus'],
+    paddleSource: inXR ? ['camera'] : [],
+  };
+
   const cycle = (key) => {
-    const choices = OPTIONS[key];
-    const index = Math.max(
-      0,
-      choices.findIndex((c) => c.value === settings.get(key))
-    );
+    const choices = OPTIONS[key].filter((c) => !(hidden[key] ?? []).includes(c.value));
+    const current = settings.get(key);
+    const index = choices.findIndex((c) => c.value === current);
+    const off = index < 0; // the value in force is one this menu hides
+
     return {
       id: key,
       kind: 'cycle',
-      value: choices[index].label,
+      // Name what is actually set, even when it is an option this menu will
+      // not offer. Falling through to choices[0] made the pause menu report
+      // "Arcade" in the middle of a Versus match.
+      value: off
+        ? (OPTIONS[key].find((c) => c.value === current)?.label ?? '—')
+        : choices[index].label,
       step: (delta) => {
-        const next = (index + delta + choices.length) % choices.length;
+        if (!choices.length) return;
+        // From a hidden value, a step lands on the first real option rather
+        // than somewhere that depends on where the hidden one used to sit.
+        const from = off ? (delta > 0 ? -1 : 0) : index;
+        const next = (from + delta + choices.length) % choices.length;
         settings.set(key, choices[next].value);
       },
     };
