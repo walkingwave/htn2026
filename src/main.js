@@ -867,6 +867,7 @@ const WEBCAM_DEFAULTS = {
   maxSpeed: 6, // m/s ceiling on paddle travel
   swingSpeed: 0.35, // m/s push toward the camera that counts as a swing
   swingCooldown: 0.45,
+  lead: 0.06, // seconds of latency the predictor hides
   assistRange: 0.24, // screen fraction where the pull engages
   assistPull: 0.26, // metres it may move the paddle
   assistSlew: 1.8, // m/s the pull creeps in at
@@ -898,6 +899,7 @@ const _aimWorld = new THREE.Vector3();
 // now moves the aim at a bounded rate instead of teleporting it, it doubles
 // as the last line against jump glitches.
 function driveAimFromWebcam(dt) {
+  camTracker.predictionLead = webcamTuning.lead;
   const displacement = camTracker.position;
 
   const targetX = THREE.MathUtils.clamp(
@@ -962,6 +964,7 @@ const TUNING_ROWS = [
   ['assistPull', 'Assist · strength', 0.08, 0.4, 0.02],
   ['assistSlew', 'Assist · speed', 0.5, 3, 0.1],
   ['assistHorizon', 'Assist · look-ahead', 0.08, 0.3, 0.01],
+  ['lead', 'Latency lead', 0, 0.15, 0.01],
   ['camEase', 'Camera follow', 1, 8, 0.5],
 ];
 
