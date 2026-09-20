@@ -260,11 +260,15 @@ const ui = new UI({
     // Prefer a LAN address the other device can actually open — `localhost`
     // means nothing to a headset across the room.
     const origin = room?.lanUrls?.[0] || window.location.origin;
-    return { role: 'host', code, link: roomLinkFor(code, origin), kind: room.kind };
+    // `room.role` rather than 'host': over the LAN relay the server decides by
+    // arrival, so hosting a code someone else already opened makes you the
+    // guest. Telling the player otherwise would be a lie about which end of
+    // the table they are on.
+    return { role: room.role, code, link: roomLinkFor(code, origin), kind: room.kind };
   },
   onVersusJoin: async (code) => {
     const room = await enterVersus('guest', code.trim().toUpperCase());
-    return { role: 'guest', code, kind: room.kind };
+    return { role: room.role, code, kind: room.kind };
   },
   onVersusLeave: () => leaveVersus(),
   // What the run was worth, read at the moment you quit. Versus is scored on
@@ -757,16 +761,42 @@ function startVersusServe() {
   ui.showCountdown(VERSUS_SERVE_SECONDS);
 }
 
+// Put the ball up in front of whoever is serving, for them to hit — rather
+// than firing it across the table on their behalf. A real serve starts with a
+// toss, and the point should begin with a stroke the player actually made.
+//
+// The host runs this for both sides. When the guest is serving, the toss is
+// placed against the bat pose their client is streaming, so the ball appears
+// in front of *their* bat, wherever they are holding it.
+const SERVE_TOSS_UP = 2.1; // m/s — about a 22 cm toss, roughly the real thing
+const SERVE_TOSS_AHEAD = 0.11; // metres in front of the blade, within reach
+const SERVE_TOSS_RISE = 0.1; // and above it, so it falls back past the face
+
 function serveVersusBall() {
   const ball = balls.find((b) => !b.active);
   if (!ball) return;
-  // The server alternates ends: host serves toward -Z, guest toward +Z.
-  const dir = match.server === 'host' ? -1 : 1;
-  ball.serve(
-    new THREE.Vector3((Math.random() * 2 - 1) * 0.3, TABLE.HEIGHT + 0.35, -dir * 0.8),
-    new THREE.Vector3((Math.random() * 2 - 1) * 0.6, 1.4, dir * 3.4)
-  );
+
+  // Which way is "across the table" for the server: the host plays from +Z.
+  const toNet = match.server === 'host' ? -1 : 1;
+  const serverIsLocal = match.server === netMode;
+  const bat = serverIsLocal ? getLocalVersusPaddle() : remotePaddle;
+
+  const spawn = new THREE.Vector3();
+  if (bat?.tracking) {
+    spawn.copy(bat.bladeCenter);
+    spawn.z += toNet * SERVE_TOSS_AHEAD;
+    spawn.y += SERVE_TOSS_RISE;
+  } else {
+    // No bat pose yet — a guest who hasn't moved, or a player with no tracked
+    // input. Toss it over their end of the table so the point can still start.
+    spawn.set(0, TABLE.HEIGHT + 0.3, -toNet * (TABLE.LENGTH / 2 - 0.35));
+  }
+  // Never below the surface, whatever the bat was doing.
+  spawn.y = Math.max(spawn.y, TABLE.HEIGHT + 0.12);
+
+  ball.serve(spawn, new THREE.Vector3(0, SERVE_TOSS_UP, 0));
   ball.floorCounted = false; // our own flag; Ball.serve() doesn't know about it
+  ball.awaitingServeStrike = true; // a toss nobody hits is not a lost point
   versusBall = ball;
   broadcastHostState();
 }
@@ -792,7 +822,27 @@ function broadcastHostState() {
 }
 
 function handleVersusHostBounce(ball, event) {
+  // The toss is live once it has been struck; until then it is not part of the
+  // point at all.
+  if (event === 'paddle' && ball === versusBall) ball.awaitingServeStrike = false;
+
+  // A toss the server swung at and missed — or simply let drop — costs them
+  // nothing but the re-serve. Scoring it would mean losing points to a fumbled
+  // ball toss, which is not what anyone is playing for. Any contact that isn't
+  // the bat ends it: a toss that lands, on the table or the floor, was not a
+  // serve. (The table case matters — a ball that comes to rest up there never
+  // reaches the floor, and the point would hang there forever.)
+  if (ball === versusBall && !ball.floorCounted && ball.awaitingServeStrike) {
+    ball.floorCounted = true;
+    ball.deactivate();
+    versusBall = null;
+    broadcastHostState();
+    startVersusServe();
+    return;
+  }
+
   if (event !== 'floor' || ball !== versusBall || ball.floorCounted) return;
+
   ball.floorCounted = true;
   // A ball that reaches the floor on the host's half (z>0) is one the host
   // failed to return, so the guest scores — and the other way around.
@@ -823,6 +873,14 @@ function runVersusHost(dt) {
   versusPaddles.length = 0;
   versusPaddles.push(...paddles, remotePaddle);
   physics.step(dt, balls, versusPaddles);
+
+  // A ball that stops on the table never reaches the floor, so the point would
+  // otherwise hang there with a dead ball sitting on the surface and neither
+  // player able to do anything about it. Resting is just as final as landing:
+  // resolve it the same way, on the half it came to rest on.
+  if (versusBall?.active && versusBall.restingOn && !versusBall.floorCounted) {
+    handleVersusHostBounce(versusBall, 'floor');
+  }
 
   for (const ball of balls) {
     if (!ball.active) continue;
@@ -877,6 +935,25 @@ function runVersusGuest(dt) {
   }
 }
 
+// Put this player on one end of the table. Called once the room has said which
+// side we are, which is not necessarily the one the player asked for.
+function takeVersusSide(role) {
+  netMode = role;
+
+  // The guest plays from the far end. Turning the rig 180° also mirrors the
+  // pointer mapping, so left and right stay the way round they should be with
+  // no extra transforms anywhere else.
+  const guest = role === 'guest';
+  playerRig.position.set(0, 0, guest ? -PLAY_AREA.PLAYER_Z : PLAY_AREA.PLAYER_Z);
+  playerRig.rotation.y = guest ? Math.PI : 0;
+
+  // The board hangs beyond the far end, which for the guest is behind their
+  // head. Move it to the other end and turn it round so both players read the
+  // score off a board in front of them.
+  scoreboard.mesh.position.z = guest ? -SCOREBOARD_POSITION.z : SCOREBOARD_POSITION.z;
+  scoreboard.mesh.rotation.y = guest ? Math.PI : 0;
+}
+
 async function enterVersus(role, code) {
   machine.enabled = false;
   coach.setActive(false);
@@ -889,39 +966,42 @@ async function enterVersus(role, code) {
   versusServeTimer = 0;
   netSendAccum = 0;
   match.reset();
-  netMode = role;
   // Nothing serves in a match, and the launcher stands at the far end —
   // which is exactly where the guest is standing, so it would otherwise be
   // parked in their face.
   machine.mesh.visible = false;
   opponent.mesh.visible = false;
 
-  // The guest plays from the far end. Turning the rig 180° also mirrors the
-  // pointer mapping, so left and right stay the way round they should be with
-  // no extra transforms anywhere else.
-  playerRig.position.set(0, 0, role === 'guest' ? -PLAY_AREA.PLAYER_Z : PLAY_AREA.PLAYER_Z);
-  playerRig.rotation.y = role === 'guest' ? Math.PI : 0;
-
-  // The board hangs beyond the far end, which for the guest is behind their
-  // head. Move it to the other end and turn it round so both players read the
-  // score off a board in front of them.
-  scoreboard.mesh.position.z =
-    role === 'guest' ? -SCOREBOARD_POSITION.z : SCOREBOARD_POSITION.z;
-  scoreboard.mesh.rotation.y = role === 'guest' ? Math.PI : 0;
-
+  netMode = role; // provisional, so the trainer stands down while we connect
   room = createRoom({ code, role });
-  if (role === 'host') room.on('paddle', (pkt) => applyRemotePaddle(pkt));
-  else room.on('state', (state) => applyHostState(state));
+
+  // Both messages are wired up before the side is known, because over the LAN
+  // relay it isn't ours to decide: the server hands out host and guest by who
+  // arrives first, so this client can come back as the opposite of what the
+  // player pressed. Each handler checks the side it ended up on.
+  room.on('paddle', (pkt) => {
+    if (netMode === 'host') applyRemotePaddle(pkt);
+  });
+  room.on('state', (state) => {
+    if (netMode === 'guest') applyHostState(state);
+  });
 
   room.onOpponent((present) => {
     ui.setVersusOpponent(present);
     // The first moment both players are in the room, the host puts a ball up.
-    if (present && role === 'host' && !match.winner && !versusBall && versusServeTimer <= 0) {
+    if (
+      present &&
+      netMode === 'host' &&
+      !match.winner &&
+      !versusBall &&
+      versusServeTimer <= 0
+    ) {
       startVersusServe();
     }
   });
 
   await room.connect();
+  takeVersusSide(room.role); // the side the room actually gave us
   game.revision++;
   return room;
 }
