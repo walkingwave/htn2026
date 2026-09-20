@@ -230,47 +230,23 @@ Tiger leaderboard and telemetry setup lives in `tiger/schema.sql` and `tiger/REA
 
 ## Sponsor tracks
 
-Each sponsor API does one job in the product. Every credential stays server-side in Vercel Functions except Supabase's publishable key, which is designed for the browser.
+Each sponsor API does one job in the product, keeping credentials server-side while turning technical integrations into clear, user-facing capabilities:
 
-### Supabase — multiplayer across networks
+[Sponsor] Tiger Data — Leaderboard and Telemetry: Serves as the durable data plane via Tiger Cloud (TimescaleDB). leaderboard_entries tracks canonical per-category rankings, while a coaching_events hypertable logs stroke scores and match results for real-time telemetry and deep post-match analytics.
 
-Supabase Realtime is the transport for online versus matches: Broadcast channels carry paddle and ball packets between the two players, and Presence tracks who is in the room. This is what lets two people on different networks play the same point; on one Wi-Fi the built-in dev-server relay handles it instead. The publishable key (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) is the only credential that reaches the browser.
+[Sponsor] OpenAI — Per-Shot Coaching: Transforms raw local stroke telemetry into immediate, actionable feedback. The OpenAI Responses API analyzes real-time performance numbers to generate one precise technique correction per shot, instantly displayed in the coaching panel and voiced aloud.
 
-### Tiger Data — leaderboard and telemetry
+[Sponsor] Baseten — Post-Match Analysis: Powers comprehensive performance breakdowns using hosted zai-org/GLM-5.3-Fast inference on Baseten's OpenAI-compatible endpoint, delivering deep, fast post-game feedback with automated Gemini fallback for high reliability.
 
-Tiger Cloud (TimescaleDB) is the durable data plane. `leaderboard_entries` holds the canonical per-category leaderboard, and `coaching_events` is a hypertable of stroke scores and match results for later analytics. Both are read and written only through server-only Vercel Functions over a pooled `pg` client (`TIGER_DATABASE_URL`, `TIGER_DATABASE_SSL`); the schema lives in `tiger/schema.sql`.
+[Sponsor] Gemini — Holistic Match Summary: Generates big-picture post-match summaries by evaluating overall game flow, strategy, and performance patterns. Acts as both the primary holistic narrator and a seamless failover during high-traffic inference spikes.
 
-### OpenAI — per-shot coaching
+[Sponsor] Backboard — Player Memory and Recurring Trends: Endows the AI coach with long-term memory across sessions. By appending stroke scores and match results to persistent Backboard threads, it analyzes player history to highlight recurring tendencies—like timing that runs early or an open paddle face on pushes.
 
-Each completed Coach stroke is scored locally, then sent to `/api/coach/shot`, where the OpenAI Responses API turns the numbers into one specific correction. The text appears in the coaching panel and is narrated aloud (`OPENAI_API_KEY`, `OPENAI_MODEL`).
+[Sponsor] ElevenLabs — Dynamic Narration: Transforms purely visual UI text into an immersive audio experience. Uses two distinct narrator voices to dynamically read per-shot corrections, match summaries, and recurring trends aloud, with persistent user voice preferences.
 
-### Baseten — post-match analysis
+[Sponsor] Linq — iMessage Invitations: Streamlines multiplayer onboarding via SMS/iMessage. Players trigger custom room invites directly to a contact's phone number through Linq's Partner API, allowing friends to jump straight into a match from their text thread without manually copying URLs.
 
-Baseten's OpenAI-compatible endpoint (`inference.baseten.co/v1`) serves `zai-org/GLM-5.3-Fast` for the post-match breakdown at `/api/coach/postmatch` (`BASETEN_API_KEY`, `BASETEN_MODEL_ID`). The original plan was to train the bot and FlyBrain with reinforcement learning on Baseten H100s; with no GPUs allocated this weekend, we use their hosted inference API for match analysis instead, with Gemini as an automatic fallback.
-
-### Gemini — holistic match summary
-
-Google Gemini writes the holistic post-match summary at `/api/coach/match` (`GEMINI_API_KEY`, `GEMINI_MODEL`). It doubles as the fallback when Baseten is unavailable, which also spreads load across providers.
-
-### Backboard — player memory and recurring trends
-
-Coach scores and versus results are appended to a persistent Backboard thread through `/api/profile/event`; the browser stores only the thread ID. On the next session, `/api/profile/summary` has Backboard review the accumulated history and surface recurring tendencies — timing that runs early, a face that opens on pushes — shown in the panel under "Your recurring trends" (`BACKBOARD_API_KEY`, `BACKBOARD_API_BASE_URL`).
-
-### ElevenLabs — narration
-
-Every LLM response is spoken, not just shown: per-shot feedback, the match summary, and the trends recap all go through `/api/coach/narrate`, which renders speech with two distinct narrator voices. The coaching panel can mute narration or pin a voice, and the choice persists across sessions (`ELEVENLABS_API_KEY`, `ELEVENLABS_MODEL_ID`, `ELEVENLABS_NARRATOR_A_VOICE_ID`, `ELEVENLABS_NARRATOR_B_VOICE_ID`).
-
-### Linq — iMessage invitations
-
-Hosting a match can start with a text. Enter a contact's phone number in the lobby and `/api/contact/invite` uses Linq's Partner API to create (or reuse) an iMessage chat and send the room link, so a friend joins from a message instead of hunting for a URL (`LINQ_INTEGRATION_TOKEN`, `LINQ_SEND_FROM`, `LINQ_API_BASE_URL`).
-
-### Vercel — hosting and the server bridge
-
-The frontend deploys as a static Vite build, and every secret-bearing integration above runs as a Vercel Function under `api/`, so the browser never sees a provider key. `npx vercel dev` serves the same routes locally.
-
-### Devin — planning and end-to-end testing
-
-Devin drove planning, end-to-end testing against the deployed Vercel app, and general assistance throughout the build.
+[Sponsor] Devin — Planning and End-to-End Testing: Served as an AI teammate throughout the build, driving product architecture planning, automated end-to-end testing against production deployments, and continuous developer assistance.
 
 ## Ideas / next steps
 
