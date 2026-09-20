@@ -10,13 +10,16 @@ import { supabase } from './supabaseClient.js';
 // There is no seeded demo data. An empty board says nobody has played yet,
 // which is true and useful; inventing rivals would not be.
 
-const LOCAL_KEY = 'pingpong-trainer.scores.v1';
+const LOCAL_KEY = 'paddlelab-xr.scores.v1';
+const LEGACY_LOCAL_KEY = 'pingpong-trainer.scores.v1'; // pre-rebrand; read, never written
 const TABLE = 'leaderboard_entries';
 const LIMIT = 25;
 
 function readLocal() {
   try {
-    const stored = JSON.parse(localStorage.getItem(LOCAL_KEY) ?? '[]');
+    const stored = JSON.parse(
+      localStorage.getItem(LOCAL_KEY) ?? localStorage.getItem(LEGACY_LOCAL_KEY) ?? '[]'
+    );
     return Array.isArray(stored) ? stored : [];
   } catch {
     return []; // private browsing, or a corrupt entry

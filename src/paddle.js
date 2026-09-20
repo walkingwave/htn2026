@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { PADDLE } from './constants.js';
 
-const HAND_PADDLE_SCALE = 1.4;
+// A flat screen shrinks everything: the paddle covers a fraction of the
+// visual field it would in a headset, and the pointer/camera inputs are
+// coarser than a tracked wrist. The on-screen paddle is enlarged to match —
+// the VR paddles stay life-size, because in VR life-size is right.
+export const DESKTOP_PADDLE_SCALE = 1.4;
 
 const _worldPos = new THREE.Vector3();
 const _worldQuat = new THREE.Quaternion();
@@ -49,16 +53,20 @@ export class Paddle {
     this._cameraSampleTime = null;
   }
 
+  // Scales the whole bat, physics included — the head dimensions feed the
+  // contact test, so a bigger paddle genuinely hits more balls.
+  setScale(scale) {
+    this.mesh.scale.setScalar(scale);
+    this.headRadius = PADDLE.HEAD_RADIUS * scale;
+    this.headThickness = PADDLE.HEAD_THICKNESS * scale;
+  }
+
   attachTo(controllerGrip) {
     controllerGrip.add(this.mesh);
   }
 
   // A palm describes the striking face itself, rather than a controller grip.
   setPalmTrackingMode(active) {
-    const scale = active ? HAND_PADDLE_SCALE : 1;
-    this.mesh.scale.setScalar(scale);
-    this.headRadius = PADDLE.HEAD_RADIUS * scale;
-    this.headThickness = PADDLE.HEAD_THICKNESS * scale;
     if (active) {
       this.mesh.quaternion.identity();
       this._blade.position.set(0, 0, 0);

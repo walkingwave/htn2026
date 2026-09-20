@@ -52,9 +52,30 @@ function multiplayerRelay() {
         client.room = null;
       };
 
+      // A TCP socket can stay open long after the device behind it has gone —
+      // a sleeping headset reports nothing at all. Ping every few seconds and
+      // cut anything that hasn't answered the last one, so the other player
+      // learns their opponent is gone instead of waiting on a corpse.
+      const HEARTBEAT_MS = 8000;
+      const heartbeat = setInterval(() => {
+        for (const client of wss.clients) {
+          if (client.isAlive === false) {
+            removeClient(client);
+            client.terminate();
+            continue;
+          }
+          client.isAlive = false;
+          client.ping();
+        }
+      }, HEARTBEAT_MS);
+
       wss.on('connection', (client, request) => {
         client.room = null;
         client.role = null;
+        client.isAlive = true;
+        client.on('pong', () => {
+          client.isAlive = true;
+        });
 
         client.on('message', (raw) => {
           const message = decodeMessage(raw.toString());
@@ -66,6 +87,16 @@ function multiplayerRelay() {
               return client.close(1008, 'Invalid room join');
             }
             const peers = rooms.get(code) ?? new Set();
+
+            // Drop anyone whose socket has died before counting the room as
+            // full. A headset that sleeps, a laptop that closes its lid or a
+            // dropped Wi-Fi link leaves a socket that is gone but not closed,
+            // and without this the room stays "full" of a player who left —
+            // so the next person to join is refused and their opponent never
+            // sees them arrive.
+            for (const peer of [...peers]) {
+              if (peer.readyState !== 1 /* OPEN */) peers.delete(peer);
+            }
             if (peers.size >= 2) return client.close(1008, 'Room is full');
 
             // Roles are decided here, by arrival, not by which button each
@@ -118,6 +149,7 @@ function multiplayerRelay() {
       });
 
       server.httpServer?.once('close', () => {
+        clearInterval(heartbeat);
         for (const peers of rooms.values()) for (const client of peers) client.close();
         wss.close();
       });

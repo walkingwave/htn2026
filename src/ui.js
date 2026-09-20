@@ -69,6 +69,7 @@ export class UI {
     this._buildToast();
     this._buildVersusHud();
     this._buildScores();
+    this._buildCamPreview();
 
     window.addEventListener('keydown', (e) => this._onKey(e));
     this.showMenu();
@@ -89,20 +90,38 @@ export class UI {
     el.id = 'menu';
     el.innerHTML = `
       <div>
-        <h1 class="title">Ping<span>·</span>Pong<br />Trainer<span class="blink">_</span></h1>
+        <h1 class="title">Paddle<span>·</span>Lab XR<span class="blink">_</span></h1>
         <p class="tagline">Hack the North 2026</p>
       </div>
-      <div class="menu-list" data-list></div>
-      <div class="game-pick">
-        <span class="game-pick__label">Game</span>
-        <button class="key" data-game="arcade"><b>1</b>Arcade</button>
-        <button class="key" data-game="coach"><b>2</b>Coach</button>
-        <button class="key" data-game="versus"><b>3</b>Versus</button>
+      <div class="step">
+        <div class="step__head"><span class="step__num">1</span>Pick a game</div>
+        <div class="game-pick">
+          <button class="game" data-game="arcade">
+            <span class="game__key">1</span>
+            <span class="game__name">Arcade</span>
+            <span class="game__blurb">Drills and rallies against the machine</span>
+          </button>
+          <button class="game" data-game="coach">
+            <span class="game__key">2</span>
+            <span class="game__name">Coach</span>
+            <span class="game__blurb">Learn one stroke at a time, scored</span>
+          </button>
+          <button class="game" data-game="versus">
+            <span class="game__key">3</span>
+            <span class="game__name">Versus</span>
+            <span class="game__blurb">Play a friend on another device</span>
+          </button>
+        </div>
       </div>
-      <div class="lobby" data-lobby hidden>
+      <div class="step">
+        <div class="step__head"><span class="step__num">2</span>Pick how to play</div>
+        <div class="menu-list" data-list></div>
+      </div>
+      <div class="step lobby" data-lobby hidden>
+        <div class="step__head"><span class="step__num">✦</span>Set up the match</div>
         <div class="lobby__row">
-          <button class="key" data-lobby-host><b>▸</b>Host a match</button>
-          <span class="lobby__or">or</span>
+          <button class="key" data-lobby-host><b>▸</b>Start a room</button>
+          <span class="lobby__or">or join one</span>
           <input
             class="lobby__code"
             data-lobby-code
@@ -121,7 +140,8 @@ export class UI {
         </div>
       </div>
       <div class="hint">
-        ↑ ↓ select &nbsp;·&nbsp; enter start &nbsp;·&nbsp; L scores<br />
+        <b>1 2 3</b> game &nbsp;·&nbsp; <b>↑ ↓</b> how to play &nbsp;·&nbsp;
+        <b>Enter</b> begin &nbsp;·&nbsp; <b>L</b> scores<br />
         <span data-menu-note></span>
       </div>
     `;
@@ -148,11 +168,14 @@ export class UI {
       if (e.code === 'Enter') this._joinMatch();
     };
 
+    // Named for where you end up, with the trade-off spelled out, rather than
+    // for the WebXR session mode being requested. "Enter passthrough" means
+    // nothing to someone who has not read the spec.
     this._entries = [
-      { id: 'ar', label: 'Enter passthrough', note: '', disabled: true },
-      { id: 'vr', label: 'Enter full VR', note: '', disabled: true },
-      { id: 'desktop', label: 'Computer', note: 'preview', disabled: false },
-      { id: 'camera-hand', label: 'Hand Tracking', note: 'preview', disabled: false },
+      { id: 'ar', label: 'In my room', note: 'headset · passthrough', disabled: true },
+      { id: 'vr', label: 'In the arena', note: 'headset · full VR', disabled: true },
+      { id: 'desktop', label: 'On this screen', note: 'mouse or webcam paddle', disabled: false },
+      { id: 'camera-hand', label: 'Hand tracking', note: 'webcam · bare hand', disabled: false },
     ];
     this._renderMenu();
     this._syncGamePick();
@@ -232,6 +255,13 @@ export class UI {
       this._setLobbyStatus('Enter the code your opponent gave you.', 'bad');
       return;
     }
+    // Checked here so a typo reads as a typo. Left to the relay it came back
+    // as "Invalid room join", which is true, unhelpful, and looks like the
+    // game is broken rather than the code being wrong.
+    if (!/^[A-Z0-9]{4,12}$/.test(code)) {
+      this._setLobbyStatus('Room codes are letters and numbers, six of them.', 'bad');
+      return;
+    }
     this.sfx.ui();
     this._setLobbyStatus(`Joining ${code}…`);
     try {
@@ -292,9 +322,11 @@ export class UI {
       b.className = 'item';
       b.disabled = entry.disabled;
       b.setAttribute('aria-selected', String(i === this._selected));
+      // Three columns, so the caret, the place and the caption line up down
+      // the list instead of drifting with the length of each label.
       b.innerHTML =
         `<span class="item__caret">▸</span><span>${entry.label}</span>` +
-        (entry.note ? `<span class="item__note">${entry.note}</span>` : '');
+        `<span class="item__note">${entry.note ?? ''}</span>`;
       b.onmouseenter = () => {
         this._selected = i;
         this._syncMenuSelection();
@@ -341,13 +373,17 @@ export class UI {
   applyXRSupport(support) {
     this._entries[0].disabled = !support['immersive-ar'];
     this._entries[1].disabled = !support['immersive-vr'];
-    this._entries[0].note = support['immersive-ar'] ? '' : 'unavailable';
-    this._entries[1].note = support['immersive-vr'] ? '' : 'unavailable';
+    this._entries[0].note = support['immersive-ar']
+      ? 'headset · passthrough'
+      : 'needs a headset';
+    this._entries[1].note = support['immersive-vr']
+      ? 'headset · full VR'
+      : 'needs a headset';
 
     const note = this.menu.querySelector('[data-menu-note]');
     note.textContent = support['immersive-ar'] || support['immersive-vr']
       ? 'Headset ready'
-      : 'No headset — open in the Meta Quest Browser for VR';
+      : 'Open this page in the Meta Quest Browser to play in a headset';
 
     this._selected = this._entries.findIndex((e) => !e.disabled);
     if (this._selected < 0) this._selected = 0;
@@ -407,7 +443,7 @@ export class UI {
 
     el.querySelector('[data-act="toggle"]').onclick = () => this.togglePause();
     el.querySelector('[data-act="mode"]').onclick = () => this.nextMode();
-    el.querySelector('[data-act="serve"]').onclick = () => this.machine.serve();
+    el.querySelector('[data-act="serve"]').onclick = () => this.serveOne();
     el.querySelector('[data-act="settings"]').onclick = () => this.toggleSettings();
     el.querySelector('[data-act="exit"]').onclick = () => this.quitToMenu();
   }
@@ -468,6 +504,7 @@ export class UI {
 
   _menuItems() {
     return buildPauseMenu({
+      inXR: Boolean(this.xr.session),
       machine: this.machine,
       game: this.game,
       settings: this.settings,
@@ -479,7 +516,22 @@ export class UI {
 
   // --- Commands (shared by clicks, keys and the VR menu) ----------------
 
+  // The bottom bar's commands drive the ball machine, and the machine only
+  // runs in Arcade. Coach places its own balls and Versus is fed by the other
+  // player, so these have to be refused rather than quietly doing something —
+  // pressing S in a match used to fire a stray ball into it that only one
+  // side could see, and D silently rotated a drill you would meet again the
+  // next time you played Arcade.
+  _machineCommandsAllowed(what) {
+    const game = this.settings.get('game');
+    if (game === 'arcade') return true;
+    this.toast(game === 'versus' ? `No ${what} in a match` : `No ${what} in Coach`);
+    this.sfx.ui(false);
+    return false;
+  }
+
   togglePause() {
+    if (!this._machineCommandsAllowed('pausing')) return;
     this.machine.enabled = !this.machine.enabled;
     this.game.revision++;
     this.sfx.ui(this.machine.enabled);
@@ -487,10 +539,16 @@ export class UI {
   }
 
   nextMode() {
+    if (!this._machineCommandsAllowed('mode change')) return;
     const mode = this.machine.nextDrill();
     this.game.revision++;
     this.sfx.ui();
     this.toast(mode.name);
+  }
+
+  serveOne() {
+    if (!this._machineCommandsAllowed('serving')) return;
+    this.machine.serve();
   }
 
   toggleSettings(force) {
@@ -521,11 +579,23 @@ export class UI {
   _onKey(e) {
     if (!this.menu.hidden) {
       if (document.activeElement === this.lobbyCode) return; // typing a code
+
+      // The scores panel covers the menu, so it takes the keyboard with it.
+      // Without this, Enter started the game behind it — you ended up playing
+      // under a leaderboard — and the number keys changed a game you could
+      // not see.
+      if (!this.scoresEl.hidden) {
+        if (e.code === 'KeyL' || e.code === 'Escape' || e.code === 'Enter') {
+          e.preventDefault();
+          this.toggleScores(false);
+        }
+        return;
+      }
+
       if (e.code === 'Digit1') this.setGame('arcade');
       else if (e.code === 'Digit2') this.setGame('coach');
       else if (e.code === 'Digit3') this.setGame('versus');
       else if (e.code === 'KeyL') this.toggleScores();
-      else if (e.code === 'Escape' && !this.scoresEl.hidden) this.toggleScores(false);
       else if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);
       else if (e.code === 'Enter' || e.code === 'Space') {
@@ -549,7 +619,7 @@ export class UI {
     } else if (e.code === 'KeyD') {
       this.nextMode();
     } else if (e.code === 'KeyS') {
-      this.machine.serve();
+      this.serveOne();
     } else if (e.code === 'KeyR') {
       this.game.reset();
       this.toast('Score reset');
@@ -593,6 +663,15 @@ export class UI {
     `;
     document.body.appendChild(this.winEl);
     this.winEl.querySelector('[data-win-exit]').onclick = () => this.quitToMenu();
+  }
+
+  // Force the line under the score to say something specific — used when the
+  // room dies, where "waiting for opponent" would be a lie.
+  setVersusState(text) {
+    this.versusHud.hidden = false;
+    const state = this.versusHud.querySelector('[data-versus-state]');
+    state.textContent = text;
+    state.dataset.live = 'false';
   }
 
   setVersusOpponent(present) {
@@ -643,6 +722,42 @@ export class UI {
 
   _hideVersusWin() {
     if (this.winEl) this.winEl.hidden = true;
+  }
+
+  // --- Webcam preview ---------------------------------------------------
+  //
+  // Colour tracking fails for reasons you can see instantly and cannot guess
+  // at all: it locked onto a red jumper, the rubber is in shadow, your hand is
+  // over the face. A thumbnail of what the camera is matching turns "it
+  // doesn't work" into "move the lamp".
+
+  _buildCamPreview() {
+    const el = document.createElement('div');
+    el.id = 'campreview';
+    el.hidden = true;
+    el.innerHTML = `
+      <canvas class="campreview__view" width="192" height="144"></canvas>
+      <div class="campreview__status" data-cam-status></div>
+    `;
+    document.body.appendChild(el);
+    this.camPreview = el;
+    this.camCanvas = el.querySelector('canvas');
+    this.camStatus = el.querySelector('[data-cam-status]');
+  }
+
+  // `tracker` is a PaddleTracker, or null to put the preview away.
+  showCamPreview(tracker) {
+    if (!tracker) {
+      this.camPreview.hidden = true;
+      return null;
+    }
+    this.camPreview.hidden = false;
+    tracker.attachDebugCanvas(this.camCanvas);
+    return this.camCanvas;
+  }
+
+  setCamStatus(text) {
+    if (this.camStatus) this.camStatus.textContent = text;
   }
 
   // --- Scores -----------------------------------------------------------

@@ -33,6 +33,16 @@ import * as THREE from 'three';
 const PROC_W = 160; // detection runs downscaled; full res buys nothing here
 const PROC_H = 120;
 
+// The mask size a paddle held at a sensible distance produces, in pixels of
+// the downscaled frame. The colour gate is nudged to keep the blob in this
+// band — see _adaptTolerance.
+const TARGET_AREA_MIN = 140;
+const TARGET_AREA_MAX = 900;
+
+// How much of the usual smoothing rate depth gets. Below 1 it lags the other
+// axes, which is the point: see the note where it is applied.
+const DEPTH_DAMPING = 0.35;
+
 export const TRACKER_STATE = {
   IDLE: 'idle',
   REQUESTING: 'requesting',
@@ -76,8 +86,12 @@ export class PaddleTracker {
     this._stream = null;
     this._raf = null;
     this._mask = new Uint8Array(PROC_W * PROC_H);
+    this._labels = new Int32Array(PROC_W * PROC_H);
+    this._stack = new Int32Array(PROC_W * PROC_H);
+    this._lastCentroid = null;
     this._lastTiltSign = 1;
     this._smoothed = null;
+    this._missed = 0; // consecutive frames with no blob
     this._lastFrameTime = 0;
     this._focalPx = PROC_W; // ~53° horizontal FOV; refined at calibration
   }
@@ -180,16 +194,50 @@ export class PaddleTracker {
     if (this.state === TRACKER_STATE.TRACKING || this.state === TRACKER_STATE.LOST) {
       const blob = this._detect(frame);
       if (blob) {
+        this._adaptTolerance(blob.count);
         this._poseFromBlob(blob);
+        this._missed = 0;
         if (this.state === TRACKER_STATE.LOST) this._setState(TRACKER_STATE.TRACKING);
       } else {
-        this.confidence = 0;
-        if (this.state === TRACKER_STATE.TRACKING) this._setState(TRACKER_STATE.LOST);
+        // Don't call it lost on one bad frame. A hand crossing the rubber, a
+        // fast swing blurring it out, someone walking past the lamp — all
+        // drop a frame or three, and flicking the bat away and back each time
+        // is far worse than holding the last pose for a fifth of a second.
+        this._missed += 1;
+        this.confidence = Math.max(0, this.confidence - 0.2);
+        this._adaptTolerance(0);
+        if (this._missed > 12 && this.state === TRACKER_STATE.TRACKING) {
+          this._setState(TRACKER_STATE.LOST);
+          // After this long the paddle really has moved; anchoring the next
+          // pick to where it used to be would just fight the reacquire.
+          this._lastCentroid = null;
+        }
       }
       this._drawDebug(frame, blob);
     } else {
       this._drawDebug(frame, null);
     }
+  }
+
+  // Keep the mask roughly the size a paddle should be.
+  //
+  // One fixed threshold cannot survive a room: move under a lamp and the
+  // rubber washes out until nothing matches; turn toward a window and half
+  // the wall matches instead. Rather than ask the player to recalibrate every
+  // time they move, widen the gate when the blob is starving and tighten it
+  // when it is eating the background. Bounded at both ends, so it can neither
+  // collapse to nothing nor open up to the whole frame.
+  _adaptTolerance(count) {
+    const tol = this.tolerance;
+    const step = count < TARGET_AREA_MIN ? 1.06 : count > TARGET_AREA_MAX ? 0.96 : 1;
+    if (step === 1) return;
+    // The ceilings matter as much as the floors. Skin sits at nearly the
+    // same hue as red rubber and differs mainly in saturation, so letting
+    // the saturation gate drift open (it used to reach ±0.55) eventually
+    // admitted the player's face — and from then on the bat tracked it.
+    tol.h = THREE.MathUtils.clamp(tol.h * step, 0.03, 0.09);
+    tol.s = THREE.MathUtils.clamp(tol.s * step, 0.18, 0.4);
+    tol.v = THREE.MathUtils.clamp(tol.v * step, 0.22, 0.5);
   }
 
   // Threshold against the learned colour, then take image moments. Moments
@@ -202,73 +250,127 @@ export class PaddleTracker {
     const t = this.target;
     const tol = this.tolerance;
 
-    let count = 0;
-    let sumX = 0;
-    let sumY = 0;
+    // Rubber is deeply saturated; skin is not. A symmetric |s − target|
+    // gate treated "much more saturated than the rubber" and "much less"
+    // as equally wrong, and once the gate adapted open it reached down
+    // into skin tones — red rubber and a face are nearly the same hue, so
+    // the face matched and the centroid walked onto it. The floor is the
+    // discriminator that actually separates the two; more saturated than
+    // the target is never evidence against being the paddle.
+    const satFloor = Math.max(0.3, t.s - tol.s);
 
+    let total = 0;
     for (let y = 0, i = 0, p = 0; y < PROC_H; y++) {
       for (let x = 0; x < PROC_W; x++, i += 4, p++) {
         const [h, s, v] = rgbToHsv(data[i], data[i + 1], data[i + 2]);
         // Hue is circular, so compare the short way round
         const dh = Math.min(Math.abs(h - t.h), 1 - Math.abs(h - t.h));
-        const hit =
-          dh < tol.h && Math.abs(s - t.s) < tol.s && Math.abs(v - t.v) < tol.v;
+        const hit = dh < tol.h && s > satFloor && Math.abs(v - t.v) < tol.v;
         mask[p] = hit ? 1 : 0;
-        if (hit) {
-          count++;
-          sumX += x;
-          sumY += y;
-        }
+        if (hit) total++;
       }
     }
 
     const minArea = 40; // smaller than this is noise, not a paddle
-    if (count < minArea) return null;
+    if (total < minArea) return null;
 
-    const cx = sumX / count;
-    const cy = sumY / count;
+    // Global moments over every matching pixel were the other half of the
+    // face bug: paddle pixels here, face pixels there, and one centroid
+    // floating in the gap between them. Label connected regions and judge
+    // each on its own, then keep the one that looks most like a disc —
+    // weighted toward where the paddle was last frame, so a same-coloured
+    // patch elsewhere in the room cannot yank the bat away mid-swing.
+    const labels = this._labels;
+    labels.fill(0);
+    const stack = this._stack;
+    let nextLabel = 0;
+    let best = null;
 
-    // Second moments give the ellipse the disc projects to
-    let mxx = 0;
-    let myy = 0;
-    let mxy = 0;
-    for (let y = 0, p = 0; y < PROC_H; y++) {
-      for (let x = 0; x < PROC_W; x++, p++) {
-        if (!mask[p]) continue;
-        const dx = x - cx;
-        const dy = y - cy;
+    for (let seed = 0; seed < mask.length; seed++) {
+      if (!mask[seed] || labels[seed]) continue;
+      nextLabel++;
+      let top = 0;
+      stack[top++] = seed;
+      labels[seed] = nextLabel;
+      let count = 0;
+      let sumX = 0;
+      let sumY = 0;
+
+      while (top > 0) {
+        const p = stack[--top];
+        const x = p % PROC_W;
+        const y = (p / PROC_W) | 0;
+        count++;
+        sumX += x;
+        sumY += y;
+        if (x > 0 && mask[p - 1] && !labels[p - 1]) { labels[p - 1] = nextLabel; stack[top++] = p - 1; }
+        if (x < PROC_W - 1 && mask[p + 1] && !labels[p + 1]) { labels[p + 1] = nextLabel; stack[top++] = p + 1; }
+        if (y > 0 && mask[p - PROC_W] && !labels[p - PROC_W]) { labels[p - PROC_W] = nextLabel; stack[top++] = p - PROC_W; }
+        if (y < PROC_H - 1 && mask[p + PROC_W] && !labels[p + PROC_W]) { labels[p + PROC_W] = nextLabel; stack[top++] = p + PROC_W; }
+      }
+
+      if (count < minArea) continue;
+
+      const cx = sumX / count;
+      const cy = sumY / count;
+
+      // Second moments give the ellipse the disc projects to
+      let mxx = 0;
+      let myy = 0;
+      let mxy = 0;
+      for (let p = 0; p < mask.length; p++) {
+        if (labels[p] !== nextLabel) continue;
+        const dx = (p % PROC_W) - cx;
+        const dy = ((p / PROC_W) | 0) - cy;
         mxx += dx * dx;
         myy += dy * dy;
         mxy += dx * dy;
       }
+      mxx /= count;
+      myy /= count;
+      mxy /= count;
+
+      // Eigenvalues of the 2x2 covariance: the ellipse's squared semi-axes
+      const tr = mxx + myy;
+      const det = mxx * myy - mxy * mxy;
+      const disc = Math.sqrt(Math.max(tr * tr / 4 - det, 0));
+      const l1 = tr / 2 + disc;
+      const l2 = Math.max(tr / 2 - disc, 1e-6);
+
+      // How disc-like is this really? A hand or a sleeve in the same colour
+      // tends to be far from elliptical, and the filled-area ratio catches it.
+      const ellipseArea = Math.PI * Math.sqrt(l1) * Math.sqrt(l2);
+      const fill = ellipseArea > 0 ? count / ellipseArea : 0;
+
+      let score = Math.min(fill, 1) * Math.min(count / 220, 1);
+      if (this._lastCentroid) {
+        const jump = Math.hypot(cx - this._lastCentroid.x, cy - this._lastCentroid.y);
+        score *= 1 / (1 + jump / 45);
+      }
+      if (score <= (best?.score ?? 0)) continue;
+
+      best = {
+        cx,
+        cy,
+        major: 2 * Math.sqrt(l1),
+        minor: 2 * Math.sqrt(l2),
+        angle: 0.5 * Math.atan2(2 * mxy, mxx - myy),
+        count,
+        fill,
+        score,
+      };
     }
-    mxx /= count;
-    myy /= count;
-    mxy /= count;
 
-    // Eigenvalues of the 2x2 covariance: the ellipse's squared semi-axes
-    const tr = mxx + myy;
-    const det = mxx * myy - mxy * mxy;
-    const disc = Math.sqrt(Math.max(tr * tr / 4 - det, 0));
-    const l1 = tr / 2 + disc;
-    const l2 = Math.max(tr / 2 - disc, 1e-6);
-
-    const major = 2 * Math.sqrt(l1);
-    const minor = 2 * Math.sqrt(l2);
-    const angle = 0.5 * Math.atan2(2 * mxy, mxx - myy);
-
-    // How disc-like is this really? A hand or a shirt in the same colour
-    // tends to be far from elliptical, and the filled-area ratio catches it.
-    const ellipseArea = Math.PI * Math.sqrt(l1) * Math.sqrt(l2);
-    const fill = ellipseArea > 0 ? count / ellipseArea : 0;
+    if (!best) return null;
     this.confidence = THREE.MathUtils.clamp(
-      Math.min(fill, 1) * Math.min(count / 220, 1),
+      Math.min(best.fill, 1) * Math.min(best.count / 220, 1),
       0,
       1
     );
     if (this.confidence < 0.25) return null;
 
-    return { cx, cy, major, minor, angle, count };
+    this._lastCentroid = { x: best.cx, y: best.cy };
+    return best;
   }
 
   _poseFromBlob(blob) {
@@ -297,7 +399,17 @@ export class PaddleTracker {
 
     if (this._smoothed) {
       const k = 1 - this.smoothing;
+      const previousZ = this._smoothed.position.z;
       this._smoothed.position.lerp(pos, k);
+
+      // Depth gets its own, heavier smoothing. It is inferred from apparent
+      // size, so a few pixels of wobble on the blob's edge move it by
+      // centimetres — and since the bat's swing velocity is the difference
+      // between frames, that wobble reads as a swing the player never made
+      // and fires the ball off the table. Sideways and vertical position come
+      // from the centroid and are far steadier, so they stay responsive.
+      this._smoothed.position.z = previousZ + (pos.z - previousZ) * k * DEPTH_DAMPING;
+
       this._smoothed.quaternion.slerp(quat, k);
     } else {
       this._smoothed = { position: pos.clone(), quaternion: quat.clone() };

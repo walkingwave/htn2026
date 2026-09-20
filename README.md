@@ -1,6 +1,12 @@
-# Ping Pong VR Trainer (HTN 2026)
+# PaddleLab XR
 
-Web-based ping pong trainer/simulator for the Meta Quest 3S, running entirely in the Meta Quest Browser via **WebXR** — no Unity, no app store, no sideloading.
+A table tennis trainer and versus game for the Meta Quest 3S, running entirely in the Meta Quest Browser via **WebXR** — no Unity, no app store, no sideloading. It plays on a laptop too, with a mouse or a real bat through a webcam.
+
+Built at Hack the North 2026.
+
+## The name on screen
+
+The wordmark is set in **Ping Pong**, drawn by Elżbieta Krużyńska in 1974 and digitised by Mateusz Machalski and Małgorzata Bartosik in 2020 ([Capitalics](https://capitalics.wtf/en/font/ping-pong)). The font is free but account-gated, so it is not committed here — see `public/fonts/README.md` to add it. Without it the logo falls back to the interface's monospace face rather than breaking.
 
 ## Stack
 
@@ -33,14 +39,14 @@ Open `https://localhost:5173`, accept the cert warning. You get an orbit-camera 
 
 | | In headset | Desktop |
 | --- | --- | --- |
-| Swing the bat | Move your hand | — |
+| Swing the bat | Move your hand | Move the mouse; click or <kbd>F</kbd> to drive |
 | Pause / arm the machine | Trigger | <kbd>Space</kbd> |
 | Next mode | Grip | <kbd>D</kbd> |
 | Open the menu | A / X / B / Y | <kbd>Tab</kbd> |
 | Serve one ball | — | <kbd>S</kbd> |
 | Reset the score | — | <kbd>R</kbd> |
 | Back to main menu | Menu → Quit | <kbd>Esc</kbd> |
-| Look around | Head tracking | Drag to orbit |
+| Look around | Head tracking | The view follows your bat |
 
 ### The paddle
 
@@ -126,7 +132,15 @@ There is no seeded demo data: an empty board means nobody has played yet.
 
 It finds the rubber by colour, so it needs to be shown the colour once: hold the bat up face-on and click. From there, the blob's ellipse gives pose — apparent size is depth, the centroid is x/y, and the minor/major axis ratio is tilt. If it loses the bat, or you never calibrate, the pointer stays in charge, so you are never left with nothing to play with.
 
-Good light and a bat whose rubber isn't the same colour as your shirt both help a lot.
+Good light and a bat whose rubber isn't the same colour as your shirt both help a lot. A thumbnail in the corner shows exactly what the camera is matching, which turns most problems into something you can see rather than guess at. <kbd>V</kbd> re-learns the colour without leaving the game — worth pressing after you move to different light. <kbd>B</kbd> flips the tilt if the bat reads back to front: a paddle leaning away projects identically to one leaning toward the camera, and that ambiguity cannot be resolved from the picture alone.
+
+The colour gate adapts as you play, widening when nothing matches and tightening when too much does, so walking under a lamp no longer means recalibrating. A dropped frame or two — a hand across the rubber, a fast swing blurring it — holds the last pose rather than yanking the bat away.
+
+## The view on a computer
+
+The camera rides with your bat rather than flying around on its own. A free camera is fine for looking at a scene and hopeless for playing in one: judging where the ball is in depth depends on knowing where *you* are, and a viewpoint that drifts means re-learning that every rally. Anchored to the bat, the ball grows straight toward you and the only thing to read is its flight.
+
+It follows at a fraction of the bat's travel rather than one to one — matching exactly swings the whole world about whenever you move, which is unreadable and faintly sickening.
 
 ### Playing with your hand
 

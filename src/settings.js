@@ -33,8 +33,8 @@ export const OPTIONS = {
   paddleSource: [
     { label: 'Controller', value: 'controller' },
     { label: 'Real paddle', value: 'hand' },
-    { label: 'Webcam bat', value: 'camera' },
-    { label: 'Hand Tracking', value: 'camera-hand' },
+    { label: 'Webcam paddle', value: 'camera' },
+    { label: 'Hand tracking', value: 'camera-hand' },
   ],
   // Arcade is the drills and rally; Coach teaches strokes one at a time;
   // Versus is a networked match against another player.
@@ -56,6 +56,8 @@ export const OPTIONS = {
     { label: 'Easy', value: 'easy' },
     { label: 'Normal', value: 'normal' },
     { label: 'Hard', value: 'hard' },
+    // Paddle placement driven by a fruit fly's connectome (see flybrain.js)
+    { label: 'Fly brain', value: 'fly' },
   ],
 };
 
@@ -73,7 +75,10 @@ const DEFAULTS = {
   playerName: 'Player', // shown on the leaderboard
 };
 
-const STORAGE_KEY = 'pingpong-trainer-settings';
+const STORAGE_KEY = 'paddlelab-xr.settings';
+// The name before the rebrand. Read once, so nobody loses the settings they
+// had; never written, so the old key dies with the next save.
+const LEGACY_STORAGE_KEY = 'pingpong-trainer-settings';
 
 export class Settings {
   constructor() {
@@ -100,7 +105,9 @@ export class Settings {
 
 function load() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? {};
+    return JSON.parse(
+      localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
+    ) ?? {};
   } catch {
     return {}; // private browsing, corrupt entry — defaults are fine
   }

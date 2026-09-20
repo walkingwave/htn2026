@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 import { createTable } from './table.js';
@@ -9,7 +8,7 @@ import { UI } from './ui.js';
 import { Settings } from './settings.js';
 import { Sfx } from './audio.js';
 import { VRMenu } from './vrMenu.js';
-import { Paddle } from './paddle.js';
+import { Paddle, DESKTOP_PADDLE_SCALE } from './paddle.js';
 import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
 import { BallMachine } from './ballMachine.js';
@@ -18,10 +17,11 @@ import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
-import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
+import { MarkerPaddleTracker, TRACKER_STATE } from './vision/markerPaddleTracker.js';
 import { startHandTracking } from './handTracking.js';
 import { HandPaddlePose } from './vision/handPose.js';
 import { Opponent } from './opponent.js';
+import { FlyBrain } from './flybrain.js';
 import { Coach, SCENARIOS } from './coach.js';
 import {
   createRoom,
@@ -131,6 +131,18 @@ const _headLocal = new THREE.Vector3();
 const _headEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
 function recenter() {
+  // On a screen there is no head to centre on. The camera is posed by the
+  // game, so reading it back and correcting for it just walked the player a
+  // few centimetres off the stance both ends of a versus match assume. Put
+  // them back where they should be standing instead.
+  if (!renderer.xr.isPresenting) {
+    playerRig.position.set(0, 0, netMode === 'guest' ? -PLAY_AREA.PLAYER_Z : PLAY_AREA.PLAYER_Z);
+    playerRig.rotation.y = netMode === 'guest' ? Math.PI : 0;
+    playerRig.updateMatrixWorld(true);
+    ui.toast('View reset');
+    return;
+  }
+
   // Head pose relative to the rig is exactly what the headset reports
   _headEuler.setFromQuaternion(camera.quaternion, 'YXZ');
   playerRig.rotation.y = -_headEuler.y;
@@ -181,6 +193,18 @@ scene.add(targetZone.mesh);
 const opponent = new Opponent();
 scene.add(opponent.mesh);
 machine.server = opponent; // in rally mode the opponent puts the ball in play
+
+// The "Fly brain" difficulty: paddle placement read out of a fruit fly's
+// connectome, used as a fixed reservoir. Without the exported model file
+// (public/flybrain/model.json — built on the flybrain branch) it plays a
+// near-perfect analytic intercept instead, so the difficulty always works.
+const flyBrain = new FlyBrain();
+// The fallback predicts to the fly's own hitting plane; point it at ours.
+flyBrain.planeZ = -(TABLE.LENGTH / 2) - 0.1;
+flyBrain.load().then((ok) => {
+  if (ok) console.info('[FlyBrain] connectome model loaded');
+});
+opponent.brain = flyBrain;
 
 // Coach mode: a lesson is a path the bat should travel, shown as a ribbon
 // and scored on how closely you trace it.
@@ -477,17 +501,36 @@ for (const i of [0, 1]) {
 const desktopRig = new THREE.Group();
 playerRig.add(desktopRig);
 const desktopPaddle = new Paddle();
+// Mouse, webcam-marker and hand-tracked play all go through this one bat;
+// they all get the enlarged flat-screen size. The grip paddles above stay
+// life-size for the headset.
+desktopPaddle.setScale(DESKTOP_PADDLE_SCALE);
 desktopPaddle.attachTo(desktopRig);
 desktopPaddle.enabled = false; // switched on below whenever we're not in XR
 desktopPaddle.mesh.visible = false;
 paddles.push(desktopPaddle);
 
 const DESKTOP_REST_Z = -0.72; // blade's resting depth, a little in front of you
-const DESKTOP_THRUST_Z = -1.18; // how far forward a swing reaches
-const DESKTOP_THRUST_TIME = 0.14; // seconds held forward before it returns
+// A swing adds pace; it does not relocate the bat.
+//
+// The first version lunged 46 cm forward, which moved the plane the ball was
+// about to cross out from under it — every click turned a clean contact into
+// a miss (18 hits without swinging, 0 with). What a stroke needs to add is
+// speed at the moment of contact, so this is now a short push at a believable
+// hand speed, and the depth it reaches is a few centimetres rather than half
+// the length of your arm.
+const DESKTOP_THRUST_DEPTH = 0.14; // metres forward at the top of the swing
+const DESKTOP_THRUST_TIME = 0.1; // seconds pushing before it comes back
+const DESKTOP_THRUST_SPEED = 1.5; // m/s — the bat's own pace, not a teleport
+const DESKTOP_DRIVE_PITCH = 0.3; // radians the face closes at full stroke
 
-let desktopDepthTarget = DESKTOP_REST_Z;
+// The wheel nudges the bat nearer or further than where it would meet the
+// ball, for anyone who wants to take it early or late. A bias rather than an
+// absolute depth, so it composes with the ball-meeting above instead of
+// fighting it.
+let desktopDepthBias = 0;
 let desktopThrust = 0;
+let desktopRecover = 0; // time left before another stroke can start
 
 // Where the player is asking the *blade* to be, in rig space. Kept separate
 // from the rig's own position because the blade sits up and back from the
@@ -500,15 +543,70 @@ let desktopThrust = 0;
 const desktopAim = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
 const _bladeOffset = new THREE.Vector3();
 
+// The bat goes where the cursor points, rather than somewhere derived from it.
+//
+// The first version mapped the window onto a fixed box — which meant the reach
+// was whatever those numbers happened to be, and they were wrong: ±0.62 m of
+// swing against a table ±0.76 m wide, so the corners were physically
+// unreachable no matter how far you moved the mouse. Un-projecting the cursor
+// through the camera onto the plane the bat plays in removes the guesswork:
+// the blade sits under the pointer, and it keeps doing so as the view follows
+// the bat, which a fixed mapping cannot.
+const HALF_TABLE_X = TABLE.WIDTH / 2;
+const REACH_X = HALF_TABLE_X + 0.22; // a little past the edge, as you can reach
+const REACH_Y_TOP = 1.62; // about shoulder height; above that is not a stroke
+// Balls that clip the near edge drop well below the table before they reach
+// you, and the bat plays behind the end of the table, not over it — so the
+// old floor at table height meant a low ball was simply unreachable. Knee
+// height is both playable and honest: you can get under a low one.
+const REACH_Y_BOTTOM = 0.35;
+const _pointerNdc = new THREE.Vector2();
+const _pointerRay = new THREE.Raycaster();
+const _batPlane = new THREE.Plane();
+const _planePoint = new THREE.Vector3();
+const _planeNormal = new THREE.Vector3();
+const _hit = new THREE.Vector3();
+let pointerActive = false;
+
 function placeDesktopBat(clientX, clientY) {
-  if (renderer.xr.isPresenting || handSession) return;
-  const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
-  const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
-  desktopAim.x = (x - 0.5) * 1.25;
-  // Never below the surface, never above about head height.
-  desktopAim.y = Math.max(TABLE.HEIGHT + 0.03, 0.95 + (0.5 - y) * 0.7);
-  desktopYaw = (x - 0.5) * 0.5;
-  poseDesktopBat();
+  if (renderer.xr.isPresenting || handSession) return; // controllers or the hand own the bats
+  _pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
+  _pointerNdc.y = -(clientY / window.innerHeight) * 2 + 1;
+  pointerActive = true;
+}
+
+// Resolve the cursor onto the bat's plane. Done per frame rather than per
+// pointer event, because the plane moves: depth tracks the incoming ball and
+// the camera rides the bat, so the same cursor position means a different
+// world point a frame later.
+function aimDesktopBatAtPointer() {
+  if (!pointerActive) return;
+
+  // The plane the bat plays in: upright, facing down the table, at the bat's
+  // current depth. Built in world space from the rig so a flipped guest rig
+  // needs no special case.
+  _planePoint.set(0, 0, desktopAim.z);
+  playerRig.localToWorld(_planePoint);
+  _planeNormal.set(0, 0, 1).applyQuaternion(playerRig.quaternion);
+  _batPlane.setFromNormalAndCoplanarPoint(_planeNormal, _planePoint);
+
+  // Aimed through a fixed reference view, never the live camera.
+  //
+  // The live one follows the bat, and the bat is placed by un-projecting the
+  // cursor through a camera — so using it closes a loop: move the mouse, the
+  // bat moves, the camera chases it, and the same cursor position now means
+  // somewhere else, so the bat slides again. It settles eventually and feels
+  // like the bat is swimming away from the pointer the whole time. A fixed
+  // reference view makes a cursor position mean exactly one place on the
+  // plane, always, and leaves the camera free to drift for feel.
+  _pointerRay.setFromCamera(_pointerNdc, camera);
+  if (!_pointerRay.ray.intersectPlane(_batPlane, _hit)) return;
+
+  playerRig.worldToLocal(_hit);
+  meetIncomingBall(_hit);
+  desktopAim.x = THREE.MathUtils.clamp(_hit.x, -REACH_X, REACH_X);
+  desktopAim.y = THREE.MathUtils.clamp(_hit.y, REACH_Y_BOTTOM, REACH_Y_TOP);
+  desktopYaw = (desktopAim.x / REACH_X) * 0.5;
 }
 
 // A bat's face is perpendicular to the forearm, so the blade points along the
@@ -519,17 +617,205 @@ function placeDesktopBat(clientX, clientY) {
 let desktopYaw = 0;
 
 function poseDesktopBat() {
-  desktopRig.rotation.set(0, Math.PI / 2 + desktopYaw, 0);
+  // Close the face as you drive. A flat bat at 5 m/s puts every ball long —
+  // which it should, that is what a flat bat does. Angling it down over the
+  // ball is how the shot is actually kept on the table, so the swing does it
+  // for you, in proportion to how far through the stroke you are.
+  const drive = THREE.MathUtils.clamp(desktopThrust / DESKTOP_THRUST_TIME, 0, 1);
+
+  desktopRig.rotation.set(-drive * DESKTOP_DRIVE_PITCH, Math.PI / 2 + desktopYaw, 0);
   desktopRig.quaternion.setFromEuler(desktopRig.rotation);
   _bladeOffset
     .copy(desktopPaddle.mesh.getObjectByName('blade').position)
+    // The blade's local offset scales with the enlarged desktop bat; without
+    // this the aim point sat a handle-length away from the blade.
+    .multiplyScalar(DESKTOP_PADDLE_SCALE)
     .applyQuaternion(desktopRig.quaternion);
   desktopRig.position.copy(desktopAim).sub(_bladeOffset);
 }
 
+// Which depth the bat should hold for the ball in play.
+//
+// Held, not chased — a bat that tracks the ball's depth never lets it cross
+// the blade. But the resting depth only suits a ball that is coming at you.
+// Target practice lobs one straight up in front of the player, and it came
+// down twenty-odd centimetres short of the resting plane: the bat sat beyond
+// it, the ball fell past untouched, and the mode simply could not be played on
+// a screen. So the plane is picked once per ball and then held there.
+const PLANE_LOB_SPEED = 0.8; // m/s of approach below which a ball is a lob
+const LOB_STAND_OFF = 0.07; // metres the blade stands behind a hanging ball
+const _planeBallLocal = new THREE.Vector3();
+const _planeRigInverse = new THREE.Quaternion();
+let planeBall = null; // the ball the current plane was chosen for
+let planeDepth = DESKTOP_REST_Z;
+
+function desktopPlaneDepth() {
+  _planeRigInverse.copy(playerRig.quaternion).invert();
+
+  // The ball this player has to deal with: on their side, still in play.
+  let candidate = null;
+  let candidateZ = -Infinity;
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    _planeBallLocal.copy(ball.mesh.position);
+    playerRig.worldToLocal(_planeBallLocal);
+    if (_planeBallLocal.z > 0.2 || _planeBallLocal.z < -1.8) continue;
+    if (_planeBallLocal.z > candidateZ) {
+      candidateZ = _planeBallLocal.z;
+      candidate = ball;
+    }
+  }
+
+  if (!candidate) {
+    planeBall = null;
+    planeDepth = DESKTOP_REST_Z;
+    return planeDepth;
+  }
+  if (candidate === planeBall) return planeDepth; // already chosen; hold it
+
+  planeBall = candidate;
+  _planeBallLocal.copy(candidate.velocity).applyQuaternion(_planeRigInverse);
+  // A ball driven at you will cross the resting plane on its own. A lob will
+  // not, so the plane moves out to where it is hanging instead.
+  // For a lob the plane sits a little nearer the player than the ball, not
+  // level with it. Level, the ball descends onto the edge of the blade and
+  // which side it is counted as arriving from — and so which way it leaves —
+  // comes down to rounding: half of them were knocked back toward the player
+  // rather than down the table. Behind it, the ball is always on the far side
+  // of the face and a stroke always sends it the way the player is facing.
+  planeDepth =
+    _planeBallLocal.z > PLANE_LOB_SPEED
+      ? DESKTOP_REST_Z
+      : THREE.MathUtils.clamp(candidateZ + LOB_STAND_OFF, -1.1, -0.25);
+  return planeDepth;
+}
+
 function swingDesktopBat() {
   if (renderer.xr.isPresenting || handSession) return;
+  // One stroke at a time. Retriggering while a swing is running kept topping
+  // the timer up, so a held mouse button parked the bat at the end of its
+  // push — stationary, which is the one thing a bat must not be when the ball
+  // arrives. Balls came off a held "swing" slower than off no swing at all.
+  if (desktopThrust > 0 || desktopRecover > 0) return;
   desktopThrust = DESKTOP_THRUST_TIME;
+  desktopRecover = DESKTOP_THRUST_TIME * 1.6; // long enough to get back
+}
+
+// Close the last few centimetres onto a ball you are already tracking.
+//
+// Not a favour to bad aim — a correction for a gap the game creates. The ball
+// covers about 7 cm between frames and the blade is 8.5 cm across, so a
+// cursor sitting exactly on the ball is, by the time physics runs, most of a
+// blade behind it. Every ball then passes a hand's width from the bat, which
+// is precisely how it felt: unhittable for no visible reason.
+//
+// So: predict where the ball crosses the plane, and if the cursor is already
+// close, pull the blade the rest of the way. Bounded, and it does nothing if
+// you are not near the ball — miss by a wide margin and you still miss.
+// Screen-space: how near the cursor has to be, as a fraction of half the
+// viewport. Roughly a thumb's width — enough to cover the parallax between a
+// ball in flight and the plane it will cross, not enough to play for you.
+// Two profiles: a hand is a far coarser pointer than a mouse, so the webcam
+// paddle earns a wider catch radius, a stronger pull, and a longer look-ahead
+// — it assists a player who is already roughly right, it does not play for
+// them. The mouse keeps the light touch it was tuned with.
+const ASSIST_PROFILES = {
+  mouse: { range: 0.14, max: 0.16, slew: 0.9, horizon: 0.12 },
+  // The webcam profile is a live view onto the tuning panel's values.
+  webcam: {
+    get range() { return webcamTuning.assistRange; },
+    get max() { return webcamTuning.assistPull; },
+    get slew() { return webcamTuning.assistSlew; },
+    get horizon() { return webcamTuning.assistHorizon; },
+  },
+};
+let assist = ASSIST_PROFILES.mouse;
+const assistOffset = new THREE.Vector2();
+const _meetLocal = new THREE.Vector3();
+const _meetVel = new THREE.Vector3();
+const _meetWorld = new THREE.Vector3();
+const _rigInverse = new THREE.Quaternion();
+
+function meetIncomingBall(aim) {
+  _rigInverse.copy(playerRig.quaternion).invert();
+
+  let bestDistance = Infinity;
+  let foundX = 0;
+  let foundY = 0;
+
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    _meetLocal.copy(ball.mesh.position);
+    playerRig.worldToLocal(_meetLocal);
+    _meetVel.copy(ball.velocity).applyQuaternion(_rigInverse);
+
+    // Only a ball still coming at you, and only once it is close enough that
+    // you would actually be playing it.
+    if (_meetVel.z < 0.5) continue;
+    // A short horizon on purpose. Predicting further means predicting through
+    // the bounce this ball still has to take off the table, and a straight
+    // line through a bounce lands the blade somewhere the ball was never
+    // going — which pulled it away from balls the player had lined up
+    // perfectly. Inside a tenth of a second the flight is simple and the
+    // prediction is worth trusting.
+    const toPlane = aim.z - _meetLocal.z;
+    if (toPlane < 0 || toPlane > 0.34) continue;
+
+    const t = toPlane / _meetVel.z;
+    if (t > assist.horizon) continue;
+    const x = _meetLocal.x + _meetVel.x * t;
+    const y = _meetLocal.y + _meetVel.y * t - 0.5 * 9.81 * t * t;
+
+    // Matched on screen, not on the plane.
+    //
+    // The player puts the cursor on the ball they can see, and that ball is
+    // still short of the plane the bat plays in. The ray through it therefore
+    // meets the plane somewhere else entirely — higher and off to one side,
+    // by about eight centimetres at this camera angle — so a blade placed
+    // there misses a ball that was lined up perfectly. Comparing where the
+    // ball *will* be against where the cursor *is*, both in screen terms,
+    // measures the thing the player was actually aiming at.
+    _meetWorld.set(x, y, aim.z);
+    playerRig.localToWorld(_meetWorld);
+    _meetWorld.project(camera);
+    const distance = Math.hypot(_meetWorld.x - _pointerNdc.x, _meetWorld.y - _pointerNdc.y);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      foundX = x;
+      foundY = y;
+    }
+  }
+
+  // Slewed, never snapped.
+  //
+  // Jumping the blade onto the ball is self-defeating: the bat derives its
+  // swing speed from how far it moved since last frame, so a 14 cm correction
+  // reads as an 8 m/s lunge. Contact is then rejected as the bat moving away
+  // from the ball faster than the ball is arriving — and on the occasions it
+  // did connect it would have fired the ball off the table. Creeping the
+  // correction in over several frames leaves the bat's velocity honest, which
+  // is what the ball comes off.
+  let wantX = 0;
+  let wantY = 0;
+  if (bestDistance <= assist.range) {
+    // Strength comes from how close the cursor is on screen; the direction
+    // and size of the correction are in metres, on the plane.
+    const strength = 1 - bestDistance / assist.range;
+    const gapX = foundX - aim.x;
+    const gapY = foundY - aim.y;
+    const gap = Math.hypot(gapX, gapY);
+    if (gap > 1e-4) {
+      const pull = Math.min(assist.max, gap) * strength;
+      wantX = (gapX / gap) * pull;
+      wantY = (gapY / gap) * pull;
+    }
+  }
+
+  const step = assist.slew / 60; // metres per frame
+  assistOffset.x += THREE.MathUtils.clamp(wantX - assistOffset.x, -step, step);
+  assistOffset.y += THREE.MathUtils.clamp(wantY - assistOffset.y, -step, step);
+  aim.x += assistOffset.x;
+  aim.y += assistOffset.y;
 }
 
 // --- Webcam bat -------------------------------------------------------------
@@ -542,9 +828,7 @@ function swingDesktopBat() {
 // velocity, spin, versus packets) is identical either way; only where the pose
 // comes from changes.
 let camTracker = null;
-const _camQuat = new THREE.Quaternion();
-const _camBase = new THREE.Quaternion();
-const _camPos = new THREE.Vector3();
+let webcamHasLocked = false; // pointer drives until the first marker lock
 
 function usingWebcamBat() {
   return settings.get('paddleSource') === PADDLE_SOURCE.CAMERA;
@@ -552,31 +836,36 @@ function usingWebcamBat() {
 
 function startWebcamBat() {
   if (camTracker) return;
-  const tracker = new PaddleTracker();
-  camTracker = tracker;
-  tracker.onState = (state, error) => {
-    if (camTracker !== tracker) return;
-    if (state === TRACKER_STATE.ERROR) ui.toast(error ?? 'Camera unavailable');
-    else if (state === TRACKER_STATE.CALIBRATING) {
-      ui.toast('Hold your bat up, face on — then click to calibrate');
-    } else if (state === TRACKER_STATE.TRACKING) ui.toast('Webcam bat live');
-    else if (state === TRACKER_STATE.LOST) ui.toast('Lost the bat — hold it up again');
+  camTracker = new MarkerPaddleTracker();
+  camTracker.onState = (state, error) => {
+    // The preview carries the running commentary; toasts are for the moments
+    // that change what the player should do.
+    if (state === TRACKER_STATE.ERROR) {
+      ui.setCamStatus(error ?? 'Camera unavailable');
+      ui.toast(error ?? 'Camera unavailable');
+    } else if (state === TRACKER_STATE.CALIBRATING) {
+      ui.setCamStatus('Show the marker side of the paddle');
+      ui.toast('Show the printed markers to the camera — click to set neutral');
+    } else if (state === TRACKER_STATE.TRACKING) {
+      ui.setCamStatus('Tracking · flick to swing · V re-zeros · T tunes');
+    } else if (state === TRACKER_STATE.LOST) {
+      ui.setCamStatus('Lost the markers — show the paddle face');
+    }
   };
-  tracker.start().then(() => {
-    // A hand session or menu exit may have replaced this input while the
-    // browser was asking permission. Release that late camera stream too.
-    if (camTracker !== tracker) tracker.stop();
-  }).catch((err) => {
-    tracker.stop();
-    if (camTracker !== tracker) return;
+  ui.showCamPreview(camTracker);
+  camTracker.start().catch((err) => {
     ui.toast(err?.message ?? 'Camera failed');
     stopWebcamBat();
   });
 }
 
 function stopWebcamBat() {
+  webcamHasLocked = false;
+  webcamPrevZ = null;
+  webcamZVel = 0;
   camTracker?.stop();
   camTracker = null;
+  ui.showCamPreview(null);
 }
 
 // Keep the computercam pose/filter pipeline intact. Camera poses arrive at
@@ -642,26 +931,192 @@ window.addEventListener('pagehide', () => {
   stopWebcamBat();
 });
 
-// Pose the rig from the tracker. Camera space is +X right, +Y up, −Z away
-// from the viewer, with the origin at the lens; the desktop camera sits at eye
-// height on the rig, so the shift is a single offset. Depth and height are
-// clamped to the volume the bat can usefully be in, because a lost frame or a
-// red shirt in the background would otherwise throw it across the room.
-function poseWebcamBat() {
-  _camPos.copy(camTracker.position);
-  _camPos.y = THREE.MathUtils.clamp(_camPos.y + 1.62, TABLE.HEIGHT + 0.03, 1.6);
-  _camPos.x = THREE.MathUtils.clamp(_camPos.x, -0.8, 0.8);
-  _camPos.z = THREE.MathUtils.clamp(_camPos.z, -1.35, -0.2);
+// The webcam paddle drives the AIM POINT, not the blade.
+//
+// The first integration mapped the marker pose straight onto the blade —
+// six degrees of freedom, exactly what the tracker measures. It was
+// unusable, and the reason is instructive: blade angle came from raw board
+// tilt, but holding the paddle at a natural stroke angle foreshortens the
+// markers the tracker needs, so the angle you cannot help changing is the
+// one measured worst. Every contact came off a slightly different, slightly
+// wrong face. Depth had the same flaw — the player cannot perceive their
+// hand's distance to a virtual plane, so measured depth was noise they
+// couldn't correct.
+//
+// The mouse paddle is playable precisely because it synthesises those two
+// channels: the face angle follows the aim, the depth holds a plane, and a
+// swing is a discrete, repeatable thrust. So the hand now does what the
+// mouse does — moves the aim point — through that same proven path, aim
+// assist included. What the hand adds over a mouse is the swing itself:
+// flick the paddle toward the screen and the thrust fires, which is the
+// same motion as an actual stroke.
+const WEBCAM_REST = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
 
-  // The tracker reports how the real bat is tilted; the quarter turn that
-  // squares a blade to the table is ours to add.
-  _camBase.setFromAxisAngle(UP, Math.PI / 2);
-  _camQuat.copy(camTracker.quaternion).multiply(_camBase);
-  desktopRig.quaternion.copy(_camQuat);
-  _bladeOffset
-    .copy(desktopPaddle.mesh.getObjectByName('blade').position)
-    .applyQuaternion(_camQuat);
-  desktopRig.position.copy(_camPos).sub(_bladeOffset);
+// Everything that decides how the webcam paddle FEELS, in one tunable
+// bundle. Feel cannot be dialled in from measurements alone — it depends on
+// the player's camera, room, and reach — so the panel on the T key exposes
+// these live and persists what the player settles on.
+const WEBCAM_TUNING_KEY = 'paddlelab-webcam-tuning';
+const WEBCAM_DEFAULTS = {
+  gainX: 2.2, // virtual metres per real metre, sideways
+  gainY: 1.6, // and vertically
+  stiffness: 16, // per second; higher = snappier, noisier
+  maxSpeed: 6, // m/s ceiling on paddle travel
+  swingSpeed: 0.35, // m/s push toward the camera that counts as a swing
+  swingCooldown: 0.45,
+  lead: 0.06, // seconds of latency the predictor hides
+  assistRange: 0.24, // screen fraction where the pull engages
+  assistPull: 0.26, // metres it may move the paddle
+  assistSlew: 1.8, // m/s the pull creeps in at
+  assistHorizon: 0.18, // seconds ahead the crossing is predicted
+  camEase: 3.5, // how lazily the view follows the paddle
+};
+const webcamTuning = { ...WEBCAM_DEFAULTS };
+try {
+  Object.assign(webcamTuning, JSON.parse(localStorage.getItem(WEBCAM_TUNING_KEY)) ?? {});
+} catch {
+  // corrupt entry — defaults are fine
+}
+function saveWebcamTuning() {
+  try {
+    localStorage.setItem(WEBCAM_TUNING_KEY, JSON.stringify(webcamTuning));
+  } catch {
+    // private browsing; the sliders still work for this session
+  }
+}
+let webcamPrevZ = null;
+let webcamZVel = 0;
+let webcamSwingCooldown = 0;
+const _aimWorld = new THREE.Vector3();
+
+// Critically-damped chase of the hand. The tracker's own filter runs at
+// camera cadence and still passes pixel-level noise; written straight into
+// the aim that noise became visible paddle tremble. The spring eats it while
+// staying inside a frame or two of a real swing — and because a solve spike
+// now moves the aim at a bounded rate instead of teleporting it, it doubles
+// as the last line against jump glitches.
+function driveAimFromWebcam(dt) {
+  camTracker.predictionLead = webcamTuning.lead;
+  const displacement = camTracker.position;
+
+  const targetX = THREE.MathUtils.clamp(
+    WEBCAM_REST.x + displacement.x * webcamTuning.gainX,
+    -REACH_X,
+    REACH_X
+  );
+  const targetY = THREE.MathUtils.clamp(
+    WEBCAM_REST.y + displacement.y * webcamTuning.gainY,
+    REACH_Y_BOTTOM,
+    REACH_Y_TOP
+  );
+  const ease = 1 - Math.exp(-webcamTuning.stiffness * dt);
+  const maxStep = webcamTuning.maxSpeed * dt;
+  desktopAim.x += THREE.MathUtils.clamp((targetX - desktopAim.x) * ease, -maxStep, maxStep);
+  desktopAim.y += THREE.MathUtils.clamp((targetY - desktopAim.y) * ease, -maxStep, maxStep);
+  desktopYaw = (desktopAim.x / REACH_X) * 0.5;
+
+  // Route the existing aim assist: it compares the predicted crossing with
+  // the cursor on screen, so stand the paddle's own aim point in for the
+  // cursor by projecting it through the camera.
+  _aimWorld.copy(desktopAim);
+  playerRig.localToWorld(_aimWorld);
+  _aimWorld.project(camera);
+  _pointerNdc.set(_aimWorld.x, _aimWorld.y);
+  assist = ASSIST_PROFILES.webcam;
+  meetIncomingBall(desktopAim);
+  assist = ASSIST_PROFILES.mouse;
+  desktopAim.x = THREE.MathUtils.clamp(desktopAim.x, -REACH_X, REACH_X);
+  desktopAim.y = THREE.MathUtils.clamp(desktopAim.y, REACH_Y_BOTTOM, REACH_Y_TOP);
+
+  // Swing on a forward flick. Displacement +Z is toward the screen (depth
+  // shrinking), so a fast positive z-rate is the stroke gesture.
+  if (webcamPrevZ !== null && dt > 0) {
+    const rate = (displacement.z - webcamPrevZ) / dt;
+    webcamZVel = webcamZVel * 0.6 + rate * 0.4;
+  }
+  webcamPrevZ = displacement.z;
+  webcamSwingCooldown -= dt;
+  if (
+    webcamZVel > webcamTuning.swingSpeed &&
+    webcamSwingCooldown <= 0 &&
+    camTracker.confidence > 0.4
+  ) {
+    swingDesktopBat();
+    webcamSwingCooldown = webcamTuning.swingCooldown;
+  }
+}
+
+// --- Webcam tuning panel ------------------------------------------------
+// Feel is personal and room-dependent, so rather than shipping one guess,
+// T opens sliders over every parameter above. Values persist per browser.
+let tuningPanel = null;
+
+const TUNING_ROWS = [
+  ['gainX', 'Reach · sideways', 1, 4, 0.1],
+  ['gainY', 'Reach · vertical', 0.8, 3, 0.1],
+  ['stiffness', 'Response (snappy ↔ smooth)', 6, 30, 1],
+  ['maxSpeed', 'Max paddle speed', 2, 10, 0.5],
+  ['swingSpeed', 'Swing flick threshold', 0.15, 0.8, 0.05],
+  ['assistRange', 'Assist · catch radius', 0.08, 0.4, 0.02],
+  ['assistPull', 'Assist · strength', 0.08, 0.4, 0.02],
+  ['assistSlew', 'Assist · speed', 0.5, 3, 0.1],
+  ['assistHorizon', 'Assist · look-ahead', 0.08, 0.3, 0.01],
+  ['lead', 'Latency lead', 0, 0.15, 0.01],
+  ['camEase', 'Camera follow', 1, 8, 0.5],
+];
+
+function buildTuningPanel() {
+  const el = document.createElement('div');
+  el.id = 'webcam-tuning';
+  el.style.cssText =
+    'position:fixed;right:12px;top:12px;z-index:40;background:rgba(11,11,12,0.95);' +
+    'border-left:6px solid #e2231a;padding:14px 16px;width:280px;' +
+    'font:12px ui-monospace,monospace;color:#f2efe6;';
+  el.innerHTML =
+    '<div style="color:#e2231a;font-weight:700;margin-bottom:8px">PADDLE TUNING</div>' +
+    '<div data-rows></div>' +
+    '<button data-reset style="margin-top:8px;background:none;border:1px solid #555;' +
+    'color:#f2efe6;font:inherit;padding:3px 10px;cursor:pointer">Reset defaults</button>' +
+    '<div style="color:rgba(242,239,230,0.4);margin-top:6px">T to close · saved automatically</div>';
+  document.body.appendChild(el);
+
+  const rows = el.querySelector('[data-rows]');
+  const renderRows = () => {
+    rows.innerHTML = '';
+    for (const [key, label, min, max, step] of TUNING_ROWS) {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:block;margin:6px 0';
+      const value = document.createElement('span');
+      value.style.cssText = 'float:right;color:#e2231a';
+      value.textContent = webcamTuning[key];
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = min;
+      input.max = max;
+      input.step = step;
+      input.value = webcamTuning[key];
+      input.style.cssText = 'width:100%;accent-color:#e2231a';
+      input.oninput = () => {
+        webcamTuning[key] = Number(input.value);
+        value.textContent = input.value;
+        saveWebcamTuning();
+      };
+      row.append(label + ' ', value, input);
+      rows.appendChild(row);
+    }
+  };
+  renderRows();
+  el.querySelector('[data-reset]').onclick = () => {
+    Object.assign(webcamTuning, WEBCAM_DEFAULTS);
+    saveWebcamTuning();
+    renderRows();
+  };
+  return el;
+}
+
+function toggleTuningPanel() {
+  if (!tuningPanel) tuningPanel = buildTuningPanel();
+  else tuningPanel.hidden = !tuningPanel.hidden;
 }
 
 placeDesktopBat(window.innerWidth / 2, window.innerHeight * 0.55);
@@ -674,7 +1129,7 @@ window.addEventListener('pointerdown', (e) => {
   // The webcam tracker has to be shown the bat's colour once. Any click while
   // it is waiting is that gesture, so there is no separate key to learn.
   if (camTracker?.state === TRACKER_STATE.CALIBRATING) {
-    if (!camTracker.calibrateColour()) ui.toast('Nothing bright enough — try better light');
+    if (!camTracker.calibrateColour()) ui.toast('No markers seen yet — bring the paddle closer');
     return;
   }
   placeDesktopBat(e.clientX, e.clientY);
@@ -684,10 +1139,10 @@ window.addEventListener(
   'wheel',
   (e) => {
     if (renderer.xr.isPresenting || !ui.menu.hidden || handSession) return;
-    desktopDepthTarget = THREE.MathUtils.clamp(
-      desktopDepthTarget - Math.sign(e.deltaY) * 0.08,
-      -1.3,
-      -0.2
+    desktopDepthBias = THREE.MathUtils.clamp(
+      desktopDepthBias - Math.sign(e.deltaY) * 0.05,
+      -0.25,
+      0.25
     );
   },
   { passive: true }
@@ -697,8 +1152,29 @@ window.addEventListener(
 // keydown listener for commands; these are movement, so they live here.
 const DESKTOP_KEYS = { ArrowLeft: 0, ArrowRight: 0, ArrowUp: 0, ArrowDown: 0, KeyF: 0 };
 window.addEventListener('keydown', (e) => {
-  if (!(e.code in DESKTOP_KEYS)) return;
   if (!ui.menu.hidden) return;
+
+  // Re-learn the bat's colour without leaving the game. Lighting changes as
+  // you move around a room, and a key beats going back to the menu for it.
+  if (e.code === 'KeyT' && usingWebcamBat()) {
+    toggleTuningPanel();
+    return;
+  }
+  if (e.code === 'KeyV' && camTracker) {
+    if (camTracker.calibrateColour()) ui.toast('Neutral pose re-zeroed');
+    else ui.toast('Show the markers to the camera first');
+    return;
+  }
+  // Which way an ambiguous tilt is read, for the rare case it latches on to
+  // the wrong sign — a paddle leaning away looks identical to one leaning
+  // toward the camera, so this cannot be resolved from the image alone.
+  if (e.code === 'KeyB' && camTracker) {
+    camTracker.flipTilt();
+    ui.toast('Paddle tilt flipped');
+    return;
+  }
+
+  if (!(e.code in DESKTOP_KEYS)) return;
   DESKTOP_KEYS[e.code] = 1;
   if (e.code === 'KeyF') swingDesktopBat();
 });
@@ -731,12 +1207,21 @@ function updateDesktopBat(dt) {
     return;
   }
 
-  // A webcam bat, once it has locked on, owns the rig outright: the pose is
-  // the real bat's. Until it locks on — or if it loses the bat — the pointer
-  // stays in charge, so you are never left with nothing to play with.
+  // Once the webcam paddle has locked on, the hand owns the aim point for as
+  // long as the mode is selected. On a dropout the aim simply stays where it
+  // was — the tracker holds its last displacement — so losing the markers
+  // parks the paddle instead of teleporting it to the mouse pose. Everything
+  // below (plane depth, thrust, face angle, pose) is the same code the mouse
+  // runs, so the two inputs feel identical to hit with.
   if (usingWebcamBat() && camTracker?.state === TRACKER_STATE.TRACKING) {
-    poseWebcamBat();
-    return;
+    webcamHasLocked = true;
+  }
+  const webcamDriving = usingWebcamBat() && camTracker && webcamHasLocked;
+  if (webcamDriving) {
+    pointerActive = false; // the mouse no longer fights the hand
+    if (camTracker.state === TRACKER_STATE.TRACKING) driveAimFromWebcam(dt);
+  } else {
+    aimDesktopBatAtPointer();
   }
 
   // Held arrow keys slide the blade at a steady rate; the mouse overrides on
@@ -745,16 +1230,31 @@ function updateDesktopBat(dt) {
   const dx = (DESKTOP_KEYS.ArrowRight - DESKTOP_KEYS.ArrowLeft) * speed * dt;
   const dy = (DESKTOP_KEYS.ArrowUp - DESKTOP_KEYS.ArrowDown) * speed * dt;
   if (dx || dy) {
-    desktopAim.x = THREE.MathUtils.clamp(desktopAim.x + dx, -0.7, 0.7);
-    desktopAim.y = THREE.MathUtils.clamp(desktopAim.y + dy, TABLE.HEIGHT + 0.03, 1.45);
-    desktopYaw = (desktopAim.x / 1.25) * 0.5;
+    pointerActive = false; // keys have the bat until the mouse moves again
+    desktopAim.x = THREE.MathUtils.clamp(desktopAim.x + dx, -REACH_X, REACH_X);
+    desktopAim.y = THREE.MathUtils.clamp(desktopAim.y + dy, REACH_Y_BOTTOM, REACH_Y_TOP);
+    desktopYaw = (desktopAim.x / REACH_X) * 0.5;
   }
 
   if (desktopThrust > 0) desktopThrust -= dt;
-  const target = desktopThrust > 0 ? DESKTOP_THRUST_Z : desktopDepthTarget;
-  // Eased rather than snapped, so Paddle.update() samples a sustained velocity
-  // and a thrust carries momentum into the ball.
-  desktopAim.z += (target - desktopAim.z) * Math.min(1, dt * 12);
+  if (desktopRecover > 0) desktopRecover -= dt;
+
+  // The bat holds a plane and lets the ball come to it.
+  //
+  // Chasing the ball's depth instead — which sounds more helpful — is why it
+  // felt unhittable: the bat tracked along with the ball, the gap between them
+  // stayed at a stubborn 15 cm, and the ball never actually crossed the blade.
+  // A held plane is crossed by anything that reaches you, which turns the
+  // problem back into aiming, and aiming is what a mouse is good at.
+  const target =
+    desktopPlaneDepth() + desktopDepthBias - (desktopThrust > 0 ? DESKTOP_THRUST_DEPTH : 0);
+  // Moved at a hand's pace rather than snapped, so the velocity Paddle.update
+  // derives from it is one a person could actually produce — that velocity is
+  // what the ball comes off, and it is also what the contact test uses to tell
+  // a stroke from the bat running away.
+  const step = (desktopThrust > 0 ? DESKTOP_THRUST_SPEED : DESKTOP_THRUST_SPEED * 0.6) * dt;
+  desktopAim.z += THREE.MathUtils.clamp(target - desktopAim.z, -step, step);
+
   poseDesktopBat();
 }
 
@@ -1079,6 +1579,15 @@ async function enterVersus(role, code) {
     if (netMode === 'guest') applyHostState(state);
   });
 
+  // A dead room is not the same as an absent opponent, and the player needs
+  // to know which they are looking at: one resolves itself when the other
+  // player comes back, the other never does.
+  room.onClosed((reason) => {
+    ui.setVersusOpponent(false);
+    ui.toast(reason ? `Match ended: ${reason.toLowerCase()}` : 'Connection lost');
+    ui.setVersusState('Disconnected — quit and open a new room');
+  });
+
   room.onOpponent((present) => {
     ui.setVersusOpponent(present);
     // The first moment both players are in the room, the host puts a ball up.
@@ -1265,12 +1774,66 @@ function pulse(ball) {
   actuator?.pulse?.(0.7, 40);
 }
 
-// --- Desktop fallback: orbit controls for dev without a headset -------------
-const orbit = new OrbitControls(camera, renderer.domElement);
-orbit.target.set(0, TABLE.HEIGHT, 0);
-orbit.update();
-renderer.xr.addEventListener('sessionstart', () => (orbit.enabled = false));
-renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
+// --- Desktop camera ---------------------------------------------------------
+// The camera rides with the bat instead of being flown around independently.
+//
+// A free orbit camera is fine for looking at a scene and hopeless for playing
+// in one: judging where a ball is in depth depends on knowing where you are,
+// and if the viewpoint drifts you are re-learning that every rally. Anchoring
+// it to the bat means the bat is always in the same part of the frame, the
+// ball grows straight toward you, and the only thing you have to read is the
+// ball's flight.
+//
+// It follows at a fraction of the bat's travel, not one to one. Matching the
+// bat exactly makes the world swing about whenever you move, which is both
+// unreadable and slightly sickening; trailing it keeps the horizon steady
+// while still turning the view toward the side you are playing from.
+const CAM_FOLLOW_X = 0.2; // how much of the bat's sideways travel to take
+// Eye height is fixed, and deliberately so. The cursor is un-projected through
+// this camera onto the plane the bat plays in, so anything the camera does in
+// response to the bat feeds straight back into where the bat goes. Following
+// the bat vertically put the blade a steady 13 cm above the ball — the loop
+// never settled, and every ball passed just underneath. Sideways following is
+// gentler (the lateral error stayed inside the blade) and worth keeping for
+// the sense of playing from where you stand.
+const CAM_FOLLOW_Y = 0;
+const CAM_BEHIND = 0.85; // metres behind the blade
+const CAM_HEIGHT = 1.5; // eye height above the floor, near enough standing
+const CAM_EASE = 6; // per second; enough to feel attached, not glued
+
+const _camAim = new THREE.Vector3();
+const _camLook = new THREE.Vector3();
+// The camera's own, slower copy of the aim. The position lerp smoothed where
+// the camera sat, but lookAt() re-aimed it from the raw bat every frame — so
+// each millimetre of tracker noise rotated the entire view, which reads as
+// the whole screen shaking even when the bat's wobble is too small to see.
+// The camera now follows this filtered aim for position and look alike; the
+// bat itself stays on the responsive value.
+const camFollow = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
+// (webcam mode reads this from the tuning panel instead)
+const CAM_AIM_EASE = 3.5; // per second — deliberately lazier than the bat
+
+function updateDesktopCamera(dt) {
+  if (renderer.xr.isPresenting) return; // the headset owns the camera
+
+  const camEase = usingWebcamBat() ? webcamTuning.camEase : CAM_AIM_EASE;
+  camFollow.lerp(desktopAim, Math.min(1, dt * camEase));
+
+  // Everything here is in rig space, so the guest's flipped rig turns the
+  // view around with it and nothing else has to know.
+  _camAim.set(
+    camFollow.x * CAM_FOLLOW_X,
+    CAM_HEIGHT + (camFollow.y - 0.95) * CAM_FOLLOW_Y,
+    camFollow.z + CAM_BEHIND
+  );
+  camera.position.lerp(_camAim, Math.min(1, dt * CAM_EASE));
+
+  // Look down the table, biased toward the side the bat is on, so moving wide
+  // opens up the angle you are actually playing into.
+  _camLook.set(camFollow.x * 0.45, TABLE.HEIGHT + 0.12, -TABLE.LENGTH * 0.42);
+  playerRig.localToWorld(_camLook);
+  camera.lookAt(_camLook);
+}
 
 // --- Main loop --------------------------------------------------------------
 const clock = new THREE.Clock();
@@ -1300,6 +1863,9 @@ function tick(dt) {
 
   // Pose the desktop bat before the paddles sample themselves, so the swing
   // velocity is measured against the pose it actually has this frame.
+  // Camera first: the cursor is resolved against it, so aiming with last
+  // frame's view leaves the blade trailing wherever the view was moving.
+  updateDesktopCamera(dt);
   updateDesktopBat(dt);
 
   for (const paddle of paddles) {
@@ -1455,8 +2021,11 @@ if (import.meta.env.DEV) {
   window.__probe = {
     balls, machine, physics, game, paddles, targetZone,
     settings, ui, vrMenu, opponent, coach, scene, camera, tick,
-    match, remotePaddle, desktopPaddle,
+    match, remotePaddle, desktopPaddle, desktopAim,
     get camTracker() { return camTracker; },
+    set camTracker(t) { camTracker = t; }, // lets tests stand in a fake tracker
+    get webcamHasLocked() { return webcamHasLocked; },
+    set webcamHasLocked(v) { webcamHasLocked = v; },
     get netMode() { return netMode; },
     get room() { return room; },
   };
