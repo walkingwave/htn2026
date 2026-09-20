@@ -33,7 +33,7 @@ Open `https://localhost:5173`, accept the cert warning. You get an orbit-camera 
 
 | | In headset | Desktop |
 | --- | --- | --- |
-| Swing the bat | Move your hand | — |
+| Swing the bat | Move your hand | Move the mouse; click or <kbd>F</kbd> to drive |
 | Pause / arm the machine | Trigger | <kbd>Space</kbd> |
 | Next mode | Grip | <kbd>D</kbd> |
 | Open the menu | A / X / B / Y | <kbd>Tab</kbd> |

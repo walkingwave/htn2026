@@ -468,10 +468,24 @@ desktopPaddle.mesh.visible = false;
 paddles.push(desktopPaddle);
 
 const DESKTOP_REST_Z = -0.72; // blade's resting depth, a little in front of you
-const DESKTOP_THRUST_Z = -1.18; // how far forward a swing reaches
-const DESKTOP_THRUST_TIME = 0.14; // seconds held forward before it returns
+// A swing adds pace; it does not relocate the bat.
+//
+// The first version lunged 46 cm forward, which moved the plane the ball was
+// about to cross out from under it — every click turned a clean contact into
+// a miss (18 hits without swinging, 0 with). What a stroke needs to add is
+// speed at the moment of contact, so this is now a short push at a believable
+// hand speed, and the depth it reaches is a few centimetres rather than half
+// the length of your arm.
+const DESKTOP_THRUST_DEPTH = 0.14; // metres forward at the top of the swing
+const DESKTOP_THRUST_TIME = 0.1; // seconds pushing before it comes back
+const DESKTOP_THRUST_SPEED = 1.25; // m/s — the bat's own pace, not a teleport
+const DESKTOP_DRIVE_PITCH = 0.3; // radians the face closes at full stroke
 
-let desktopDepthTarget = DESKTOP_REST_Z;
+// The wheel nudges the bat nearer or further than where it would meet the
+// ball, for anyone who wants to take it early or late. A bias rather than an
+// absolute depth, so it composes with the ball-meeting above instead of
+// fighting it.
+let desktopDepthBias = 0;
 let desktopThrust = 0;
 
 // Where the player is asking the *blade* to be, in rig space. Kept separate
@@ -485,15 +499,83 @@ let desktopThrust = 0;
 const desktopAim = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
 const _bladeOffset = new THREE.Vector3();
 
+// The bat goes where the cursor points, rather than somewhere derived from it.
+//
+// The first version mapped the window onto a fixed box — which meant the reach
+// was whatever those numbers happened to be, and they were wrong: ±0.62 m of
+// swing against a table ±0.76 m wide, so the corners were physically
+// unreachable no matter how far you moved the mouse. Un-projecting the cursor
+// through the camera onto the plane the bat plays in removes the guesswork:
+// the blade sits under the pointer, and it keeps doing so as the view follows
+// the bat, which a fixed mapping cannot.
+const HALF_TABLE_X = TABLE.WIDTH / 2;
+const REACH_X = HALF_TABLE_X + 0.22; // a little past the edge, as you can reach
+const REACH_Y_TOP = 1.62; // about shoulder height; above that is not a stroke
+// Balls that clip the near edge drop well below the table before they reach
+// you, and the bat plays behind the end of the table, not over it — so the
+// old floor at table height meant a low ball was simply unreachable. Knee
+// height is both playable and honest: you can get under a low one.
+const REACH_Y_BOTTOM = 0.35;
+const _pointerNdc = new THREE.Vector2();
+const _pointerRay = new THREE.Raycaster();
+const _batPlane = new THREE.Plane();
+const _planePoint = new THREE.Vector3();
+const _planeNormal = new THREE.Vector3();
+const _hit = new THREE.Vector3();
+let pointerActive = false;
+
+// The reference view the cursor is resolved through: the desktop camera's
+// resting pose, parented to the rig so a flipped guest rig comes along.
+const aimCamera = new THREE.PerspectiveCamera(70, 1, 0.01, 60);
+playerRig.add(aimCamera);
+
+function syncAimCamera() {
+  aimCamera.aspect = camera.aspect;
+  aimCamera.position.set(0, CAM_HEIGHT, DESKTOP_REST_Z + CAM_BEHIND);
+  aimCamera.lookAt(playerRig.localToWorld(_camLook.set(0, TABLE.HEIGHT + 0.12, -TABLE.LENGTH * 0.42)));
+  aimCamera.updateMatrixWorld(true);
+  aimCamera.updateProjectionMatrix();
+}
+
 function placeDesktopBat(clientX, clientY) {
   if (renderer.xr.isPresenting) return; // controllers own the bats in a session
-  const x = THREE.MathUtils.clamp(clientX / window.innerWidth, 0, 1);
-  const y = THREE.MathUtils.clamp(clientY / window.innerHeight, 0, 1);
-  desktopAim.x = (x - 0.5) * 1.25;
-  // Never below the surface, never above about head height.
-  desktopAim.y = Math.max(TABLE.HEIGHT + 0.03, 0.95 + (0.5 - y) * 0.7);
-  desktopYaw = (x - 0.5) * 0.5;
-  poseDesktopBat();
+  _pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
+  _pointerNdc.y = -(clientY / window.innerHeight) * 2 + 1;
+  pointerActive = true;
+}
+
+// Resolve the cursor onto the bat's plane. Done per frame rather than per
+// pointer event, because the plane moves: depth tracks the incoming ball and
+// the camera rides the bat, so the same cursor position means a different
+// world point a frame later.
+function aimDesktopBatAtPointer() {
+  if (!pointerActive) return;
+
+  // The plane the bat plays in: upright, facing down the table, at the bat's
+  // current depth. Built in world space from the rig so a flipped guest rig
+  // needs no special case.
+  _planePoint.set(0, 0, desktopAim.z);
+  playerRig.localToWorld(_planePoint);
+  _planeNormal.set(0, 0, 1).applyQuaternion(playerRig.quaternion);
+  _batPlane.setFromNormalAndCoplanarPoint(_planeNormal, _planePoint);
+
+  // Aimed through a fixed reference view, never the live camera.
+  //
+  // The live one follows the bat, and the bat is placed by un-projecting the
+  // cursor through a camera — so using it closes a loop: move the mouse, the
+  // bat moves, the camera chases it, and the same cursor position now means
+  // somewhere else, so the bat slides again. It settles eventually and feels
+  // like the bat is swimming away from the pointer the whole time. A fixed
+  // reference view makes a cursor position mean exactly one place on the
+  // plane, always, and leaves the camera free to drift for feel.
+  _pointerRay.setFromCamera(_pointerNdc, camera);
+  if (!_pointerRay.ray.intersectPlane(_batPlane, _hit)) return;
+
+  playerRig.worldToLocal(_hit);
+  meetIncomingBall(_hit);
+  desktopAim.x = THREE.MathUtils.clamp(_hit.x, -REACH_X, REACH_X);
+  desktopAim.y = THREE.MathUtils.clamp(_hit.y, REACH_Y_BOTTOM, REACH_Y_TOP);
+  desktopYaw = (desktopAim.x / REACH_X) * 0.5;
 }
 
 // A bat's face is perpendicular to the forearm, so the blade points along the
@@ -504,7 +586,12 @@ function placeDesktopBat(clientX, clientY) {
 let desktopYaw = 0;
 
 function poseDesktopBat() {
-  desktopRig.rotation.set(0, Math.PI / 2 + desktopYaw, 0);
+  // Close the face as you drive. A flat bat at 5 m/s puts every ball long —
+  // which it should, that is what a flat bat does. Angling it down over the
+  // ball is how the shot is actually kept on the table, so the swing does it
+  // for you, in proportion to how far through the stroke you are.
+  const drive = THREE.MathUtils.clamp(desktopThrust / DESKTOP_THRUST_TIME, 0, 1);
+  desktopRig.rotation.set(-drive * DESKTOP_DRIVE_PITCH, Math.PI / 2 + desktopYaw, 0);
   desktopRig.quaternion.setFromEuler(desktopRig.rotation);
   _bladeOffset
     .copy(desktopPaddle.mesh.getObjectByName('blade').position)
@@ -515,6 +602,111 @@ function poseDesktopBat() {
 function swingDesktopBat() {
   if (renderer.xr.isPresenting) return;
   desktopThrust = DESKTOP_THRUST_TIME;
+}
+
+// Close the last few centimetres onto a ball you are already tracking.
+//
+// Not a favour to bad aim — a correction for a gap the game creates. The ball
+// covers about 7 cm between frames and the blade is 8.5 cm across, so a
+// cursor sitting exactly on the ball is, by the time physics runs, most of a
+// blade behind it. Every ball then passes a hand's width from the bat, which
+// is precisely how it felt: unhittable for no visible reason.
+//
+// So: predict where the ball crosses the plane, and if the cursor is already
+// close, pull the blade the rest of the way. Bounded, and it does nothing if
+// you are not near the ball — miss by a wide margin and you still miss.
+// Screen-space: how near the cursor has to be, as a fraction of half the
+// viewport. Roughly a thumb's width — enough to cover the parallax between a
+// ball in flight and the plane it will cross, not enough to play for you.
+const ASSIST_RANGE = 0.14;
+const ASSIST_MAX = 0.16; // metres: the furthest it will ever move the blade
+const ASSIST_SLEW = 0.9; // metres per second of correction — a drift, not a lunge
+const assistOffset = new THREE.Vector2();
+const _meetLocal = new THREE.Vector3();
+const _meetVel = new THREE.Vector3();
+const _meetWorld = new THREE.Vector3();
+const _rigInverse = new THREE.Quaternion();
+
+function meetIncomingBall(aim) {
+  _rigInverse.copy(playerRig.quaternion).invert();
+
+  let bestDistance = Infinity;
+  let foundX = 0;
+  let foundY = 0;
+
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    _meetLocal.copy(ball.mesh.position);
+    playerRig.worldToLocal(_meetLocal);
+    _meetVel.copy(ball.velocity).applyQuaternion(_rigInverse);
+
+    // Only a ball still coming at you, and only once it is close enough that
+    // you would actually be playing it.
+    if (_meetVel.z < 0.5) continue;
+    // A short horizon on purpose. Predicting further means predicting through
+    // the bounce this ball still has to take off the table, and a straight
+    // line through a bounce lands the blade somewhere the ball was never
+    // going — which pulled it away from balls the player had lined up
+    // perfectly. Inside a tenth of a second the flight is simple and the
+    // prediction is worth trusting.
+    const toPlane = aim.z - _meetLocal.z;
+    if (toPlane < 0 || toPlane > 0.34) continue;
+
+    const t = toPlane / _meetVel.z;
+    if (t > 0.12) continue;
+    const x = _meetLocal.x + _meetVel.x * t;
+    const y = _meetLocal.y + _meetVel.y * t - 0.5 * 9.81 * t * t;
+
+    // Matched on screen, not on the plane.
+    //
+    // The player puts the cursor on the ball they can see, and that ball is
+    // still short of the plane the bat plays in. The ray through it therefore
+    // meets the plane somewhere else entirely — higher and off to one side,
+    // by about eight centimetres at this camera angle — so a blade placed
+    // there misses a ball that was lined up perfectly. Comparing where the
+    // ball *will* be against where the cursor *is*, both in screen terms,
+    // measures the thing the player was actually aiming at.
+    _meetWorld.set(x, y, aim.z);
+    playerRig.localToWorld(_meetWorld);
+    _meetWorld.project(camera);
+    const distance = Math.hypot(_meetWorld.x - _pointerNdc.x, _meetWorld.y - _pointerNdc.y);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      foundX = x;
+      foundY = y;
+    }
+  }
+
+  // Slewed, never snapped.
+  //
+  // Jumping the blade onto the ball is self-defeating: the bat derives its
+  // swing speed from how far it moved since last frame, so a 14 cm correction
+  // reads as an 8 m/s lunge. Contact is then rejected as the bat moving away
+  // from the ball faster than the ball is arriving — and on the occasions it
+  // did connect it would have fired the ball off the table. Creeping the
+  // correction in over several frames leaves the bat's velocity honest, which
+  // is what the ball comes off.
+  let wantX = 0;
+  let wantY = 0;
+  if (bestDistance <= ASSIST_RANGE) {
+    // Strength comes from how close the cursor is on screen; the direction
+    // and size of the correction are in metres, on the plane.
+    const strength = 1 - bestDistance / ASSIST_RANGE;
+    const gapX = foundX - aim.x;
+    const gapY = foundY - aim.y;
+    const gap = Math.hypot(gapX, gapY);
+    if (gap > 1e-4) {
+      const pull = Math.min(ASSIST_MAX, gap) * strength;
+      wantX = (gapX / gap) * pull;
+      wantY = (gapY / gap) * pull;
+    }
+  }
+
+  const step = ASSIST_SLEW / 60; // metres per frame
+  assistOffset.x += THREE.MathUtils.clamp(wantX - assistOffset.x, -step, step);
+  assistOffset.y += THREE.MathUtils.clamp(wantY - assistOffset.y, -step, step);
+  aim.x += assistOffset.x;
+  aim.y += assistOffset.y;
 }
 
 // --- Webcam bat -------------------------------------------------------------
@@ -608,10 +800,10 @@ window.addEventListener(
   'wheel',
   (e) => {
     if (renderer.xr.isPresenting || !ui.menu.hidden) return;
-    desktopDepthTarget = THREE.MathUtils.clamp(
-      desktopDepthTarget - Math.sign(e.deltaY) * 0.08,
-      -1.3,
-      -0.2
+    desktopDepthBias = THREE.MathUtils.clamp(
+      desktopDepthBias - Math.sign(e.deltaY) * 0.05,
+      -0.25,
+      0.25
     );
   },
   { passive: true }
@@ -672,22 +864,37 @@ function updateDesktopBat(dt) {
     return;
   }
 
+  aimDesktopBatAtPointer();
+
   // Held arrow keys slide the blade at a steady rate; the mouse overrides on
   // its next move, which is what you'd expect from whichever you touched last.
   const speed = 1.1; // m/s
   const dx = (DESKTOP_KEYS.ArrowRight - DESKTOP_KEYS.ArrowLeft) * speed * dt;
   const dy = (DESKTOP_KEYS.ArrowUp - DESKTOP_KEYS.ArrowDown) * speed * dt;
   if (dx || dy) {
-    desktopAim.x = THREE.MathUtils.clamp(desktopAim.x + dx, -0.7, 0.7);
-    desktopAim.y = THREE.MathUtils.clamp(desktopAim.y + dy, TABLE.HEIGHT + 0.03, 1.45);
-    desktopYaw = (desktopAim.x / 1.25) * 0.5;
+    pointerActive = false; // keys have the bat until the mouse moves again
+    desktopAim.x = THREE.MathUtils.clamp(desktopAim.x + dx, -REACH_X, REACH_X);
+    desktopAim.y = THREE.MathUtils.clamp(desktopAim.y + dy, REACH_Y_BOTTOM, REACH_Y_TOP);
+    desktopYaw = (desktopAim.x / REACH_X) * 0.5;
   }
 
   if (desktopThrust > 0) desktopThrust -= dt;
-  const target = desktopThrust > 0 ? DESKTOP_THRUST_Z : desktopDepthTarget;
-  // Eased rather than snapped, so Paddle.update() samples a sustained velocity
-  // and a thrust carries momentum into the ball.
-  desktopAim.z += (target - desktopAim.z) * Math.min(1, dt * 12);
+
+  // The bat holds a plane and lets the ball come to it.
+  //
+  // Chasing the ball's depth instead — which sounds more helpful — is why it
+  // felt unhittable: the bat tracked along with the ball, the gap between them
+  // stayed at a stubborn 15 cm, and the ball never actually crossed the blade.
+  // A held plane is crossed by anything that reaches you, which turns the
+  // problem back into aiming, and aiming is what a mouse is good at.
+  const target =
+    DESKTOP_REST_Z + desktopDepthBias - (desktopThrust > 0 ? DESKTOP_THRUST_DEPTH : 0);
+  // Moved at a hand's pace rather than snapped, so the velocity Paddle.update
+  // derives from it is one a person could actually produce — that velocity is
+  // what the ball comes off, and it is also what the contact test uses to tell
+  // a stroke from the bat running away.
+  const step = (desktopThrust > 0 ? DESKTOP_THRUST_SPEED : DESKTOP_THRUST_SPEED * 0.6) * dt;
+  desktopAim.z += THREE.MathUtils.clamp(target - desktopAim.z, -step, step);
   poseDesktopBat();
 }
 
@@ -1213,8 +1420,15 @@ function pulse(ball) {
 // bat exactly makes the world swing about whenever you move, which is both
 // unreadable and slightly sickening; trailing it keeps the horizon steady
 // while still turning the view toward the side you are playing from.
-const CAM_FOLLOW_X = 0.35; // how much of the bat's sideways travel to take
-const CAM_FOLLOW_Y = 0.25;
+const CAM_FOLLOW_X = 0.2; // how much of the bat's sideways travel to take
+// Eye height is fixed, and deliberately so. The cursor is un-projected through
+// this camera onto the plane the bat plays in, so anything the camera does in
+// response to the bat feeds straight back into where the bat goes. Following
+// the bat vertically put the blade a steady 13 cm above the ball — the loop
+// never settled, and every ball passed just underneath. Sideways following is
+// gentler (the lateral error stayed inside the blade) and worth keeping for
+// the sense of playing from where you stand.
+const CAM_FOLLOW_Y = 0;
 const CAM_BEHIND = 0.85; // metres behind the blade
 const CAM_HEIGHT = 1.5; // eye height above the floor, near enough standing
 const CAM_EASE = 6; // per second; enough to feel attached, not glued
@@ -1269,8 +1483,10 @@ function tick(dt) {
 
   // Pose the desktop bat before the paddles sample themselves, so the swing
   // velocity is measured against the pose it actually has this frame.
-  updateDesktopBat(dt);
+  // Camera first: the cursor is resolved against it, so aiming with last
+  // frame's view leaves the blade trailing wherever the view was moving.
   updateDesktopCamera(dt);
+  updateDesktopBat(dt);
 
   for (const paddle of paddles) paddle.update(dt);
 
@@ -1423,7 +1639,7 @@ if (import.meta.env.DEV) {
   window.__probe = {
     balls, machine, physics, game, paddles, targetZone,
     settings, ui, vrMenu, opponent, coach, scene, camera, tick,
-    match, remotePaddle, desktopPaddle,
+    match, remotePaddle, desktopPaddle, desktopAim,
     get camTracker() { return camTracker; },
     get netMode() { return netMode; },
     get room() { return room; },
