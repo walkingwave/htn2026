@@ -187,6 +187,17 @@ export class UI {
 
   // --- Versus lobby -----------------------------------------------------
 
+  // Which pipe the room is actually using. Worth saying out loud: the three
+  // reach different distances, and "nothing happens" usually turns out to be
+  // two players on two different ones.
+  _transportNote() {
+    const kind = this._versus?.kind;
+    if (kind === 'websocket') return 'Connected over this Wi-Fi.';
+    if (kind === 'supabase') return 'Connected over the internet.';
+    if (kind === 'local') return 'Local only — this connects tabs on this machine, not another device.';
+    return '';
+  }
+
   _setLobbyStatus(text, tone = '') {
     this.lobbyStatus.textContent = text;
     this.lobbyStatus.dataset.tone = tone;
@@ -202,7 +213,9 @@ export class UI {
       this.lobbyLink.textContent = this._versus.link;
       this.lobbyShare.hidden = false;
       this._setLobbyStatus(
-        `Room ${this._versus.code} — waiting for your opponent. Send them the link.`
+        `Room ${this._versus.code} — waiting for your opponent. ` +
+          `Send them this link; it has to be opened on this machine’s address, not their own. ` +
+          this._transportNote()
       );
     } catch (err) {
       console.error('Failed to host a match', err);
@@ -223,7 +236,14 @@ export class UI {
     try {
       this._versus = await this.onVersusJoin?.(code);
       this.lobbyShare.hidden = true;
-      this._setLobbyStatus(`Joined ${code} — waiting for the host to serve.`);
+      // Which side you ended up on is decided by who got there first, so say
+      // so — otherwise the player who arrived first sits waiting for a serve
+      // that is theirs to make.
+      this._setLobbyStatus(
+        this._versus.role === 'host'
+          ? `Room ${code} — you got there first, so you serve. Waiting for them.`
+          : `Joined ${code} — waiting for the host to serve. ${this._transportNote()}`
+      );
     } catch (err) {
       console.error('Failed to join a match', err);
       this._versus = null;

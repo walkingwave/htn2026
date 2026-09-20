@@ -260,11 +260,15 @@ const ui = new UI({
     // Prefer a LAN address the other device can actually open — `localhost`
     // means nothing to a headset across the room.
     const origin = room?.lanUrls?.[0] || window.location.origin;
-    return { role: 'host', code, link: roomLinkFor(code, origin), kind: room.kind };
+    // `room.role` rather than 'host': over the LAN relay the server decides by
+    // arrival, so hosting a code someone else already opened makes you the
+    // guest. Telling the player otherwise would be a lie about which end of
+    // the table they are on.
+    return { role: room.role, code, link: roomLinkFor(code, origin), kind: room.kind };
   },
   onVersusJoin: async (code) => {
     const room = await enterVersus('guest', code.trim().toUpperCase());
-    return { role: 'guest', code, kind: room.kind };
+    return { role: room.role, code, kind: room.kind };
   },
   onVersusLeave: () => leaveVersus(),
   // What the run was worth, read at the moment you quit. Versus is scored on
@@ -877,6 +881,25 @@ function runVersusGuest(dt) {
   }
 }
 
+// Put this player on one end of the table. Called once the room has said which
+// side we are, which is not necessarily the one the player asked for.
+function takeVersusSide(role) {
+  netMode = role;
+
+  // The guest plays from the far end. Turning the rig 180° also mirrors the
+  // pointer mapping, so left and right stay the way round they should be with
+  // no extra transforms anywhere else.
+  const guest = role === 'guest';
+  playerRig.position.set(0, 0, guest ? -PLAY_AREA.PLAYER_Z : PLAY_AREA.PLAYER_Z);
+  playerRig.rotation.y = guest ? Math.PI : 0;
+
+  // The board hangs beyond the far end, which for the guest is behind their
+  // head. Move it to the other end and turn it round so both players read the
+  // score off a board in front of them.
+  scoreboard.mesh.position.z = guest ? -SCOREBOARD_POSITION.z : SCOREBOARD_POSITION.z;
+  scoreboard.mesh.rotation.y = guest ? Math.PI : 0;
+}
+
 async function enterVersus(role, code) {
   machine.enabled = false;
   coach.setActive(false);
@@ -889,39 +912,42 @@ async function enterVersus(role, code) {
   versusServeTimer = 0;
   netSendAccum = 0;
   match.reset();
-  netMode = role;
   // Nothing serves in a match, and the launcher stands at the far end —
   // which is exactly where the guest is standing, so it would otherwise be
   // parked in their face.
   machine.mesh.visible = false;
   opponent.mesh.visible = false;
 
-  // The guest plays from the far end. Turning the rig 180° also mirrors the
-  // pointer mapping, so left and right stay the way round they should be with
-  // no extra transforms anywhere else.
-  playerRig.position.set(0, 0, role === 'guest' ? -PLAY_AREA.PLAYER_Z : PLAY_AREA.PLAYER_Z);
-  playerRig.rotation.y = role === 'guest' ? Math.PI : 0;
-
-  // The board hangs beyond the far end, which for the guest is behind their
-  // head. Move it to the other end and turn it round so both players read the
-  // score off a board in front of them.
-  scoreboard.mesh.position.z =
-    role === 'guest' ? -SCOREBOARD_POSITION.z : SCOREBOARD_POSITION.z;
-  scoreboard.mesh.rotation.y = role === 'guest' ? Math.PI : 0;
-
+  netMode = role; // provisional, so the trainer stands down while we connect
   room = createRoom({ code, role });
-  if (role === 'host') room.on('paddle', (pkt) => applyRemotePaddle(pkt));
-  else room.on('state', (state) => applyHostState(state));
+
+  // Both messages are wired up before the side is known, because over the LAN
+  // relay it isn't ours to decide: the server hands out host and guest by who
+  // arrives first, so this client can come back as the opposite of what the
+  // player pressed. Each handler checks the side it ended up on.
+  room.on('paddle', (pkt) => {
+    if (netMode === 'host') applyRemotePaddle(pkt);
+  });
+  room.on('state', (state) => {
+    if (netMode === 'guest') applyHostState(state);
+  });
 
   room.onOpponent((present) => {
     ui.setVersusOpponent(present);
     // The first moment both players are in the room, the host puts a ball up.
-    if (present && role === 'host' && !match.winner && !versusBall && versusServeTimer <= 0) {
+    if (
+      present &&
+      netMode === 'host' &&
+      !match.winner &&
+      !versusBall &&
+      versusServeTimer <= 0
+    ) {
       startVersusServe();
     }
   });
 
   await room.connect();
+  takeVersusSide(room.role); // the side the room actually gave us
   game.revision++;
   return room;
 }

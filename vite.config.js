@@ -62,12 +62,18 @@ function multiplayerRelay() {
 
           if (message.type === '__join') {
             const code = message.data?.code;
-            const role = message.data?.role;
-            if (!isValidRoomCode(code) || (role !== 'host' && role !== 'guest')) {
+            if (!isValidRoomCode(code)) {
               return client.close(1008, 'Invalid room join');
             }
             const peers = rooms.get(code) ?? new Set();
             if (peers.size >= 2) return client.close(1008, 'Room is full');
+
+            // Roles are decided here, by arrival, not by which button each
+            // player pressed. Two people can both press Join — with the same
+            // code, off the same link — and the room still works: whoever
+            // arrives first simulates. Before this, two guests would sit
+            // there connected to each other with nobody serving.
+            const role = peers.size === 0 ? 'host' : 'guest';
             client.room = code;
             client.role = role;
             peers.add(client);

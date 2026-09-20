@@ -216,6 +216,9 @@ class WebSocketTransport {
         if (message.protocol !== MULTIPLAYER_PROTOCOL) return;
         if (message.type === '__joined') {
           this.lanUrls = Array.isArray(message.data?.lanUrls) ? message.data.lanUrls : [];
+          // The relay decides who hosts, by arrival — see vite.config.js.
+          // Whatever this client asked for, this is what it is.
+          if (message.data?.role) this.role = message.data.role;
           if (!settled) {
             settled = true;
             clearTimeout(timeout);
@@ -293,7 +296,12 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
 
   return {
     code,
-    role,
+    // Read through to the transport: over the LAN relay the server assigns
+    // this on arrival, so it can differ from what was requested. Callers must
+    // read it *after* connect() rather than assuming what they asked for.
+    get role() {
+      return transport.role ?? role;
+    },
     kind: useWebSocket ? 'websocket' : useSupabase ? 'supabase' : 'local',
     async connect() {
       await transport.connect();
