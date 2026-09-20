@@ -1,6 +1,12 @@
-# Ping Pong VR Trainer (HTN 2026)
+# PaddleLab XR
 
-Web-based ping pong trainer/simulator for the Meta Quest 3S, running entirely in the Meta Quest Browser via **WebXR** — no Unity, no app store, no sideloading.
+A table tennis trainer and versus game for the Meta Quest 3S, running entirely in the Meta Quest Browser via **WebXR** — no Unity, no app store, no sideloading. It plays on a laptop too, with a mouse or a real bat through a webcam.
+
+Built at Hack the North 2026.
+
+## The name on screen
+
+The wordmark is set in **Ping Pong**, drawn by Elżbieta Krużyńska in 1974 and digitised by Mateusz Machalski and Małgorzata Bartosik in 2020 ([Capitalics](https://capitalics.wtf/en/font/ping-pong)). The font is free but account-gated, so it is not committed here — see `public/fonts/README.md` to add it. Without it the logo falls back to the interface's monospace face rather than breaking.
 
 ## Stack
 

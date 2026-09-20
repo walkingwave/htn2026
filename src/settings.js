@@ -72,7 +72,10 @@ const DEFAULTS = {
   playerName: 'Player', // shown on the leaderboard
 };
 
-const STORAGE_KEY = 'pingpong-trainer-settings';
+const STORAGE_KEY = 'paddlelab-xr.settings';
+// The name before the rebrand. Read once, so nobody loses the settings they
+// had; never written, so the old key dies with the next save.
+const LEGACY_STORAGE_KEY = 'pingpong-trainer-settings';
 
 export class Settings {
   constructor() {
@@ -99,7 +102,9 @@ export class Settings {
 
 function load() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? {};
+    return JSON.parse(
+      localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
+    ) ?? {};
   } catch {
     return {}; // private browsing, corrupt entry — defaults are fine
   }

@@ -1,11 +1,25 @@
 /* Retro indie-game shell: one monospace face, three colours, no boxes.
    Everything is a line of text — menus are lists you move a caret down. */
+/* The logo face: Ping Pong, by Elżbieta Krużyńska (1974), digitised by
+   Mateusz Machalski and Małgorzata Bartosik (2020) — capitalics.wtf.
+   It is account-gated, so the file is not in this repo: drop
+   PingPong.woff2 into public/fonts/ and the logo picks it up. Until then
+   everything falls back to the monospace shell face, which is why the
+   stack below ends where it does rather than at a generic sans. */
+@font-face {
+  font-family: 'Ping Pong';
+  src: url('/fonts/PingPong.woff2') format('woff2');
+  font-display: swap;
+  font-weight: 400 900;
+}
+
 :root {
   --ink: #0b0b0c;
   --paper: #f2efe6;
   --dim: rgba(242, 239, 230, 0.45);
   --red: #e2231a;
   --mono: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+  --logo: 'Ping Pong', var(--mono);
 }
 
 * {
@@ -48,9 +62,13 @@ canvas {
 }
 
 .title {
+  font-family: var(--logo);
   font-size: clamp(28px, 6vw, 52px);
   font-weight: 700;
-  letter-spacing: 0.16em;
+  /* Tighter than the shell's tracking: the logo face is drawn to sit close,
+     and the wide spacing the rest of the UI uses pulls it apart. Falls back
+     to something still readable when the face is missing. */
+  letter-spacing: 0.1em;
   line-height: 1.25;
   margin: 0;
   text-transform: uppercase;

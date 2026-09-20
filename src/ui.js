@@ -90,7 +90,7 @@ export class UI {
     el.id = 'menu';
     el.innerHTML = `
       <div>
-        <h1 class="title">Ping<span>·</span>Pong<br />Trainer<span class="blink">_</span></h1>
+        <h1 class="title">Paddle<span>·</span>Lab<br />XR<span class="blink">_</span></h1>
         <p class="tagline">Hack the North 2026</p>
       </div>
       <div class="menu-list" data-list></div>
