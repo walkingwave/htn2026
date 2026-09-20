@@ -219,6 +219,7 @@ export class UI {
     this._entries = [
       { id: 'vr', label: 'A VR headset', note: 'headset', disabled: true },
       { id: 'camera', label: 'A ping pong paddle', note: 'webcam', disabled: false },
+      { id: 'camera-hand', label: 'A hand', note: 'webcam · hand tracking', disabled: false },
       { id: 'phone', label: 'A phone', note: 'beta', disabled: true },
       { id: 'desktop', label: 'Nothing — just the mouse', note: '', disabled: false },
     ];
@@ -482,6 +483,9 @@ export class UI {
     if (!entry || entry.disabled) return;
     if (entry.id === 'camera') {
       this.settings.set('paddleSource', 'camera');
+      this._launch(null);
+    } else if (entry.id === 'camera-hand') {
+      this.settings.set('paddleSource', 'camera-hand');
       this._launch(null);
     } else if (entry.id === 'desktop') {
       // On desktop, the controller source falls back to the mouse. Do not
