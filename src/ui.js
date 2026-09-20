@@ -98,7 +98,8 @@ export class UI {
         entries: [
           { id: 'tournament', label: 'Create a Tournament', note: 'beta' },
           { id: 'friend', label: 'Play a Friend', note: 'beta' },
-          { id: 'bot', label: 'Play a Bot' },
+          { id: 'bot', label: 'Play a Standard Bot' },
+          { id: 'fly', label: 'Play a Fly', note: 'connectome' },
           { id: 'drills', label: 'Drills' },
         ],
       };

@@ -3,3 +3,14 @@ dist/
 .DS_Store
 *.local
 .vite/
+
+# Fly connectome raw data (166k ~210MB of typed arrays) - never commit.
+# Download with scripts/flybrain/build_flybrain.py; only the small exported
+# artifact in public/flybrain/ is committed.
+data/
+
+# Python env for the flybrain pipeline
+.venv/
+venv/
+__pycache__/
+*.pyc

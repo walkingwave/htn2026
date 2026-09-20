@@ -30,6 +30,8 @@ import {
 } from './net.js';
 import { VersusMatch, VERSUS_TARGET } from './versus.js';
 import { PaddleTracker, TRACKER_STATE } from './vision/paddleTracker.js';
+import { FlyBrain } from './flybrain/flyBrain.js';
+import { FlyBrainViz } from './flybrain/flyBrainViz.js';
 
 const BALL_POOL_SIZE = 10;
 const DEAD_BALL_LINGER = 1.5; // seconds a dead ball stays visible before recycling
@@ -200,10 +202,15 @@ const ui = new UI({
     if (input === 'paddle') startCamPaddle();
     else stopCamPaddle();
 
-    // Play a Bot: a real 1v1 rally against the AI "fly brain" — no ball
-    // machine. The host loop drives the opponent paddle and scoring.
+    // Play a Fly: the connectome-reservoir opponent. Play a (Standard) Bot and
+    // the beta friend/tournament paths use the analytic AI. Both run on the
+    // host loop with no ball machine.
+    if (mode === 'fly') {
+      startBotGame({ fly: true });
+      return;
+    }
     if (mode === 'bot' || mode === 'friend' || mode === 'tournament') {
-      startBotGame();
+      startBotGame({ fly: false });
       return;
     }
 
@@ -661,6 +668,8 @@ function leaveVersus() {
   room = null;
   netMode = null;
   vsBot = false; // exit any local bot match cleanly
+  useFlyBrain = false;
+  flyBrainViz.hide();
   remotePaddle.enabled = false;
   remotePaddle.tracking = false;
   versusBall = null;
@@ -698,9 +707,20 @@ function wireTourneyRoom(roomHandle) {
 // Reaction plane for the AI paddle — a little in front of the far baseline.
 const BOT_HOME_Z = -(TABLE.LENGTH / 2 - 0.35);
 
-function startBotGame() {
+// Connectome-reservoir controller + its visualization for "Play a Fly". The
+// model is fetched once at startup; until it resolves (or if it's missing)
+// FlyBrain.step() falls back to a near-perfect analytic intercept.
+const flyBrain = new FlyBrain();
+flyBrain.load().then((ok) => ok && console.info('[FlyBrain] connectome model loaded'));
+const flyBrainViz = new FlyBrainViz(flyBrain);
+flyBrainViz.mount();
+flyBrainViz.hide();
+let useFlyBrain = false;
+
+function startBotGame({ fly = false } = {}) {
   vsBot = true;
-  botOpponentName = 'Bot';
+  useFlyBrain = fly;
+  botOpponentName = fly ? 'Fly' : 'Bot';
 
   machine.enabled = false;
   launchCountdown = 0;
@@ -727,6 +747,11 @@ function startBotGame() {
   remoteAnchor.rotation.y = Math.PI; // blade faces +Z (back toward the player)
   remoteAnchor.position.set(0, TABLE.HEIGHT + 0.2, BOT_HOME_Z);
 
+  // The Fly brings its connectome reservoir + activation viz; the standard bot
+  // does not.
+  if (fly) { flyBrain.reset(); flyBrainViz.show(); }
+  else flyBrainViz.hide();
+
   // Scoreboard-only view (no lobby/room code), then serve directly — there's
   // no room to wait on, so we don't rely on room.onOpponent.
   ui.showBotMatch(botOpponentName);
@@ -734,44 +759,84 @@ function startBotGame() {
   startVersusServe();
 }
 
+// Cheap ballistic roll-forward (gravity + one table bounce) to find where an
+// incoming ball crosses the fly's paddle plane. This is what the standard bot
+// lacked: a naive linear guess ignores the bounce, so the paddle sat at the
+// wrong height and whiffed.
+function predictIntercept(ball) {
+  const p = ball.mesh.position.clone();
+  const v = ball.velocity.clone();
+  const g = -9.81, dt = 1 / 120, surfaceY = TABLE.HEIGHT + BALL.RADIUS;
+  let bounced = false;
+  for (let i = 0; i < 600; i++) {
+    v.y += g * dt;
+    p.addScaledVector(v, dt);
+    if (p.y <= surfaceY && v.y < 0 && Math.abs(p.x) < TABLE.WIDTH / 2 && p.z < 0 && !bounced) {
+      p.y = surfaceY; v.y = -v.y * 0.9; bounced = true;
+    }
+    if (p.z <= BOT_HOME_Z) break;
+  }
+  return { x: p.x, y: p.y };
+}
+
 function updateBotPaddle(dt) {
   const ball = versusBall;
-  // Reaction gain <1 so the paddle lags the ideal intercept and misses some.
-  const k = Math.min(1, dt * 7);
   let targetX = remoteAnchor.position.x;
   let targetY = remoteAnchor.position.y;
-
-  if (ball && ball.active && ball.velocity.z < 0) {
-    const pos = ball.mesh.position;
-    // Linear predict where the ball crosses the paddle plane in x/y.
-    const dz = BOT_HOME_Z - pos.z;
-    const vz = ball.velocity.z;
-    const tHit = Math.abs(vz) > 1e-4 ? dz / vz : 0;
-    targetX = pos.x + ball.velocity.x * tHit;
-    targetY = pos.y + ball.velocity.y * tHit;
-  }
 
   const minX = -(TABLE.WIDTH / 2 - 0.12);
   const maxX = TABLE.WIDTH / 2 - 0.12;
   const minY = TABLE.HEIGHT + 0.05;
   const maxY = TABLE.HEIGHT + 0.45;
+
+  if (useFlyBrain) {
+    // Connectome reservoir. Step every frame (even with no ball) so activity
+    // keeps flowing and the viz animates; it drives toward the ball whenever
+    // one is incoming. The world frame matches how the readout was trained.
+    const s = ball && ball.active
+      ? {
+          x: ball.mesh.position.x, y: ball.mesh.position.y,
+          vx: ball.velocity.x, vy: ball.velocity.y,
+          z: ball.mesh.position.z, vz: ball.velocity.z,
+        }
+      : { x: 0, y: TABLE.HEIGHT + 0.2, vx: 0, vy: 0, z: 0, vz: -3 };
+    const out = flyBrain.step(s);
+    targetX = out.targetX;
+    if (out.targetY != null) targetY = out.targetY;
+
+    // Near-unbeatable: track the predicted intercept almost exactly.
+    const k = Math.min(1, dt * 18);
+    targetX = THREE.MathUtils.clamp(targetX, minX, maxX);
+    targetY = THREE.MathUtils.clamp(targetY, minY, maxY);
+    remoteAnchor.position.x += (targetX - remoteAnchor.position.x) * k;
+    remoteAnchor.position.y += (targetY - remoteAnchor.position.y) * k;
+    remoteAnchor.position.z = BOT_HOME_Z;
+    remoteAnchor.rotation.y = Math.PI;
+    remotePaddle.update(dt);
+    remotePaddle.bladeNormal.y += 0.28;
+    remotePaddle.bladeNormal.normalize();
+    return;
+  }
+
+  // Standard bot: predict the post-bounce intercept and track it briskly
+  // enough to actually get there (the old gain of ~0.12/frame was too slow to
+  // reach anything but a ball hit straight at it).
+  const k = Math.min(1, dt * 12);
+  if (ball && ball.active && ball.velocity.z < 0) {
+    const hit = predictIntercept(ball);
+    targetX = hit.x;
+    targetY = hit.y;
+  }
   targetX = THREE.MathUtils.clamp(targetX, minX, maxX);
   targetY = THREE.MathUtils.clamp(targetY, minY, maxY);
-
   remoteAnchor.position.x += (targetX - remoteAnchor.position.x) * k;
   remoteAnchor.position.y += (targetY - remoteAnchor.position.y) * k;
   remoteAnchor.position.z = BOT_HOME_Z;
   remoteAnchor.rotation.y = Math.PI;
-
-  // The networked flag makes the tick loop skip this paddle, so update it here
-  // to derive bladeCenter/normal/velocity for the physics collision.
   remotePaddle.update(dt);
 
-  // Return bias: the blade faces +Z (back toward the player); tilting its
-  // normal a little upward makes the reflected ball arc up and over the net
-  // instead of driving flat into it. The collision reflects off bladeNormal,
-  // so nudging it here is enough. Tuned conservatively — increase for a
-  // loopier, safer return, decrease for a flatter, more aggressive one.
+  // Return bias: tilt the blade normal up so the reflected ball arcs over the
+  // net instead of driving flat into it.
   remotePaddle.bladeNormal.y += 0.32;
   remotePaddle.bladeNormal.normalize();
 }
@@ -1037,6 +1102,7 @@ function tick(dt) {
 
   scoreboard.update();
   ui.update();
+  if (useFlyBrain) flyBrainViz.render();
   controlsHint.style.display = (!renderer.xr.isPresenting && ui.menu && ui.menu.hidden) ? 'flex' : 'none';
 
   // Hide the OS cursor while the desktop player is training so it doesn't sit
