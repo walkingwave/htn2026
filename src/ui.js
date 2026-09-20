@@ -174,7 +174,7 @@ export class UI {
     this._entries = [
       { id: 'ar', label: 'In my room', note: 'headset · passthrough', disabled: true },
       { id: 'vr', label: 'In the arena', note: 'headset · full VR', disabled: true },
-      { id: 'desktop', label: 'On this screen', note: 'mouse or webcam bat', disabled: false },
+      { id: 'desktop', label: 'On this screen', note: 'mouse or webcam paddle', disabled: false },
     ];
     this._renderMenu();
     this._syncGamePick();
@@ -427,7 +427,7 @@ export class UI {
 
     el.querySelector('[data-act="toggle"]').onclick = () => this.togglePause();
     el.querySelector('[data-act="mode"]').onclick = () => this.nextMode();
-    el.querySelector('[data-act="serve"]').onclick = () => this.machine.serve();
+    el.querySelector('[data-act="serve"]').onclick = () => this.serveOne();
     el.querySelector('[data-act="settings"]').onclick = () => this.toggleSettings();
     el.querySelector('[data-act="exit"]').onclick = () => this.quitToMenu();
   }
@@ -499,7 +499,22 @@ export class UI {
 
   // --- Commands (shared by clicks, keys and the VR menu) ----------------
 
+  // The bottom bar's commands drive the ball machine, and the machine only
+  // runs in Arcade. Coach places its own balls and Versus is fed by the other
+  // player, so these have to be refused rather than quietly doing something —
+  // pressing S in a match used to fire a stray ball into it that only one
+  // side could see, and D silently rotated a drill you would meet again the
+  // next time you played Arcade.
+  _machineCommandsAllowed(what) {
+    const game = this.settings.get('game');
+    if (game === 'arcade') return true;
+    this.toast(game === 'versus' ? `No ${what} in a match` : `No ${what} in Coach`);
+    this.sfx.ui(false);
+    return false;
+  }
+
   togglePause() {
+    if (!this._machineCommandsAllowed('pausing')) return;
     this.machine.enabled = !this.machine.enabled;
     this.game.revision++;
     this.sfx.ui(this.machine.enabled);
@@ -507,10 +522,16 @@ export class UI {
   }
 
   nextMode() {
+    if (!this._machineCommandsAllowed('mode change')) return;
     const mode = this.machine.nextDrill();
     this.game.revision++;
     this.sfx.ui();
     this.toast(mode.name);
+  }
+
+  serveOne() {
+    if (!this._machineCommandsAllowed('serving')) return;
+    this.machine.serve();
   }
 
   toggleSettings(force) {
@@ -541,11 +562,23 @@ export class UI {
   _onKey(e) {
     if (!this.menu.hidden) {
       if (document.activeElement === this.lobbyCode) return; // typing a code
+
+      // The scores panel covers the menu, so it takes the keyboard with it.
+      // Without this, Enter started the game behind it — you ended up playing
+      // under a leaderboard — and the number keys changed a game you could
+      // not see.
+      if (!this.scoresEl.hidden) {
+        if (e.code === 'KeyL' || e.code === 'Escape' || e.code === 'Enter') {
+          e.preventDefault();
+          this.toggleScores(false);
+        }
+        return;
+      }
+
       if (e.code === 'Digit1') this.setGame('arcade');
       else if (e.code === 'Digit2') this.setGame('coach');
       else if (e.code === 'Digit3') this.setGame('versus');
       else if (e.code === 'KeyL') this.toggleScores();
-      else if (e.code === 'Escape' && !this.scoresEl.hidden) this.toggleScores(false);
       else if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);
       else if (e.code === 'Enter' || e.code === 'Space') {
@@ -569,7 +602,7 @@ export class UI {
     } else if (e.code === 'KeyD') {
       this.nextMode();
     } else if (e.code === 'KeyS') {
-      this.machine.serve();
+      this.serveOne();
     } else if (e.code === 'KeyR') {
       this.game.reset();
       this.toast('Score reset');

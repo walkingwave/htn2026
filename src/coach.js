@@ -187,7 +187,7 @@ export class Coach {
     this.bestScore = 0;
     this.attempts = 0;
     this.history = [];
-    this.advice = 'Put your bat in the ring to start';
+    this.advice = 'Put your paddle in the ring to start';
     this.deviation = 0;
     this.progress = 0; // how far along the path you have traced
 
@@ -227,7 +227,7 @@ export class Coach {
     // A new stroke is a new skill; advice about the last one would describe
     // a habit the player does not have in this one.
     this.history = [];
-    this.advice = 'Put your bat in the ring to start';
+    this.advice = 'Put your paddle in the ring to start';
     this.result = '';
     this.reset();
   }
@@ -658,7 +658,7 @@ export class Coach {
 
     ctx.fillStyle = 'rgba(242,239,230,0.4)';
     ctx.font = '500 18px ui-monospace, monospace';
-    ctx.fillText('TAP A ROW WITH YOUR BAT TO SWITCH', 34, H - 24);
+    ctx.fillText('TAP A ROW WITH YOUR PADDLE TO SWITCH', 34, H - 24);
 
     this._boardTexture.needsUpdate = true;
   }
@@ -951,8 +951,8 @@ export class Coach {
         return this.advice;
       case COACH_STATE.READY:
         return this.isFed
-          ? 'Bat in the ring when you are ready'
-          : 'Put your bat in the ring to start';
+          ? 'Paddle in the ring when you are ready'
+          : 'Put your paddle in the ring to start';
       default:
         return this.scenario.brief;
     }

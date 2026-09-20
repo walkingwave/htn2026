@@ -524,19 +524,6 @@ const _planeNormal = new THREE.Vector3();
 const _hit = new THREE.Vector3();
 let pointerActive = false;
 
-// The reference view the cursor is resolved through: the desktop camera's
-// resting pose, parented to the rig so a flipped guest rig comes along.
-const aimCamera = new THREE.PerspectiveCamera(70, 1, 0.01, 60);
-playerRig.add(aimCamera);
-
-function syncAimCamera() {
-  aimCamera.aspect = camera.aspect;
-  aimCamera.position.set(0, CAM_HEIGHT, DESKTOP_REST_Z + CAM_BEHIND);
-  aimCamera.lookAt(playerRig.localToWorld(_camLook.set(0, TABLE.HEIGHT + 0.12, -TABLE.LENGTH * 0.42)));
-  aimCamera.updateMatrixWorld(true);
-  aimCamera.updateProjectionMatrix();
-}
-
 function placeDesktopBat(clientX, clientY) {
   if (renderer.xr.isPresenting) return; // controllers own the bats in a session
   _pointerNdc.x = (clientX / window.innerWidth) * 2 - 1;
@@ -719,6 +706,7 @@ function meetIncomingBall(aim) {
 // velocity, spin, versus packets) is identical either way; only where the pose
 // comes from changes.
 let camTracker = null;
+let webcamHasLocked = false; // pointer drives until the first marker lock
 const _camQuat = new THREE.Quaternion();
 const _camBase = new THREE.Quaternion();
 const _camPos = new THREE.Vector3();
@@ -737,12 +725,12 @@ function startWebcamBat() {
       ui.setCamStatus(error ?? 'Camera unavailable');
       ui.toast(error ?? 'Camera unavailable');
     } else if (state === TRACKER_STATE.CALIBRATING) {
-      ui.setCamStatus('Show the marker side of the bat');
+      ui.setCamStatus('Show the marker side of the paddle');
       ui.toast('Show the printed markers to the camera — click to set neutral');
     } else if (state === TRACKER_STATE.TRACKING) {
       ui.setCamStatus('Tracking markers · click to re-zero');
     } else if (state === TRACKER_STATE.LOST) {
-      ui.setCamStatus('Lost the markers — show the bat face');
+      ui.setCamStatus('Lost the markers — show the paddle face');
     }
   };
   ui.showCamPreview(camTracker);
@@ -753,26 +741,60 @@ function startWebcamBat() {
 }
 
 function stopWebcamBat() {
+  webcamHasLocked = false;
   camTracker?.stop();
   camTracker = null;
   ui.showCamPreview(null);
 }
 
-// Pose the rig from the tracker. Camera space is +X right, +Y up, −Z away
-// from the viewer, with the origin at the lens; the desktop camera sits at eye
-// height on the rig, so the shift is a single offset. Depth and height are
-// clamped to the volume the bat can usefully be in, because a lost frame or a
-// red shirt in the background would otherwise throw it across the room.
-function poseWebcamBat() {
-  _camPos.copy(camTracker.position);
-  _camPos.y = THREE.MathUtils.clamp(_camPos.y + 1.62, TABLE.HEIGHT + 0.03, 1.6);
-  _camPos.x = THREE.MathUtils.clamp(_camPos.x, -0.8, 0.8);
-  _camPos.z = THREE.MathUtils.clamp(_camPos.z, -1.35, -0.2);
+// Pose the rig from the tracker, as a controller: the tracker reports how
+// far the real paddle has moved from its calibrated neutral hold, and that
+// displacement is applied around the same rest pose the mouse paddle uses.
+//
+// Mapping absolute camera coordinates instead is what parked the virtual
+// paddle at head height — the old +1.62 assumed the tracker's origin was
+// eye level, but it is wherever the webcam happens to sit, so the paddle
+// spawned near its clamp ceiling and stayed there. Relative-to-neutral has
+// no such assumption: wherever you hold the paddle when it locks on IS the
+// rest pose, exactly like recentring a VR controller.
+const WEBCAM_REST = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
+// Moving the paddle toward the webcam reads as depth decreasing; the bat
+// should push toward the table. Small real depth changes need amplifying —
+// a hand only travels ~25 cm before leaving focus.
+const WEBCAM_DEPTH_GAIN = 2.0;
+const _camTarget = new THREE.Vector3();
 
-  // The tracker reports how the real bat is tilted; the quarter turn that
-  // squares a blade to the table is ours to add.
-  _camBase.setFromAxisAngle(UP, Math.PI / 2);
-  _camQuat.copy(camTracker.quaternion).multiply(_camBase);
+function poseWebcamBat(dt, tracking) {
+  if (tracking) {
+    _camTarget.set(
+      THREE.MathUtils.clamp(WEBCAM_REST.x + camTracker.position.x, -REACH_X, REACH_X),
+      THREE.MathUtils.clamp(
+        WEBCAM_REST.y + camTracker.position.y,
+        REACH_Y_BOTTOM,
+        REACH_Y_TOP
+      ),
+      THREE.MathUtils.clamp(
+        WEBCAM_REST.z - camTracker.position.z * WEBCAM_DEPTH_GAIN,
+        DESKTOP_REST_Z - 0.55,
+        DESKTOP_REST_Z + 0.3
+      )
+    );
+    _camPos.copy(_camTarget);
+    // The tracker reports how the real paddle is tilted; the quarter turn
+    // that squares a blade to the table is ours to add.
+    _camBase.setFromAxisAngle(UP, Math.PI / 2);
+    _camQuat.copy(camTracker.quaternion).multiply(_camBase);
+  } else {
+    // Markers gone. Hold where the paddle was and drift gently back toward
+    // the rest pose — the old behaviour snapped straight to the mouse pose
+    // the instant tracking dropped, which read as the paddle glitching out
+    // whenever the board left the frame.
+    const step = 0.8 * dt;
+    _camPos.lerp(WEBCAM_REST, Math.min(step, 1));
+    _camBase.setFromAxisAngle(UP, Math.PI / 2);
+    _camQuat.slerp(_camBase, Math.min(step, 1));
+  }
+
   desktopRig.quaternion.copy(_camQuat);
   _bladeOffset
     .copy(desktopPaddle.mesh.getObjectByName('blade').position)
@@ -790,7 +812,7 @@ window.addEventListener('pointerdown', (e) => {
   // The webcam tracker has to be shown the bat's colour once. Any click while
   // it is waiting is that gesture, so there is no separate key to learn.
   if (camTracker?.state === TRACKER_STATE.CALIBRATING) {
-    if (!camTracker.calibrateColour()) ui.toast('No markers seen yet — bring the bat closer');
+    if (!camTracker.calibrateColour()) ui.toast('No markers seen yet — bring the paddle closer');
     return;
   }
   placeDesktopBat(e.clientX, e.clientY);
@@ -827,7 +849,7 @@ window.addEventListener('keydown', (e) => {
   // toward the camera, so this cannot be resolved from the image alone.
   if (e.code === 'KeyB' && camTracker) {
     camTracker.flipTilt();
-    ui.toast('Bat tilt flipped');
+    ui.toast('Paddle tilt flipped');
     return;
   }
 
@@ -856,12 +878,20 @@ function updateDesktopBat(dt) {
 
   if (inXR) return;
 
-  // A webcam bat, once it has locked on, owns the rig outright: the pose is
-  // the real bat's. Until it locks on — or if it loses the bat — the pointer
-  // stays in charge, so you are never left with nothing to play with.
-  if (usingWebcamBat() && camTracker?.state === TRACKER_STATE.TRACKING) {
-    poseWebcamBat();
-    return;
+  // A webcam paddle, once it has locked on, owns the rig for as long as the
+  // mode is selected — including through dropouts, where it holds its last
+  // pose and drifts back to rest. Handing control back to the mouse on every
+  // dropout made the paddle teleport between two unrelated poses, which is
+  // the glitching that made it feel unusable. The pointer only drives before
+  // the very first lock, so there is something to play with while you get
+  // the markers in view.
+  if (usingWebcamBat() && camTracker) {
+    const tracking = camTracker.state === TRACKER_STATE.TRACKING;
+    if (tracking) webcamHasLocked = true;
+    if (webcamHasLocked) {
+      poseWebcamBat(dt, tracking);
+      return;
+    }
   }
 
   aimDesktopBatAtPointer();

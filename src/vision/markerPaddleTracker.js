@@ -114,8 +114,13 @@ export class MarkerPaddleTracker {
     this.confidence = 0;
     this.fps = 0;
 
-    // Latest pose, camera space: +X right, +Y up, −Z into the scene, metres.
-    // The quaternion is relative to the calibrated neutral hold.
+    // Latest pose as a controller would report it: `position` is the
+    // DISPLACEMENT from the calibrated neutral hold, in metres of (gained)
+    // camera space — +X right, +Y up, −Z toward the screen. Absolute camera
+    // position is useless to the game: it depends on where the webcam sits
+    // and how far back the player's chair is, which is exactly why the
+    // paddle used to appear parked near the ceiling. The quaternion is
+    // likewise relative to the neutral hold.
     this.position = new THREE.Vector3();
     this.quaternion = new THREE.Quaternion();
 
@@ -139,6 +144,9 @@ export class MarkerPaddleTracker {
     this._missed = 0;
     this._activeFace = 'red';
     this._neutral = null; // quaternion captured while the player holds still
+    this._neutralPosition = null;
+    this._lastAccepted = null; // last raw position that passed the sanity gate
+    this._jumpFrames = 0;
     this._latestRawPose = null;
     this._previousGrey = null;
     this._previousMarkers = [];
@@ -207,10 +215,12 @@ export class MarkerPaddleTracker {
   calibrateColour() {
     if (!this._latestRawPose) return false;
     this._neutral = this._latestRawPose.quaternion.clone().invert();
+    this._neutralPosition = this._latestRawPose.position.clone();
     this._smoothedQuat = null;
     this._filterX.reset();
     this._filterY.reset();
     this._filterZ.reset();
+    this.position.set(0, 0, 0);
     if (this.state === TRACKER_STATE.CALIBRATING) this._setState(TRACKER_STATE.TRACKING);
     return true;
   }
@@ -258,8 +268,9 @@ export class MarkerPaddleTracker {
       // but only just after a confirmed marker pose — a free-running colour
       // blob is exactly the face bug this tracker exists to kill.
       const recentlyConfirmed = now - this._lastPoseAt < 750;
-      if (recentlyConfirmed && assist) {
-        this._applyPose(this._assistPosition(assist, width), null, now);
+      if (recentlyConfirmed && assist && this._neutralPosition) {
+        const displacement = this._assistPosition(assist, width).sub(this._neutralPosition);
+        this._applyPose(displacement, null, now, true);
         this.confidence = 0.3;
         return;
       }
@@ -299,22 +310,47 @@ export class MarkerPaddleTracker {
     this._latestRawPose = { position, quaternion: boardPose.quaternion.clone() };
 
     // First solid pose while waiting: adopt the current hold as neutral, so
-    // the bat is usable immediately; a click recalibrates deliberately.
+    // the paddle is usable immediately; a click recalibrates deliberately.
     if (!this._neutral) {
       this._neutral = boardPose.quaternion.clone().invert();
+      this._neutralPosition = position.clone();
     }
     if (this.state !== TRACKER_STATE.TRACKING) this._setState(TRACKER_STATE.TRACKING);
 
+    // Sanity gate against teleports. When the board slides half out of frame
+    // the surviving markers solve to somewhere wild for a frame or two, and
+    // that frame used to fling the paddle across the room. A real swing is
+    // fast but continuous; a solve error is a discontinuity. So a large jump
+    // is only believed once a second frame lands near the same new spot.
+    if (this._lastAccepted && position.distanceTo(this._lastAccepted) > 0.45) {
+      this._jumpFrames += 1;
+      if (this._jumpFrames < 2) return;
+    }
+    this._jumpFrames = 0;
+    this._lastAccepted = position.clone();
+
+    // A board grazing the frame edge, or held by a single marker, solves
+    // noisily. Its position is still worth a heavily damped nudge, but its
+    // orientation is not worth anything — hold the last good angle.
+    const soft = boardPose.nearEdge || boardPose.markers.length < 2;
+
     const relative = boardPose.quaternion.clone().premultiply(this._neutral);
-    this._applyPose(position, relative, now);
+    const displacement = position.clone().sub(this._neutralPosition);
+    this._applyPose(displacement, soft ? null : relative, now, soft);
   }
 
-  _applyPose(position, quaternion, now) {
-    this.position.set(
-      this._filterX.filter(position.x, now),
-      this._filterY.filter(position.y, now),
-      this._filterZ.filter(position.z, now)
-    );
+  _applyPose(position, quaternion, now, soft = false) {
+    if (soft) {
+      // Damped nudge only: the measurement is suspect, so creep toward it
+      // rather than feeding it through the responsive filters.
+      this.position.lerp(position, 0.15);
+    } else {
+      this.position.set(
+        this._filterX.filter(position.x, now),
+        this._filterY.filter(position.y, now),
+        this._filterZ.filter(position.z, now)
+      );
+    }
     if (quaternion) {
       if (!this._smoothedQuat) this._smoothedQuat = quaternion.clone();
       else this._smoothedQuat.slerp(quaternion, 0.35);
@@ -548,11 +584,24 @@ export class MarkerPaddleTracker {
       quaternion = wholeBoard.quaternion;
     }
 
+    // A corner within a few percent of the frame border means the board is
+    // sliding out of view — the caller treats the pose as suspect.
+    const marginX = frameWidth * 0.04;
+    const marginY = frameHeight * 0.04;
+    const nearEdge = inliers.some((p) =>
+      p.marker.corners.some(
+        (c) =>
+          c.x < marginX || c.x > frameWidth - marginX ||
+          c.y < marginY || c.y > frameHeight - marginY
+      )
+    );
+
     return {
       isFrontBoard: inliers[0].isFrontBoard,
       markers: inliers.map((p) => p.marker),
       position,
       quaternion,
+      nearEdge,
       usesWholeBoardPose: Boolean(wholeBoard),
       markerSpacingDepth: estimateMarkerSpacingDepth(inliers.map((p) => p.marker), frameWidth),
     };

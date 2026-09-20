@@ -50,7 +50,7 @@ export function buildPauseMenu({ machine, settings, game, onExit, onResume, onRe
     { id: 'resume', kind: 'action', label: 'Resume', activate: onResume },
     modeRow,
     { ...cycle('game'), label: 'Game' },
-    { ...cycle('paddleSource'), label: 'Bat follows' },
+    { ...cycle('paddleSource'), label: 'Paddle input' },
     { ...cycle('difficulty'), label: 'Opponent' },
 
     { ...cycle('hand'), label: 'Paddle hand' },
