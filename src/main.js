@@ -255,7 +255,10 @@ xr.onModeChange = (mode) => {
   if (mode) {
     stopHandPaddle();
     stopWebcamBat();
-  } else if (ui.menu.hidden) syncCameraInput();
+  } else if (ui.menu.hidden) {
+    syncCameraInput();
+    syncDesktopCursor();
+  }
 };
 
 const ui = new UI({
@@ -275,6 +278,7 @@ const ui = new UI({
     // The camera only opens once you are actually playing, not while the
     // setting sits there remembered from last time.
     if (!mode) syncCameraInput();
+    syncDesktopCursor();
     if (settings.get('difficulty') === 'fly') flyBrainViz.show();
   },
   onExit: () => {
@@ -283,6 +287,7 @@ const ui = new UI({
     clearBalls();
     stopWebcamBat();
     stopHandPaddle();
+    renderer.domElement.style.cursor = '';
     flyBrainViz.hide();
   },
   isInputBlocked: () => vrMenu.open,
@@ -529,6 +534,7 @@ const DESKTOP_THRUST_DEPTH = 0.14; // metres forward at the top of the swing
 const DESKTOP_THRUST_TIME = 0.1; // seconds pushing before it comes back
 const DESKTOP_THRUST_SPEED = 1.5; // m/s — the bat's own pace, not a teleport
 const DESKTOP_DRIVE_PITCH = 0.3; // radians the face closes at full stroke
+const DESKTOP_WHEEL_DEPTH_STEP = 0.08; // metres per wheel notch
 
 // The wheel nudges the bat nearer or further than where it would meet the
 // ball, for anyone who wants to take it early or late. A bias rather than an
@@ -889,6 +895,17 @@ function syncCameraInput() {
   else if (playing && usingWebcamBat()) startWebcamBat();
 }
 
+// In mouse play the paddle already marks the pointer's exact position. Keeping
+// the browser cursor there makes it look like a second, stray paddle marker.
+// Restore it for menus, webcam setup, and XR where it remains useful.
+function syncDesktopCursor() {
+  const mousePlay =
+    ui?.menu?.hidden &&
+    !renderer.xr.isPresenting &&
+    settings.get('paddleSource') === PADDLE_SOURCE.CONTROLLER;
+  renderer.domElement.style.cursor = mousePlay ? 'none' : '';
+}
+
 function startHandPaddle() {
   if (handSession) return;
   stopWebcamBat();
@@ -1146,7 +1163,7 @@ window.addEventListener(
   (e) => {
     if (renderer.xr.isPresenting || !ui.menu.hidden || handSession) return;
     desktopDepthBias = THREE.MathUtils.clamp(
-      desktopDepthBias - Math.sign(e.deltaY) * 0.05,
+      desktopDepthBias - Math.sign(e.deltaY) * DESKTOP_WHEEL_DEPTH_STEP,
       -0.25,
       0.25
     );
@@ -1761,6 +1778,7 @@ settings.onChange((key) => {
     // Hold the camera open only while it is the chosen input. Nobody wants a
     // webcam light on because they tried a menu option once.
     syncCameraInput();
+    syncDesktopCursor();
   }
   if (key === 'hand') applyHandedness();
   if (key === 'difficulty') {
