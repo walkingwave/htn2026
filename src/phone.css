@@ -1,0 +1,19 @@
+* { box-sizing: border-box; }
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+html, body { margin: 0; min-height: 100%; background: radial-gradient(circle at 50% 0%, #482033, #0c0b12 68%); color: #f8f4ec; }
+.phone-shell { min-height: 100svh; padding: max(22px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: center; }
+.phone-brand { width: min(100%, 480px); font-weight: 800; letter-spacing: .04em; font-size: 18px; }
+.phone-brand span { font-size: 28px; vertical-align: -3px; margin-right: 8px; }
+.phone-card { width: min(100%, 480px); margin: auto 0; padding: 28px 22px; border: 1px solid rgba(255,255,255,.14); border-radius: 26px; background: rgba(20,16,27,.82); box-shadow: 0 24px 80px rgba(0,0,0,.32); }
+.phone-kicker { color: #ff716b; font-size: 11px; letter-spacing: .2em; font-weight: 800; }
+h1 { font-size: clamp(32px, 10vw, 54px); line-height: .98; margin: 18px 0; letter-spacing: -.06em; }
+.phone-copy, .phone-help { color: #b9afc1; line-height: 1.55; }
+.phone-status { border-radius: 12px; padding: 14px; margin: 24px 0 12px; background: #292332; font-size: 13px; }
+.phone-status[data-tone="good"] { color: #b9f5be; border: 1px solid #3d8d59; }
+.phone-status[data-tone="bad"] { color: #ffaaa5; border: 1px solid #a34855; }
+.phone-button { width: 100%; border: 0; border-radius: 14px; padding: 17px; margin-top: 10px; background: #e53935; color: #fff; font: inherit; font-weight: 800; cursor: pointer; }
+.phone-button:active { transform: scale(.98); }
+.phone-button--secondary { background: #332a42; }
+.phone-meter { height: 6px; margin: 24px 0 8px; border-radius: 99px; background: #31283b; overflow: hidden; }
+.phone-meter span { display: block; height: 100%; width: 100%; transform-origin: left; transform: scaleX(0); background: linear-gradient(90deg, #ed3d4d, #f7c957); transition: transform .08s linear; }
+.phone-footer { width: min(100%, 480px); color: #81768d; font-size: 11px; text-align: center; }

@@ -38,7 +38,16 @@ export function decodeMessage(raw) {
 // The relay forwards only these. Anything else is dropped rather than
 // broadcast, so a malformed or hostile client can't use the room as a
 // general-purpose message bus.
-const RELAYED = new Set(['__join', '__leave', 'paddle', 'state']);
+const RELAYED = new Set([
+  '__join',
+  '__leave',
+  'paddle',
+  'state',
+  'phone-hello',
+  'phone-pose',
+  'phone-calibrate',
+  'phone-haptic',
+]);
 
 export function isClientMessage(message) {
   return Boolean(message && RELAYED.has(message.type));

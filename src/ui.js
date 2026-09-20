@@ -3,6 +3,7 @@ import { MODES } from './ballMachine.js';
 import { buildPauseMenu } from './menuModel.js';
 import { getNarrationSettings, setNarrationEnabled, setNarratorMode, sendInvite } from './backendApi.js';
 import { getLeaderboard, submitScore, isWorthRecording } from './leaderboard.js';
+import QRCode from 'qrcode';
 
 // The flat-screen shell: a retro start menu, a one-line status bar, and a
 // settings screen built from the shared menu model.
@@ -38,8 +39,10 @@ export class UI {
     onVersusCreate,
     onVersusJoin,
     onVersusLeave,
+    onPhonePair,
     onRunSummary,
     invitedRoom = null,
+    invitedRelay = null,
     realtimeAvailable = false,
   }) {
     Object.assign(this, {
@@ -54,6 +57,7 @@ export class UI {
       onVersusCreate,
       onVersusJoin,
       onVersusLeave,
+      onPhonePair,
       onRunSummary,
       realtimeAvailable,
     });
@@ -64,6 +68,7 @@ export class UI {
     this._toastTimer = null;
     this._lastRevision = -1;
     this._versus = null; // { role, code, link, kind } once a room is open
+    this._versusTransport = 'auto';
 
     this._buildMenu();
     this._buildBar();
@@ -80,7 +85,16 @@ export class UI {
     // Arriving on a ?room=CODE link is an invitation, so the menu opens on
     // Versus with the code already filled in — one button from playing.
     if (invitedRoom) {
-      this.chooseGame('friend');
+      this._productMode = 'friend';
+      this._setProductCursor(this._productChoices.indexOf('friend'), false);
+      this._versusTransport = invitedRelay
+        ? 'websocket'
+        : this.realtimeAvailable
+          ? 'webrtc'
+          : 'auto';
+      this.setGame('versus');
+      this.setScreen('play');
+      if (invitedRelay) this.lanRelay.value = invitedRelay;
       this.lobbyCode.value = invitedRoom;
       this._setLobbyStatus(`Invited to room ${invitedRoom} — join to play.`);
     }
@@ -130,11 +144,48 @@ export class UI {
         <div class="prompt blink">↑ ↓ SELECT · ENTER CONTINUE</div>
       </div>
 
+      <div class="screen" data-screen="network" hidden>
+        <button class="crumb" data-network-back>‹ <b>PLAY A FRIEND</b> — change mode</button>
+        <div class="step__head"><span class="step__num">2</span>Is your friend on the same Wi-Fi?</div>
+        <div class="game-pick">
+          <button class="game" data-transport="websocket">
+            <span class="game__key">1</span>
+            <span class="game__name">Yes — same Wi-Fi</span>
+            <span class="game__blurb">Direct local relay</span>
+          </button>
+          <button class="game" data-transport="supabase">
+            <span class="game__key">2</span>
+            <span class="game__name">No — different network</span>
+            <span class="game__blurb">Online relay</span>
+          </button>
+        </div>
+        <div class="prompt blink">↑ ↓ SELECT · ENTER CONTINUE</div>
+      </div>
+
       <div class="screen" data-screen="play" hidden>
-        <button class="crumb" data-back>‹ <b data-crumb-game>ARCADE</b> — change game</button>
-        <div class="step__head"><span class="step__num">2</span>What do you have?</div>
+        <button class="crumb" data-back>‹ <b data-crumb-game>ARCADE</b> — change game</button>          <div class="step__head"><span class="step__num">2</span>What do you have?</div>
         <div class="menu-list" data-list></div>
+        <div class="phone-pair" data-phone-pair hidden>
+          <div class="phone-pair__title">Pair your phone as the paddle</div>
+          <div class="phone-pair__qr"><img data-phone-qr alt="QR code to pair your phone" /></div>
+          <div class="phone-pair__link" data-phone-link></div>
+          <button class="key" data-phone-copy><b>⧉</b>Copy phone link</button>
+          <div class="lobby__status" data-phone-status>Waiting for phone…</div>
+        </div>
         <div class="lobby" data-lobby hidden>
+          <div class="lobby__relay" data-lan-relay-row hidden>
+            <label class="lobby__relay-label">
+              Host LAN relay
+              <input
+                class="lobby__code lobby__relay-input"
+                data-lan-relay
+                placeholder="192.168.1.42:5173"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </label>
+            <div class="lobby__status">Host runs <b>npm run dev</b>; both players use this deployed page.</div>
+          </div>
           <div class="step__head"><span class="step__num">✦</span>Set up the match</div>
           <div class="lobby__row">
             <button class="key" data-lobby-host><b>▸</b>Start a room</button>
@@ -174,23 +225,37 @@ export class UI {
     this.list = el.querySelector('[data-list]');
     this._screens = {
       game: el.querySelector('[data-screen="game"]'),
+      network: el.querySelector('[data-screen="network"]'),
       play: el.querySelector('[data-screen="play"]'),
     };
     this._crumbGame = el.querySelector('[data-crumb-game]');
     this._screen = 'game';
     this._productChoices = ['tournament', 'friend', 'bot', 'fly', 'drills'];
     this._gameIndex = 2;
+    this._transportChoices = ['websocket', 'supabase'];
+    this._transportIndex = 0;
     el.querySelector('[data-back]').onclick = () => this.setScreen('game');
+    el.querySelector('[data-network-back]').onclick = () => this.setScreen('game');
 
     for (const btn of el.querySelectorAll('[data-game]')) {
       btn.onclick = () => this.chooseGame(btn.dataset.game);
     }
+    for (const btn of el.querySelectorAll('[data-transport]')) {
+      btn.onclick = () => this._chooseTransport(btn.dataset.transport);
+    }
 
     this.lobby = el.querySelector('[data-lobby]');
+    this.lanRelayRow = el.querySelector('[data-lan-relay-row]');
+    this.lanRelay = el.querySelector('[data-lan-relay]');
     this.lobbyCode = el.querySelector('[data-lobby-code]');
     this.lobbyStatus = el.querySelector('[data-lobby-status]');
     this.lobbyShare = el.querySelector('[data-lobby-share]');
     this.lobbyLink = el.querySelector('[data-lobby-link]');
+    this.phonePair = el.querySelector('[data-phone-pair]');
+    this.phoneQr = el.querySelector('[data-phone-qr]');
+    this.phoneLink = el.querySelector('[data-phone-link]');
+    this.phoneStatus = el.querySelector('[data-phone-status]');
+    el.querySelector('[data-phone-copy]').onclick = () => this._copyPhoneLink();
     el.querySelector('[data-lobby-host]').onclick = () => this._hostMatch();
     el.querySelector('[data-lobby-join]').onclick = () => this._joinMatch();
     el.querySelector('[data-lobby-copy]').onclick = () => this._copyRoomLink();
@@ -206,6 +271,7 @@ export class UI {
       e.stopPropagation(); // the menu's arrow/enter handling isn't wanted here
       if (e.code === 'Enter') this._joinMatch();
     };
+    this.lanRelay.onkeydown = (e) => e.stopPropagation();
 
     // Named for where you end up, with the trade-off spelled out, rather than
     // for the WebXR session mode being requested. "Enter passthrough" means
@@ -219,11 +285,12 @@ export class UI {
     this._entries = [
       { id: 'vr', label: 'A VR headset', note: 'headset', disabled: true },
       { id: 'camera', label: 'A ping pong paddle', note: 'webcam', disabled: false },
-      { id: 'phone', label: 'A phone', note: 'beta', disabled: true },
+      { id: 'phone', label: 'A phone', note: 'motion + haptics', disabled: false },
       { id: 'desktop', label: 'Nothing — just the mouse', note: '', disabled: false },
     ];
     this._renderMenu();
     this._setProductCursor(this._gameIndex, false);
+    this._setTransportCursor(this._transportIndex, false);
   }
 
   // The menu is two screens shown one after the other — pick a game, then
@@ -232,6 +299,7 @@ export class UI {
   setScreen(name) {
     this._screen = name;
     this._screens.game.hidden = name !== 'game';
+    this._screens.network.hidden = name !== 'network';
     this._screens.play.hidden = name !== 'play';
     if (name === 'play') {
       this._crumbGame.textContent = this._productLabel(this._productMode);
@@ -257,7 +325,15 @@ export class UI {
     }
 
     if (value === 'friend') {
+      if (!this.realtimeAvailable && !import.meta.env.DEV) {
+        this.toast('Online play is being set up — try again shortly');
+        this.sfx.ui(false);
+        return;
+      }
+      this._versusTransport = this.realtimeAvailable ? 'webrtc' : 'websocket';
       this.setGame('versus');
+      this.setScreen('play');
+      return;
     } else {
       this.setGame('arcade');
       this.settings.set('difficulty', value === 'fly' ? 'fly' : 'normal');
@@ -287,6 +363,26 @@ export class UI {
     if (sound) this.sfx.ui();
   }
 
+  _setTransportCursor(index, sound = true) {
+    if (index < 0) return;
+    this._transportIndex = index;
+    for (const btn of this.menu.querySelectorAll('[data-transport]')) {
+      btn.setAttribute(
+        'aria-pressed',
+        String(btn.dataset.transport === this._transportChoices[index])
+      );
+    }
+    if (sound) this.sfx.ui();
+  }
+
+  _chooseTransport(transport) {
+    const index = this._transportChoices.indexOf(transport);
+    this._setTransportCursor(index, false);
+    this._versusTransport = transport;
+    this.setGame('versus');
+    this.setScreen('play');
+  }
+
   // Arcade is the drills and rally; Coach teaches one stroke at a time. It
   // is a separate game rather than another drill in the rotation, so it is
   // chosen here before you enter rather than cycled into by accident.
@@ -299,6 +395,7 @@ export class UI {
   _syncGamePick() {
     const versus = this.settings.get('game') === 'versus';
     this.lobby.hidden = !versus;
+    this.lanRelayRow.hidden = !versus || this._versusTransport !== 'websocket';
     if (versus && !this._versus) {
       this._setLobbyStatus(
         this.realtimeAvailable
@@ -317,6 +414,7 @@ export class UI {
   // two players on two different ones.
   _transportNote() {
     const kind = this._versus?.kind;
+    if (kind === 'webrtc') return 'Connected directly to your friend.';
     if (kind === 'websocket') return 'Connected over this Wi-Fi.';
     if (kind === 'supabase') return 'Connected over the internet.';
     if (kind === 'local') return 'Local only — this connects tabs on this machine, not another device.';
@@ -328,12 +426,27 @@ export class UI {
     this.lobbyStatus.dataset.tone = tone;
   }
 
+  _relayForMatch() {
+    if (this._versusTransport !== 'websocket') return null;
+    const relay = this.lanRelay.value.trim();
+    // On the local Vite page the relay shares the page origin, so an address
+    // is optional. A deployed page needs the host's private LAN address.
+    if (!relay && !import.meta.env.DEV) {
+      this._setLobbyStatus('Enter the host laptop’s LAN address first.', 'bad');
+      this.lanRelay.focus();
+      return undefined;
+    }
+    return relay || null;
+  }
+
   async _hostMatch() {
     if (this._versus) return;
+    const relay = this._relayForMatch();
+    if (relay === undefined) return;
     this.sfx.ui();
     this._setLobbyStatus('Opening room…');
     try {
-      this._versus = await this.onVersusCreate?.();
+      this._versus = await this.onVersusCreate?.(this._versusTransport, relay);
       this.lobbyCode.value = this._versus.code;
       this.lobbyLink.textContent = this._versus.link;
       this.lobbyShare.hidden = false;
@@ -351,6 +464,8 @@ export class UI {
 
   async _joinMatch() {
     if (this._versus) return;
+    const relay = this._relayForMatch();
+    if (relay === undefined) return;
     const code = this.lobbyCode.value.trim().toUpperCase();
     if (!code) {
       this._setLobbyStatus('Enter the code your opponent gave you.', 'bad');
@@ -366,7 +481,7 @@ export class UI {
     this.sfx.ui();
     this._setLobbyStatus(`Joining ${code}…`);
     try {
-      this._versus = await this.onVersusJoin?.(code);
+      this._versus = await this.onVersusJoin?.(code, this._versusTransport, relay);
       this.lobbyShare.hidden = true;
       // Which side you ended up on is decided by who got there first, so say
       // so — otherwise the player who arrived first sits waiting for a serve
@@ -432,6 +547,31 @@ export class UI {
     this._setLobbyStatus('Left the room.');
   }
 
+  async _startPhonePair() {
+    this.sfx.unlock();
+    this.phoneStatus.textContent = 'Opening a private phone room…';
+    try {
+      const pairing = await this.onPhonePair?.();
+      if (!pairing) throw new Error('Phone pairing is unavailable.');
+      this.phoneLink.textContent = pairing.link;
+      this.phoneQr.src = await QRCode.toDataURL(pairing.link, { width: 220, margin: 1, errorCorrectionLevel: 'M' });
+      this.phoneStatus.textContent = 'Scan the code, enable motion, then calibrate.';
+      this.menu.hidden = true;
+      this.bar.hidden = false;
+      this.onStart?.(null);
+    } catch (error) {
+      this.phoneStatus.textContent = error.message || 'Could not open phone pairing.';
+      this.phoneStatus.dataset.tone = 'bad';
+    }
+  }
+
+  async _copyPhoneLink() {
+    const link = this.phoneLink.textContent;
+    if (!link) return;
+    try { await navigator.clipboard.writeText(link); this.toast('Phone link copied'); }
+    catch { this.toast('Select the link and copy it'); }
+  }
+
   // Whether a networked match is set up and ready to play.
   get inVersus() {
     return Boolean(this._versus);
@@ -480,7 +620,11 @@ export class UI {
   _activateMenu(index) {
     const entry = this._entries[index];
     if (!entry || entry.disabled) return;
-    if (entry.id === 'camera') {
+    if (entry.id === 'phone') {
+      this.settings.set('paddleSource', 'phone');
+      this.phonePair.hidden = false;
+      this._startPhonePair();
+    } else if (entry.id === 'camera') {
       this.settings.set('paddleSource', 'camera');
       this._launch(null);
     } else if (entry.id === 'desktop') {
@@ -488,8 +632,7 @@ export class UI {
       // reuse a saved webcam/hand selection when Computer was requested.
       this.settings.set('paddleSource', 'controller');
       this._launch(null);
-    }
-    else this._launch('immersive-vr');
+    } else this._launch('immersive-vr');
   }
 
   applyXRSupport(support) {
@@ -835,7 +978,7 @@ export class UI {
       else if (e.code === 'Digit5') this.chooseGame('drills');
       else if (e.code === 'KeyL') this.toggleScores();
       else if (e.code === 'Escape' || e.code === 'Backspace') {
-        if (this._screen === 'play') this.setScreen('game');
+        if (this._screen === 'play' || this._screen === 'network') this.setScreen('game');
       } else if (this._screen === 'game') {
         // Product choices map onto game settings, so their cursor must be
         // separate from the underlying Arcade/Versus setting.
@@ -845,6 +988,16 @@ export class UI {
         else if (e.code === 'Enter' || e.code === 'Space') {
           e.preventDefault();
           this.chooseGame(games[this._gameIndex]);
+        }
+      } else if (this._screen === 'network') {
+        const transports = this._transportChoices;
+        if (e.code === 'ArrowUp') {
+          this._setTransportCursor((this._transportIndex + transports.length - 1) % transports.length);
+        } else if (e.code === 'ArrowDown') {
+          this._setTransportCursor((this._transportIndex + 1) % transports.length);
+        } else if (e.code === 'Enter' || e.code === 'Space') {
+          e.preventDefault();
+          this._chooseTransport(transports[this._transportIndex]);
         }
       } else if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);

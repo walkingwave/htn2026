@@ -26,6 +26,8 @@ export const PADDLE_SOURCE = {
   // Inside a session there is a tracked hand to use instead, so the router
   // treats this as `controller` and main.js does the rest.
   CAMERA: 'camera',
+  // A phone browser sends orientation and flick gestures over the paired room.
+  PHONE: 'phone',
 };
 
 const _pos = new THREE.Vector3();

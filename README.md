@@ -23,7 +23,19 @@ npm install
 npm run dev
 ```
 
-The dev server runs on **HTTPS** (self-signed cert via `@vitejs/plugin-basic-ssl`) because WebXR requires a secure context.
+The dev server runs on **HTTPS** (self-signed cert via `@vitejs/plugin-basic-ssl`) because WebXR and phone motion permissions require a secure context.
+
+### Phone paddle (mobile branch)
+
+On the desktop start screen choose **A phone**. PaddleLab opens a short-lived room and renders a QR code. Scan it with the phone on the same Wi-Fi, tap **Enable motion controls**, then tap **Calibrate neutral pose** while holding the phone like a racket.
+
+- Phone tilt maps to the paddle's horizontal and vertical aim.
+- A quick forward acceleration is treated as a swing.
+- Paddle contacts send a short haptic pulse back to supported phones.
+- The phone page is `/` with a `?phone=<room-code>` link; it is not a native iOS app yet, so it works in Safari without App Store packaging.
+- Camera CV is intentionally optional. The desktop webcam can later validate a phone marker, but sensor input remains the authoritative low-latency control path.
+
+Use the **Network URL** printed by Vite for the QR link. `localhost` only works on the laptop itself, not on the phone.
 
 ### On desktop
 
