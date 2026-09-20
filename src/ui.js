@@ -38,6 +38,7 @@ export class UI {
     onVersusCreate,
     onVersusJoin,
     onVersusLeave,
+    onTournamentStart,
     onRunSummary,
     invitedRoom = null,
     realtimeAvailable = false,
@@ -54,6 +55,7 @@ export class UI {
       onVersusCreate,
       onVersusJoin,
       onVersusLeave,
+      onTournamentStart,
       onRunSummary,
       realtimeAvailable,
     });
@@ -64,6 +66,7 @@ export class UI {
     this._toastTimer = null;
     this._lastRevision = -1;
     this._versus = null; // { role, code, link, kind } once a room is open
+    this._tournamentOrganizer = false;
 
     this._buildMenu();
     this._buildBar();
@@ -71,8 +74,13 @@ export class UI {
     this._buildToast();
     this._buildCoachPanel();
     this._buildVersusHud();
+    this._buildTournamentHud();
     this._buildScores();
     this._buildCamPreview();
+    if (this.settings.get('game') === 'tournament') {
+      this._tournamentOrganizer = true;
+      this.menu.dataset.tournamentHost = 'true';
+    }
 
     window.addEventListener('keydown', (e) => this._onKey(e));
     this.showMenu();
@@ -132,10 +140,10 @@ export class UI {
 
       <div class="screen" data-screen="play" hidden>
         <button class="crumb" data-back>‹ <b data-crumb-game>ARCADE</b> — change game</button>
-        <div class="step__head"><span class="step__num">2</span>What do you have?</div>
+        <div class="step__head" data-input-step><span class="step__num">2</span>What do you have?</div>
         <div class="menu-list" data-list></div>
         <div class="lobby" data-lobby hidden>
-          <div class="step__head"><span class="step__num">✦</span>Set up the match</div>
+          <div class="step__head"><span class="step__num">✦</span><span data-lobby-title>Set up the match</span></div>
           <div class="lobby__row">
             <button class="key" data-lobby-host><b>▸</b>Start a room</button>
             <span class="lobby__or">or join one</span>
@@ -148,8 +156,10 @@ export class UI {
               spellcheck="false"
             />
             <button class="key" data-lobby-join><b>▸</b>Join</button>
+            <button class="key" data-lobby-start hidden><b>▶</b>Start tournament</button>
           </div>
           <div class="lobby__status" data-lobby-status></div>
+          <div class="lobby__players" data-lobby-players></div>
           <div class="lobby__share" data-lobby-share hidden>
             <span class="lobby__link" data-lobby-link></span>
             <button class="key" data-lobby-copy><b>⧉</b>Copy link</button>
@@ -187,6 +197,10 @@ export class UI {
     }
 
     this.lobby = el.querySelector('[data-lobby]');
+    this.inputStep = el.querySelector('[data-input-step]');
+    this.lobbyTitle = el.querySelector('[data-lobby-title]');
+    this.lobbyPlayers = el.querySelector('[data-lobby-players]');
+    this.lobbyStart = el.querySelector('[data-lobby-start]');
     this.lobbyCode = el.querySelector('[data-lobby-code]');
     this.lobbyStatus = el.querySelector('[data-lobby-status]');
     this.lobbyShare = el.querySelector('[data-lobby-share]');
@@ -201,6 +215,7 @@ export class UI {
       e.stopPropagation();
       if (e.code === 'Enter') this._sendLinqInvite();
     };
+    this.lobbyStart.onclick = () => this._startTournament();
     // Typing a code and pressing enter joins, which is what everyone tries.
     this.lobbyCode.onkeydown = (e) => {
       e.stopPropagation(); // the menu's arrow/enter handling isn't wanted here
@@ -233,6 +248,12 @@ export class UI {
   setScreen(name) {
     this._screen = name;
     this._screens.game.hidden = name !== 'game';
+    // Re-apply the role-specific tournament layout whenever the screen opens;
+    // this also handles returning to a remembered tournament setting where
+    // setGame() did not emit a change event.
+    if (name === 'play' && this.settings.get('game') === 'tournament') {
+      this._syncGamePick();
+    }
     this._screens.play.hidden = name !== 'play';
     if (name === 'play') {
       this._crumbGame.textContent = this._productLabel(this._productMode);
@@ -252,14 +273,22 @@ export class UI {
     this._setProductCursor(this._productChoices.indexOf(value), false);
     this._productMode = value;
     if (value === 'tournament') {
-      this.toast('Tournament mode is coming soon');
-      this.sfx.ui(false);
+      // Creating a tournament is the organizer flow. Participants enter from
+      // an invite and are switched into the player flow after joining.
+      this._tournamentOrganizer = true;
+      this.menu.dataset.tournamentHost = 'true';
+      this.setGame('tournament');
+      this.setScreen('play');
       return;
     }
 
     if (value === 'friend') {
+      this._tournamentOrganizer = false;
+      delete this.menu.dataset.tournamentHost;
       this.setGame('versus');
     } else {
+      this._tournamentOrganizer = false;
+      delete this.menu.dataset.tournamentHost;
       this.setGame('arcade');
       this.settings.set('difficulty', value === 'fly' ? 'fly' : 'normal');
       const modeType = value === 'drills' ? 'drill' : 'rally';
@@ -299,8 +328,21 @@ export class UI {
 
   _syncGamePick() {
     const versus = this.settings.get('game') === 'versus';
-    this.lobby.hidden = !versus;
-    if (versus && !this._versus) {
+    const tournament = this.settings.get('game') === 'tournament';
+    const tournamentParticipant = tournament && !this._tournamentOrganizer && Boolean(this._versus);
+    this.lobby.hidden = !versus && !tournament || tournamentParticipant;
+    this.list.hidden = tournament && !tournamentParticipant;
+    this.inputStep.hidden = tournament && !tournamentParticipant;
+    this.inputStep.innerHTML = tournamentParticipant
+      ? '<span class="step__num">2</span>How will you play?'
+      : tournament
+        ? ''
+        : '<span class="step__num">2</span>What do you have?';
+    this.lobbyTitle.textContent = tournament ? 'Invite players to your tournament' : 'Set up the match';
+    this.lobbyStart.hidden = !tournament || !this._versus || this._versus.role !== 'host';
+    if (tournament && !this._versus) {
+      this._setLobbyStatus('Create a room, then send the invite link to the players you want in the bracket.');
+    } else if (versus && !this._versus) {
       this._setLobbyStatus(
         this.realtimeAvailable
           ? 'Host a match, or enter a friend’s code.'
@@ -329,8 +371,30 @@ export class UI {
     this.lobbyStatus.dataset.tone = tone;
   }
 
+  startTournamentParticipant() {
+    if (this.settings.get('game') !== 'tournament' || !this._versus) return;
+    this.sfx.unlock();
+    this.menu.hidden = true;
+    this.bar.hidden = false;
+    this.tournamentHud.hidden = false;
+    this.onStart?.(null);
+  }
+
+  _startTournament() {
+    if (this.settings.get('game') !== 'tournament' || !this._versus) return;
+    if (this._versus.role !== 'host') return;
+    this.sfx.ui();
+    this.onTournamentStart?.();
+    // The organizer stays in the lobby/dashboard; only invited players enter
+    // the game. The host must never be forced to choose a paddle input.
+    this.tournamentHud.hidden = false;
+    this.updateTournament(this._tournamentSnapshot);
+    this._setLobbyStatus('Tournament started — you are the host. Watch the bracket for match results.');
+  }
+
   async _hostMatch() {
     if (this._versus) return;
+    this._tournamentOrganizer = this.settings.get('game') === 'tournament';
     this.sfx.ui();
     this._setLobbyStatus('Opening room…');
     try {
@@ -338,8 +402,14 @@ export class UI {
       this.lobbyCode.value = this._versus.code;
       this.lobbyLink.textContent = this._versus.link;
       this.lobbyShare.hidden = false;
+      this.lobbyStart.hidden = this.settings.get('game') !== 'tournament' || !this._tournamentOrganizer;
+      if (this._tournamentOrganizer) {
+        this.list.hidden = true;
+        this.inputStep.hidden = true;
+        this.inputStep.innerHTML = '';
+      }
       this._setLobbyStatus(
-        `Room ${this._versus.code} — waiting for your opponent. ` +
+        `${this.settings.get('game') === 'tournament' ? 'Tournament room' : 'Room'} ${this._versus.code} — waiting for players. ` +
           `Send them this link; it has to be opened on this machine’s address, not their own. ` +
           this._transportNote()
       );
@@ -367,8 +437,21 @@ export class UI {
     this.sfx.ui();
     this._setLobbyStatus(`Joining ${code}…`);
     try {
+      this._tournamentOrganizer = false;
+      delete this.menu.dataset.tournamentHost;
       this._versus = await this.onVersusJoin?.(code);
       this.lobbyShare.hidden = true;
+      this.lobbyStart.hidden = true;
+      if (this.settings.get('game') === 'tournament') {
+        // Participants choose their own input medium; the organizer does not.
+        this.lobby.hidden = true;
+        this.list.hidden = false;
+        this.inputStep.hidden = false;
+        this.inputStep.innerHTML = '<span class="step__num">2</span>How will you play?';
+        const firstPlayable = this._entries.findIndex((entry) => !entry.disabled);
+        if (firstPlayable >= 0) this._selected = firstPlayable;
+        this._renderMenu();
+      }
       // Which side you ended up on is decided by who got there first, so say
       // so — otherwise the player who arrived first sits waiting for a serve
       // that is theirs to make.
@@ -427,7 +510,11 @@ export class UI {
     this._versus = null;
     this.hideCoachPanel();
     this.lobbyShare.hidden = true;
+    this.lobbyStart.hidden = true;
+    this.lobbyPlayers.textContent = '';
+    this._tournamentOrganizer = false;
     this.versusHud.hidden = true;
+    this.tournamentHud.hidden = true;
     this.hideCountdown();
     this._hideVersusWin();
     this._setLobbyStatus('Left the room.');
@@ -487,7 +574,7 @@ export class UI {
     } else if (entry.id === 'camera-hand') {
       this.settings.set('paddleSource', 'camera-hand');
       this._launch(null);
-    } else if (entry.id === 'desktop') {
+    }    else if (entry.id === 'desktop') {
       // On desktop, the controller source falls back to the mouse. Do not
       // reuse a saved webcam/hand selection when Computer was requested.
       this.settings.set('paddleSource', 'controller');
@@ -528,12 +615,12 @@ export class UI {
     this._renderMenu();
   }
 
-  async _launch(mode) {
+  async  _launch(mode) {
     // Versus has nothing to play until a room exists, and walking into an
     // empty table wondering where the ball is would be a worse answer than
     // saying so.
-    if (this.settings.get('game') === 'versus' && !this._versus) {
-      this._setLobbyStatus('Host a match or join a code first.', 'bad');
+    if ((this.settings.get('game') === 'versus' || this.settings.get('game') === 'tournament') && !this._versus) {
+      this._setLobbyStatus('Create a room or join an invite code first.', 'bad');
       this.sfx.ui(false);
       return;
     }
@@ -542,6 +629,7 @@ export class UI {
     this.sfx.ui();
     this.menu.hidden = true;
     this.bar.hidden = false;
+    this.tournamentHud.hidden = this.settings.get('game') !== 'tournament';
     this.onStart?.(mode);
 
     if (mode) {
@@ -805,6 +893,7 @@ export class UI {
     this.settingsEl.hidden = true;
     this.scoresEl.hidden = true;
     this.versusHud.hidden = true;
+    this.tournamentHud.hidden = true;
     this.hideCountdown();
     this._hideVersusWin();
     this._versus = null;
@@ -886,6 +975,27 @@ export class UI {
   //
   // The in-world scoreboard carries the match too, but a headset is not the
   // only way to play this: on a screen the flat overlay is the scoreboard.
+
+  _buildTournamentHud() {
+    const el = document.createElement('div');
+    el.id = 'tournament-hud';
+    el.hidden = true;
+    el.innerHTML = '<div class="tournament__title">TOURNAMENT</div><div data-tournament-round></div><pre data-tournament-bracket></pre><div data-tournament-score></div>';
+    document.body.appendChild(el);
+    this.tournamentHud = el;
+  }
+
+  updateTournament(snapshot) {
+    if (!snapshot || !this.tournamentHud) return;
+    this._tournamentSnapshot = snapshot;
+    this.tournamentHud.hidden = false;
+    const current = snapshot.matches.find((match) => match.id === snapshot.currentMatchId);
+    this.tournamentHud.querySelector('[data-tournament-round]').textContent = snapshot.finished ? 'CHAMPION' : `ROUND ${current.round + 1} · FIRST TO ${snapshot.target}`;
+    this.tournamentHud.querySelector('[data-tournament-score]').textContent = current ? `${current.player1} ${current.score1} — ${current.score2} ${current.player2}` : '';
+    this.tournamentHud.querySelector('[data-tournament-bracket]').textContent = snapshot.matches
+      .map((match) => `${match.round === 0 ? 'SEMIFINAL' : match.round === 1 ? 'FINAL' : 'CHAMPIONSHIP'}  ${match.player1} ${match.score1} — ${match.score2} ${match.player2}${match.winner ? `  ✓ ${match.winner}` : ''}`)
+      .join('\\n');
+  }
 
   _buildVersusHud() {
     const el = document.createElement('div');
@@ -1108,6 +1218,13 @@ export class UI {
 
     const { game, machine } = this;
     const mode = this.settings.get('game');
+
+    if (mode === 'tournament') {
+      this.bar.querySelector('[data-bar-mode]').textContent = 'Tournament';
+      this.bar.querySelector('[data-bar-stats]').textContent = 'real bracket · no simulated results';
+      this.bar.querySelector('[data-toggle-label]').textContent = 'Pause';
+      return;
+    }
 
     if (mode === 'versus') {
       // The machine's drills mean nothing in a match; the bar carries the

@@ -69,6 +69,7 @@ export class Ball {
     this.countedHit = false;
     this.countedReturn = false;
     this.countedMiss = false;
+    this.tournamentPointCounted = false;
   }
 
   deactivate() {

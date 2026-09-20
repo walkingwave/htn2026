@@ -29,9 +29,10 @@ function lanUrlsFor(request) {
   return [...new Set(urls)];
 }
 
-// Two-player relay attached to the dev server. It keeps no game state — it
-// pairs sockets by room code and forwards whitelisted messages to the other
-// side — which is all online versus needs when both players are on one LAN.
+// Multi-player relay attached to the dev server. It keeps no game state — it
+// groups sockets by room code and forwards whitelisted messages to the other
+// participants. Versus still uses two clients; tournament rooms can invite
+// several participants before the host starts the bracket.
 function multiplayerRelay() {
   return {
     name: 'pingpong-multiplayer-relay',
@@ -45,8 +46,7 @@ function multiplayerRelay() {
         peers?.delete(client);
         if (peers?.size === 0) rooms.delete(client.room);
         else {
-          for (const peer of peers) {
-            peer.send(encodeMessage('__presence', { present: false }));
+          for (const peer of peers) {                peer.send(encodeMessage('__presence', { present: false, count: peers.size }));
           }
         }
         client.room = null;
@@ -97,7 +97,7 @@ function multiplayerRelay() {
             for (const peer of [...peers]) {
               if (peer.readyState !== 1 /* OPEN */) peers.delete(peer);
             }
-            if (peers.size >= 2) return client.close(1008, 'Room is full');
+            if (peers.size >= 8) return client.close(1008, 'Tournament room is full');
 
             // Roles are decided here, by arrival, not by which button each
             // player pressed. Two people can both press Join — with the same
@@ -113,12 +113,13 @@ function multiplayerRelay() {
               encodeMessage('__joined', {
                 role,
                 present: peers.size >= 2,
+                count: peers.size,
                 lanUrls: lanUrlsFor(request),
               })
             );
             if (peers.size >= 2) {
               for (const peer of peers) {
-                peer.send(encodeMessage('__presence', { present: true }));
+                peer.send(encodeMessage('__presence', { present: true, count: peers.size }));
               }
             }
             return;

@@ -47,6 +47,13 @@ canvas {
 }
 
 /* Start menu ------------------------------------------------------------- */
+/* Tournament organizers never choose a paddle medium. This selector is a
+   hard guard in addition to the DOM `hidden` state, so an async XR-support
+   refresh cannot repopulate the organizer's participant menu. */
+#menu[data-tournament-host] .menu-list,
+#menu[data-tournament-host] [data-input-step] {
+  display: none !important;
+}
 
 #menu {
   position: fixed;
@@ -676,6 +683,25 @@ canvas {
 }
 
 /* Bottom status line ----------------------------------------------------- */
+
+#tournament-hud {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 12;
+  min-width: min(430px, calc(100vw - 36px));
+  padding: 14px 16px;
+  border-left: 4px solid var(--red);
+  background: rgba(11, 11, 12, 0.92);
+  color: var(--paper);
+  font: 11px/1.7 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#tournament-hud[hidden] { display: none; }
+.tournament__title { color: var(--red); font-weight: 700; letter-spacing: 0.2em; }
+#tournament-hud pre { margin: 8px 0; color: var(--dim); white-space: pre-wrap; }
+#tournament-hud [data-tournament-score] { color: var(--paper); }
 
 #bar {
   position: fixed;

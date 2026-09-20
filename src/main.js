@@ -11,7 +11,7 @@ import { VRMenu } from './vrMenu.js';
 import { Paddle, DESKTOP_PADDLE_SCALE } from './paddle.js';
 import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
-import { BallMachine } from './ballMachine.js';
+import { BallMachine, MODES } from './ballMachine.js';
 import { Game, SCOREBOARD_POSITION } from './game.js';
 import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
@@ -34,6 +34,7 @@ import {
 } from './net.js';
 import { VersusMatch } from './versus.js';
 import { summarizeMatch, analyzeShot, narrate, recordProfileEvent, recordTelemetry, getProfileSummary } from './backendApi.js';
+import { Tournament } from './tournament.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
@@ -302,6 +303,12 @@ const ui = new UI({
     // A versus match is served by the host over the network, so the ball
     // machine stays down for it.
     machine.enabled = settings.get('game') !== 'versus';
+    if (settings.get('game') === 'tournament') {
+      tournament.reset();
+      const rallyIndex = MODES.findIndex((mode) => mode.type === 'rally');
+      if (rallyIndex >= 0) machine.modeIndex = rallyIndex;
+      ui.updateTournament(tournament.snapshot());
+    }
     game.reset();
     // The camera only opens once you are actually playing, not while the
     // setting sits there remembered from last time.
@@ -354,6 +361,11 @@ const ui = new UI({
     return { role: room.role, code, kind: room.kind };
   },
   onVersusLeave: () => leaveVersus(),
+  onTournamentStart: () => {
+    if (settings.get('game') !== 'tournament' || !room || netMode !== 'host') return;
+    room.send('tournament-start', { started: true });
+    ui.toast('Tournament started — watching bracket');
+  },
   // What the run was worth, read at the moment you quit. Versus is scored on
   // what you took off a real opponent; the other two on the trainer's stats.
   onRunSummary: () => ({
@@ -366,8 +378,10 @@ const ui = new UI({
     accuracy: game.accuracy,
     lessonBest: game.lessonBest,
     lessonAttempts: game.lessonAttempts,
-    pointsWon: netMode === 'guest' ? match.scoreGuest : match.scoreHost,
-    matchWon: Boolean(netMode) && match.winner === netMode,
+    pointsWon: settings.get('game') === 'tournament'
+      ? tournament.matches.reduce((total, item) => total + (item.player1?.id === 0 ? item.score1 : 0), 0)
+      : netMode === 'guest' ? match.scoreGuest : match.scoreHost,
+    matchWon: settings.get('game') === 'tournament' ? tournament.finished && tournament.matches.at(-1).winner === 0 : Boolean(netMode) && match.winner === netMode,
   }),
   // A link with ?room=CODE means someone invited you: the lobby opens on the
   // join step with the code already filled in.
@@ -393,6 +407,15 @@ physics.onBounce = (ball, event, paddle) => {
   // The coach's live drills report where your return actually went, so it
   // needs to see what happens to the ball it served.
   coach.onBallEvent(ball, event, paddle);
+
+  if (settings.get('game') === 'tournament') {
+    if (event === 'paddle' && paddle?.isOpponent) {
+      opponent.onHit();
+    } else if (event === 'floor') {
+      handleTournamentFloor(ball);
+    }
+    return;
+  }
 
   // The opponent's returns arrive through the same contact path as yours,
   // so they have to be told apart: one is an exchange in the rally, the
@@ -1335,6 +1358,7 @@ function updateDesktopBat(dt) {
 let netMode = null; // null | 'host' | 'guest'
 let room = null; // active room handle
 const match = new VersusMatch();
+const tournament = new Tournament();
 let versusBall = null; // the rally ball (host authoritative)
 let versusServeTimer = 0; // countdown before the host's next serve
 let netSendAccum = 0; // throttle for outbound state
@@ -1469,6 +1493,29 @@ function broadcastHostState() {
     ball,
     paddle: bladePacket(),
   });
+}
+
+function handleTournamentFloor(ball) {
+  if (ball.tournamentPointCounted) return;
+  ball.tournamentPointCounted = true;
+
+  // The ball landing on the near (+Z) half means the local player missed;
+  // landing on the far half means the opponent missed. The point is awarded
+  // from the real physics result, never from a simulated bracket result.    const scorer = ball.mesh.position.z > 0 ? tournament.opponent?.id : 0;
+  ball.deactivate();
+  const winner = tournament.scorePoint(scorer);
+  ui.updateTournament(tournament.snapshot());
+  game.revision++;
+
+  if (winner !== null) {
+    if (tournament.finished) {
+      machine.enabled = false;
+      ui.toast(winner === 0 ? 'Tournament champion!' : 'Tournament over');
+    } else {
+      opponent.setSkill(settings.get('difficulty'));
+      ui.toast(`Next match: ${tournament.opponent?.name ?? 'Opponent'}`);
+    }
+  }
 }
 
 function handleVersusHostBounce(ball, event) {
@@ -1663,6 +1710,11 @@ async function enterVersus(role, code) {
   room.on('state', (state) => {
     if (netMode === 'guest') applyHostState(state);
   });
+  room.on('tournament-start', () => {
+    if (settings.get('game') === 'tournament' && netMode === 'guest') {
+      ui.startTournamentParticipant();
+    }
+  });
 
   // A dead room is not the same as an absent opponent, and the player needs
   // to know which they are looking at: one resolves itself when the other
@@ -1825,13 +1877,21 @@ function applyScenario() {
 // down for it rather than it being one more drill in the rotation.
 function applyGame() {
   const coaching = settings.get('game') === 'coach';
+  const tournamentMode = settings.get('game') === 'tournament';
   machine.coachActive = coaching;
+  machine.tournamentActive = tournamentMode;
   // Clear on every switch, not just into Coach. A held ball never falls and
   // never recycles, so leaving one behind parked it in mid-air over the
   // arcade table for good and cost a slot in the pool.
   clearBalls();
   game.reset();
   coach.reset();
+  if (tournamentMode) {
+    const rallyIndex = MODES.findIndex((mode) => mode.type === 'rally');
+    if (rallyIndex >= 0) machine.modeIndex = rallyIndex;
+    tournament.reset();
+    ui.updateTournament(tournament.snapshot());
+  }
   game.revision++;
 }
 
@@ -2010,7 +2070,10 @@ function tick(dt) {
 
   // The opponent only exists in rally mode. It moves before the physics
   // step so the bat's derived velocity matches the motion this frame.
-  opponent.setActive(machine.isRallyMode && !vrMenu.open);
+  opponent.setActive(
+    machine.isRallyMode && !vrMenu.open &&
+      (settings.get('game') !== 'tournament' || !tournament.finished)
+  );
   opponent.update(dt, balls);
   if (opponent.active && settings.get('difficulty') === 'fly') flyBrainViz.render();
 
@@ -2128,7 +2191,7 @@ if (import.meta.env.DEV) {
   window.__probe = {
     balls, machine, physics, game, paddles, targetZone,
     settings, ui, vrMenu, opponent, coach, scene, camera, tick,
-    match, remotePaddle, desktopPaddle, desktopAim,
+    match, tournament, remotePaddle, desktopPaddle, desktopAim,
     get camTracker() { return camTracker; },
     set camTracker(t) { camTracker = t; }, // lets tests stand in a fake tracker
     get webcamHasLocked() { return webcamHasLocked; },
