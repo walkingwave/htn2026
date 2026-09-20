@@ -1725,8 +1725,8 @@ async function enterVersus(role, code) {
     ui.setVersusState('Disconnected — quit and open a new room');
   });
 
-  room.onOpponent((present) => {
-    ui.setVersusOpponent(present);
+  room.onOpponent((present, playerCount) => {
+    ui.setVersusOpponent(present, playerCount);
     // The first moment both players are in the room, the host puts a ball up.
     if (
       present &&

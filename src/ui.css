@@ -287,6 +287,33 @@ canvas {
 
 /* Versus lobby ----------------------------------------------------------- */
 
+.tournament-waiting {
+  max-width: 560px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--red);
+  color: var(--paper);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  line-height: 1.7;
+  text-align: left;
+}
+.tournament-waiting[hidden] {
+  display: none;
+}
+
+.tournament-room-status {
+  max-width: 560px;
+  padding-left: 12px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  line-height: 1.7;
+  text-align: left;
+}
+.tournament-room-status[hidden] {
+  display: none;
+}
+
 .lobby {
   display: flex;
   flex-direction: column;

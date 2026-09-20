@@ -78,8 +78,8 @@ class SupabaseTransport {
       if (handler) handler(payload.data);
     });
     this.channel.on('presence', { event: 'sync' }, () => {
-      const present = Object.keys(this.channel.presenceState()).length >= 2;
-      this.onOpponent?.(present);
+      const playerCount = Object.keys(this.channel.presenceState()).length;
+      this.onOpponent?.(playerCount >= 2, playerCount);
     });
     await new Promise((resolve, reject) => {
       this.channel.subscribe((status) => {
@@ -132,17 +132,17 @@ class BroadcastChannelTransport {
       if (type === '__hello') {
         this.peers.add(from);
         this.bc.postMessage({ type: '__ack', from: this.role });
-        this.onOpponent?.(this.peers.size >= 1);
+        this.onOpponent?.(this.peers.size >= 1, this.peers.size + 1);
         return;
       }
       if (type === '__ack') {
         this.peers.add(from);
-        this.onOpponent?.(this.peers.size >= 1);
+        this.onOpponent?.(this.peers.size >= 1, this.peers.size + 1);
         return;
       }
       if (type === '__bye') {
         this.peers.delete(from);
-        this.onOpponent?.(this.peers.size >= 1);
+        this.onOpponent?.(this.peers.size >= 1, this.peers.size + 1);
         return;
       }
       const handler = this.handlers[type];
@@ -225,11 +225,13 @@ class WebSocketTransport {
             clearTimeout(timeout);
             resolve();
           }
-          this.onOpponent?.(Boolean(message.data?.present));
+          const count = Math.max(1, Number(message.data?.count) || (message.data?.present ? 2 : 1));
+          this.onOpponent?.(Boolean(message.data?.present), count);
           return;
         }
         if (message.type === '__presence') {
-          this.onOpponent?.(Boolean(message.data?.present));
+          const count = Math.max(1, Number(message.data?.count) || (message.data?.present ? 2 : 1));
+          this.onOpponent?.(Boolean(message.data?.present), count);
           return;
         }
         const handler = this.handlers[message.type];
@@ -239,7 +241,7 @@ class WebSocketTransport {
         fail(new Error('LAN relay connection failed.'))
       );
       this.socket.addEventListener('close', (event) => {
-        this.onOpponent?.(false);
+        this.onOpponent?.(false, 1);
         // Distinct from "the opponent stepped away": the room itself is gone,
         // and nothing either player does will reach the other until they open
         // a new one. Said out loud rather than left as a match that quietly
@@ -296,6 +298,7 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
       : new BroadcastChannelTransport(code, role);
 
   let opponentPresent = false;
+  let playerCount = 1;
   let closed = false;
   const opponentSubscribers = new Set();
   const closedSubscribers = new Set();
@@ -304,10 +307,12 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
     closed = true;
     closedSubscribers.forEach((cb) => cb(reason));
   };
-  transport.onOpponent = (present) => {
-    if (present === opponentPresent) return;
+  transport.onOpponent = (present, count = present ? 2 : 1) => {
+    const nextCount = Math.max(1, Number(count) || 1);
+    if (present === opponentPresent && nextCount === playerCount) return;
     opponentPresent = present;
-    opponentSubscribers.forEach((cb) => cb(present));
+    playerCount = nextCount;
+    opponentSubscribers.forEach((cb) => cb(present, playerCount));
   };
 
   return {
@@ -331,7 +336,7 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
     onOpponent(cb) {
       opponentSubscribers.add(cb);
       // Fire immediately with current state so late subscribers are in sync.
-      cb(opponentPresent);
+      cb(opponentPresent, playerCount);
     },
     // The room died under us — server restarted, network dropped, laptop lid
     // closed. Only the LAN relay can tell; the other transports have nothing

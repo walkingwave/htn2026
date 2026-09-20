@@ -67,6 +67,8 @@ export class UI {
     this._lastRevision = -1;
     this._versus = null; // { role, code, link, kind } once a room is open
     this._tournamentOrganizer = false;
+    this._tournamentWaiting = false;
+    this._roomPlayerCount = 1;
 
     this._buildMenu();
     this._buildBar();
@@ -88,9 +90,17 @@ export class UI {
     // Arriving on a ?room=CODE link is an invitation, so the menu opens on
     // Versus with the code already filled in — one button from playing.
     if (invitedRoom) {
-      this.chooseGame('friend');
-      this.lobbyCode.value = invitedRoom;
-      this._setLobbyStatus(`Invited to room ${invitedRoom} — join to play.`);
+      // Tournament invite links are the player flow: connect immediately,
+      // keep the player on the medium picker, and wait for the organizer's
+      // start signal instead of making them press Join or Start.
+      // UI is constructed before main.js finishes declaring the network game
+      // state. Defer the connection until module initialization completes;
+      // otherwise enterVersus() reads the still-uninitialized versusBall let.
+      queueMicrotask(() => {
+        this._joinInvitedTournament(invitedRoom).catch((error) => {
+          console.error('Failed to join invited tournament', error);
+        });
+      });
     }
   }
 
@@ -146,16 +156,18 @@ export class UI {
           <div class="step__head"><span class="step__num">✦</span><span data-lobby-title>Set up the match</span></div>
           <div class="lobby__row">
             <button class="key" data-lobby-host><b>▸</b>Start a room</button>
-            <span class="lobby__or">or join one</span>
-            <input
-              class="lobby__code"
-              data-lobby-code
-              maxlength="6"
-              placeholder="CODE"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button class="key" data-lobby-join><b>▸</b>Join</button>
+            <span data-lobby-join-controls>
+              <span class="lobby__or">or join one</span>
+              <input
+                class="lobby__code"
+                data-lobby-code
+                maxlength="6"
+                placeholder="CODE"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button class="key" data-lobby-join><b>▸</b>Join</button>
+            </span>
             <button class="key" data-lobby-start hidden><b>▶</b>Start tournament</button>
           </div>
           <div class="lobby__status" data-lobby-status></div>
@@ -171,6 +183,8 @@ export class UI {
             </div>
           </div>
         </div>
+        <div class="tournament-waiting" data-tournament-waiting hidden></div>
+        <div class="tournament-room-status" data-tournament-room-status hidden></div>
         <div class="prompt blink">↑ ↓ SELECT · ENTER START</div>
       </div>
 
@@ -197,6 +211,9 @@ export class UI {
     }
 
     this.lobby = el.querySelector('[data-lobby]');
+    this.lobbyJoinControls = el.querySelector('[data-lobby-join-controls]');
+    this.tournamentWaiting = el.querySelector('[data-tournament-waiting]');
+    this.tournamentRoomStatus = el.querySelector('[data-tournament-room-status]');
     this.inputStep = el.querySelector('[data-input-step]');
     this.lobbyTitle = el.querySelector('[data-lobby-title]');
     this.lobbyPlayers = el.querySelector('[data-lobby-players]');
@@ -334,11 +351,12 @@ export class UI {
     this.list.hidden = tournament && !tournamentParticipant;
     this.inputStep.hidden = tournament && !tournamentParticipant;
     this.inputStep.innerHTML = tournamentParticipant
-      ? '<span class="step__num">2</span>How will you play?'
+      ? '<span class="step__num">2</span>What is your paddle medium?'
       : tournament
         ? ''
         : '<span class="step__num">2</span>What do you have?';
     this.lobbyTitle.textContent = tournament ? 'Invite players to your tournament' : 'Set up the match';
+    this.lobbyJoinControls.hidden = tournament && this._tournamentOrganizer;
     this.lobbyStart.hidden = !tournament || !this._versus || this._versus.role !== 'host';
     if (tournament && !this._versus) {
       this._setLobbyStatus('Create a room, then send the invite link to the players you want in the bracket.');
@@ -373,6 +391,8 @@ export class UI {
 
   startTournamentParticipant() {
     if (this.settings.get('game') !== 'tournament' || !this._versus) return;
+    this._tournamentWaiting = false;
+    this.tournamentWaiting.hidden = true;
     this.sfx.unlock();
     this.menu.hidden = true;
     this.bar.hidden = false;
@@ -383,6 +403,10 @@ export class UI {
   _startTournament() {
     if (this.settings.get('game') !== 'tournament' || !this._versus) return;
     if (this._versus.role !== 'host') return;
+    if (this._roomPlayerCount < 2) {
+      this._setLobbyStatus('Waiting for at least 2 players.');
+      return;
+    }
     this.sfx.ui();
     this.onTournamentStart?.();
     // The organizer stays in the lobby/dashboard; only invited players enter
@@ -403,10 +427,13 @@ export class UI {
       this.lobbyLink.textContent = this._versus.link;
       this.lobbyShare.hidden = false;
       this.lobbyStart.hidden = this.settings.get('game') !== 'tournament' || !this._tournamentOrganizer;
+      this._roomPlayerCount = 1;
+      this.lobbyStart.disabled = true;
       if (this._tournamentOrganizer) {
         this.list.hidden = true;
         this.inputStep.hidden = true;
         this.inputStep.innerHTML = '';
+        this.lobbyJoinControls.hidden = true;
       }
       this._setLobbyStatus(
         `${this.settings.get('game') === 'tournament' ? 'Tournament room' : 'Room'} ${this._versus.code} — waiting for players. ` +
@@ -418,6 +445,14 @@ export class UI {
       this._versus = null;
       this._setLobbyStatus(err.message ?? 'Could not open a room.', 'bad');
     }
+  }
+
+  async _joinInvitedTournament(code) {
+    this.chooseGame('tournament');
+    this._tournamentOrganizer = false;
+    delete this.menu.dataset.tournamentHost;
+    this.lobbyCode.value = code;
+    await this._joinMatch();
   }
 
   async _joinMatch() {
@@ -443,11 +478,17 @@ export class UI {
       this.lobbyShare.hidden = true;
       this.lobbyStart.hidden = true;
       if (this.settings.get('game') === 'tournament') {
+        this._tournamentWaiting = true;
+        this._roomPlayerCount = 1;
+        this.tournamentWaiting.textContent =
+          `JOINED ROOM ${code} · CHOOSE YOUR PADDLE MEDIUM · WAITING FOR HOST TO START`;
+        this.tournamentWaiting.hidden = false;
+        this._setTournamentRoomStatus('Waiting for at least 2 players…');
         // Participants choose their own input medium; the organizer does not.
         this.lobby.hidden = true;
         this.list.hidden = false;
         this.inputStep.hidden = false;
-        this.inputStep.innerHTML = '<span class="step__num">2</span>How will you play?';
+        this.inputStep.innerHTML = '<span class="step__num">2</span>What is your paddle medium?';
         const firstPlayable = this._entries.findIndex((entry) => !entry.disabled);
         if (firstPlayable >= 0) this._selected = firstPlayable;
         this._renderMenu();
@@ -455,10 +496,12 @@ export class UI {
       // Which side you ended up on is decided by who got there first, so say
       // so — otherwise the player who arrived first sits waiting for a serve
       // that is theirs to make.
-      this._setLobbyStatus(
+        this._setLobbyStatus(
         this._versus.role === 'host'
           ? `Room ${code} — you got there first, so you serve. Waiting for them.`
-          : `Joined ${code} — waiting for the host to serve. ${this._transportNote()}`
+          : this.settings.get('game') === 'tournament'
+            ? `Joined ${code} — waiting for the host to start the tournament. ${this._transportNote()}`
+            : `Joined ${code} — waiting for the host to serve. ${this._transportNote()}`
       );
     } catch (err) {
       console.error('Failed to join a match', err);
@@ -511,8 +554,15 @@ export class UI {
     this.hideCoachPanel();
     this.lobbyShare.hidden = true;
     this.lobbyStart.hidden = true;
+    this.lobbyStart.disabled = false;
+    this.lobbyJoinControls.hidden = false;
     this.lobbyPlayers.textContent = '';
     this._tournamentOrganizer = false;
+    this._tournamentWaiting = false;
+    this._roomPlayerCount = 1;
+    this.tournamentWaiting.hidden = true;
+    this.tournamentRoomStatus.hidden = true;
+    delete this.menu.dataset.tournamentHost;
     this.versusHud.hidden = true;
     this.tournamentHud.hidden = true;
     this.hideCountdown();
@@ -539,6 +589,8 @@ export class UI {
         `<span class="item__note">${entry.note ?? ''}</span>`;
       b.onmouseenter = () => {
         this._selected = i;
+        // Hover moves the caret only. The chosen paddle medium is committed
+        // on click, so merely browsing rows does not change the status line.
         this._syncMenuSelection();
       };
       b.onclick = () => this._activateMenu(i);
@@ -550,6 +602,16 @@ export class UI {
     [...this.list.children].forEach((child, i) =>
       child.setAttribute('aria-selected', String(i === this._selected))
     );
+  }
+
+  _syncTournamentWaiting() {
+    if (!this._tournamentWaiting || !this.tournamentWaiting || !this._versus) return;
+    const entry = this._entries[this._selected];
+    if (!entry || entry.disabled) return;
+    const note = entry.note ? ` · ${entry.note}` : '';
+    this.tournamentWaiting.textContent =
+      `PADDLE MEDIUM: ${entry.label}${note} · WAITING FOR HOST TO START`;
+    this.tournamentWaiting.hidden = false;
   }
 
   _moveMenu(delta) {
@@ -568,19 +630,38 @@ export class UI {
   _activateMenu(index) {
     const entry = this._entries[index];
     if (!entry || entry.disabled) return;
+    if (this._tournamentWaiting) this._showTournamentMedium(entry);
     if (entry.id === 'camera') {
       this.settings.set('paddleSource', 'camera');
+      if (this._tournamentWaiting) return this._showTournamentMedium(entry);
       this._launch(null);
     } else if (entry.id === 'camera-hand') {
       this.settings.set('paddleSource', 'camera-hand');
+      if (this._tournamentWaiting) return this._showTournamentMedium(entry);
       this._launch(null);
-    }    else if (entry.id === 'desktop') {
+    } else if (entry.id === 'desktop') {
       // On desktop, the controller source falls back to the mouse. Do not
       // reuse a saved webcam/hand selection when Computer was requested.
       this.settings.set('paddleSource', 'controller');
+      if (this._tournamentWaiting) return this._showTournamentMedium(entry);
       this._launch(null);
+    } else {
+      if (this._tournamentWaiting) return this._showTournamentMedium(entry);
+      this._launch('immersive-vr');
     }
-    else this._launch('immersive-vr');
+  }
+
+  _showTournamentMedium(entry) {
+    const note = entry.note ? ` · ${entry.note}` : '';
+    this.tournamentWaiting.textContent =
+      `PADDLE MEDIUM: ${entry.label}${note} · WAITING FOR HOST TO START`;
+    this.tournamentWaiting.hidden = false;
+  }
+
+  _setTournamentRoomStatus(text) {
+    if (!this.tournamentRoomStatus) return;
+    this.tournamentRoomStatus.textContent = text;
+    this.tournamentRoomStatus.hidden = false;
   }
 
   applyXRSupport(support) {
@@ -1038,12 +1119,28 @@ export class UI {
     state.dataset.live = 'false';
   }
 
-  setVersusOpponent(present) {
+  setVersusOpponent(present, playerCount = present ? 2 : 1) {
+    this._roomPlayerCount = Math.max(1, playerCount);
     this.versusHud.hidden = false;
     const state = this.versusHud.querySelector('[data-versus-state]');
     state.textContent = present ? 'Opponent connected' : 'Waiting for opponent';
     state.dataset.live = String(present);
-    if (present && !this.menu.hidden) this._setLobbyStatus('Opponent connected — start when ready.');
+    if (this.settings.get('game') === 'tournament') {
+      if (this._tournamentOrganizer && this._versus) {
+        this.lobbyStart.disabled = this._roomPlayerCount < 2;
+        this._setLobbyStatus(
+          this._roomPlayerCount < 2
+            ? 'Waiting for at least 2 players.'
+            : `${this._roomPlayerCount} players connected — start tournament when ready.`
+        );
+      } else if (this._tournamentWaiting) {
+        this._setTournamentRoomStatus(
+          this._roomPlayerCount < 2
+            ? 'Waiting for at least 2 players…'
+            : `${this._roomPlayerCount} players connected · waiting for host to start`
+        );
+      }
+    } else if (present && !this.menu.hidden) this._setLobbyStatus('Opponent connected — start when ready.');
     else if (!present && this._versus) this._setLobbyStatus('Opponent left the room.');
   }
 
