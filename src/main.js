@@ -128,6 +128,18 @@ const _headLocal = new THREE.Vector3();
 const _headEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
 function recenter() {
+  // On a screen there is no head to centre on. The camera is posed by the
+  // game, so reading it back and correcting for it just walked the player a
+  // few centimetres off the stance both ends of a versus match assume. Put
+  // them back where they should be standing instead.
+  if (!renderer.xr.isPresenting) {
+    playerRig.position.set(0, 0, netMode === 'guest' ? -PLAY_AREA.PLAYER_Z : PLAY_AREA.PLAYER_Z);
+    playerRig.rotation.y = netMode === 'guest' ? Math.PI : 0;
+    playerRig.updateMatrixWorld(true);
+    ui.toast('View reset');
+    return;
+  }
+
   // Head pose relative to the rig is exactly what the headset reports
   _headEuler.setFromQuaternion(camera.quaternion, 'YXZ');
   playerRig.rotation.y = -_headEuler.y;
@@ -478,8 +490,13 @@ const DESKTOP_REST_Z = -0.72; // blade's resting depth, a little in front of you
 // the length of your arm.
 const DESKTOP_THRUST_DEPTH = 0.14; // metres forward at the top of the swing
 const DESKTOP_THRUST_TIME = 0.1; // seconds pushing before it comes back
-const DESKTOP_THRUST_SPEED = 1.25; // m/s — the bat's own pace, not a teleport
+const DESKTOP_THRUST_SPEED = 2.4; // m/s — the bat's own pace, not a teleport
 const DESKTOP_DRIVE_PITCH = 0.3; // radians the face closes at full stroke
+const LIFT_PER_RISE = 0.22; // radians of open face per m/s of upward motion
+const LIFT_LIMIT = 0.5; // and a ceiling, so nobody scoops it into the ceiling
+const RISE_SMOOTHING = 0.75; // the bat's vertical pace, smoothed over frames
+let batRise = 0; // m/s, positive upward
+let lastAimY = 0.95;
 
 // The wheel nudges the bat nearer or further than where it would meet the
 // ball, for anyone who wants to take it early or late. A bias rather than an
@@ -487,6 +504,7 @@ const DESKTOP_DRIVE_PITCH = 0.3; // radians the face closes at full stroke
 // fighting it.
 let desktopDepthBias = 0;
 let desktopThrust = 0;
+let desktopRecover = 0; // time left before another stroke can start
 
 // Where the player is asking the *blade* to be, in rig space. Kept separate
 // from the rig's own position because the blade sits up and back from the
@@ -578,7 +596,19 @@ function poseDesktopBat() {
   // ball is how the shot is actually kept on the table, so the swing does it
   // for you, in proportion to how far through the stroke you are.
   const drive = THREE.MathUtils.clamp(desktopThrust / DESKTOP_THRUST_TIME, 0, 1);
-  desktopRig.rotation.set(-drive * DESKTOP_DRIVE_PITCH, Math.PI / 2 + desktopYaw, 0);
+
+  // And the face follows the stroke, the way a wrist does: lift the bat
+  // through the ball and it opens, so the ball goes up and over; pull down
+  // through it and it closes into a drive. Without this the angle was fixed
+  // and the player had no way to get a hanging ball over the net at all —
+  // target practice was unplayable for want of a way to lift.
+  const lift = THREE.MathUtils.clamp(batRise * LIFT_PER_RISE, -LIFT_LIMIT, LIFT_LIMIT);
+
+  desktopRig.rotation.set(
+    lift - drive * DESKTOP_DRIVE_PITCH,
+    Math.PI / 2 + desktopYaw,
+    0
+  );
   desktopRig.quaternion.setFromEuler(desktopRig.rotation);
   _bladeOffset
     .copy(desktopPaddle.mesh.getObjectByName('blade').position)
@@ -586,9 +616,71 @@ function poseDesktopBat() {
   desktopRig.position.copy(desktopAim).sub(_bladeOffset);
 }
 
+// Which depth the bat should hold for the ball in play.
+//
+// Held, not chased — a bat that tracks the ball's depth never lets it cross
+// the blade. But the resting depth only suits a ball that is coming at you.
+// Target practice lobs one straight up in front of the player, and it came
+// down twenty-odd centimetres short of the resting plane: the bat sat beyond
+// it, the ball fell past untouched, and the mode simply could not be played on
+// a screen. So the plane is picked once per ball and then held there.
+const PLANE_LOB_SPEED = 0.8; // m/s of approach below which a ball is a lob
+const LOB_STAND_OFF = 0.07; // metres the blade stands behind a hanging ball
+const _planeBallLocal = new THREE.Vector3();
+const _planeRigInverse = new THREE.Quaternion();
+let planeBall = null; // the ball the current plane was chosen for
+let planeDepth = DESKTOP_REST_Z;
+
+function desktopPlaneDepth() {
+  _planeRigInverse.copy(playerRig.quaternion).invert();
+
+  // The ball this player has to deal with: on their side, still in play.
+  let candidate = null;
+  let candidateZ = -Infinity;
+  for (const ball of balls) {
+    if (!ball.active) continue;
+    _planeBallLocal.copy(ball.mesh.position);
+    playerRig.worldToLocal(_planeBallLocal);
+    if (_planeBallLocal.z > 0.2 || _planeBallLocal.z < -1.8) continue;
+    if (_planeBallLocal.z > candidateZ) {
+      candidateZ = _planeBallLocal.z;
+      candidate = ball;
+    }
+  }
+
+  if (!candidate) {
+    planeBall = null;
+    planeDepth = DESKTOP_REST_Z;
+    return planeDepth;
+  }
+  if (candidate === planeBall) return planeDepth; // already chosen; hold it
+
+  planeBall = candidate;
+  _planeBallLocal.copy(candidate.velocity).applyQuaternion(_planeRigInverse);
+  // A ball driven at you will cross the resting plane on its own. A lob will
+  // not, so the plane moves out to where it is hanging instead.
+  // For a lob the plane sits a little nearer the player than the ball, not
+  // level with it. Level, the ball descends onto the edge of the blade and
+  // which side it is counted as arriving from — and so which way it leaves —
+  // comes down to rounding: half of them were knocked back toward the player
+  // rather than down the table. Behind it, the ball is always on the far side
+  // of the face and a stroke always sends it the way the player is facing.
+  planeDepth =
+    _planeBallLocal.z > PLANE_LOB_SPEED
+      ? DESKTOP_REST_Z
+      : THREE.MathUtils.clamp(candidateZ + LOB_STAND_OFF, -1.1, -0.25);
+  return planeDepth;
+}
+
 function swingDesktopBat() {
   if (renderer.xr.isPresenting) return;
+  // One stroke at a time. Retriggering while a swing is running kept topping
+  // the timer up, so a held mouse button parked the bat at the end of its
+  // push — stationary, which is the one thing a bat must not be when the ball
+  // arrives. Balls came off a held "swing" slower than off no swing at all.
+  if (desktopThrust > 0 || desktopRecover > 0) return;
   desktopThrust = DESKTOP_THRUST_TIME;
+  desktopRecover = DESKTOP_THRUST_TIME * 1.6; // long enough to get back
 }
 
 // Close the last few centimetres onto a ball you are already tracking.
@@ -605,9 +697,15 @@ function swingDesktopBat() {
 // Screen-space: how near the cursor has to be, as a fraction of half the
 // viewport. Roughly a thumb's width — enough to cover the parallax between a
 // ball in flight and the plane it will cross, not enough to play for you.
-const ASSIST_RANGE = 0.14;
-const ASSIST_MAX = 0.16; // metres: the furthest it will ever move the blade
-const ASSIST_SLEW = 0.9; // metres per second of correction — a drift, not a lunge
+// Two profiles: a hand is a far coarser pointer than a mouse, so the webcam
+// paddle earns a wider catch radius, a stronger pull, and a longer look-ahead
+// — it assists a player who is already roughly right, it does not play for
+// them. The mouse keeps the light touch it was tuned with.
+const ASSIST_PROFILES = {
+  mouse: { range: 0.14, max: 0.16, slew: 0.9, horizon: 0.12 },
+  webcam: { range: 0.24, max: 0.26, slew: 1.8, horizon: 0.18 },
+};
+let assist = ASSIST_PROFILES.mouse;
 const assistOffset = new THREE.Vector2();
 const _meetLocal = new THREE.Vector3();
 const _meetVel = new THREE.Vector3();
@@ -640,7 +738,7 @@ function meetIncomingBall(aim) {
     if (toPlane < 0 || toPlane > 0.34) continue;
 
     const t = toPlane / _meetVel.z;
-    if (t > 0.12) continue;
+    if (t > assist.horizon) continue;
     const x = _meetLocal.x + _meetVel.x * t;
     const y = _meetLocal.y + _meetVel.y * t - 0.5 * 9.81 * t * t;
 
@@ -675,21 +773,21 @@ function meetIncomingBall(aim) {
   // is what the ball comes off.
   let wantX = 0;
   let wantY = 0;
-  if (bestDistance <= ASSIST_RANGE) {
+  if (bestDistance <= assist.range) {
     // Strength comes from how close the cursor is on screen; the direction
     // and size of the correction are in metres, on the plane.
-    const strength = 1 - bestDistance / ASSIST_RANGE;
+    const strength = 1 - bestDistance / assist.range;
     const gapX = foundX - aim.x;
     const gapY = foundY - aim.y;
     const gap = Math.hypot(gapX, gapY);
     if (gap > 1e-4) {
-      const pull = Math.min(ASSIST_MAX, gap) * strength;
+      const pull = Math.min(assist.max, gap) * strength;
       wantX = (gapX / gap) * pull;
       wantY = (gapY / gap) * pull;
     }
   }
 
-  const step = ASSIST_SLEW / 60; // metres per frame
+  const step = assist.slew / 60; // metres per frame
   assistOffset.x += THREE.MathUtils.clamp(wantX - assistOffset.x, -step, step);
   assistOffset.y += THREE.MathUtils.clamp(wantY - assistOffset.y, -step, step);
   aim.x += assistOffset.x;
@@ -775,15 +873,28 @@ let webcamZVel = 0;
 let webcamSwingCooldown = 0;
 const _aimWorld = new THREE.Vector3();
 
+// Critically-damped chase of the hand. The tracker's own filter runs at
+// camera cadence and still passes pixel-level noise; written straight into
+// the aim that noise became visible paddle tremble. The spring eats it while
+// staying inside a frame or two of a real swing — and because a solve spike
+// now moves the aim at a bounded rate instead of teleporting it, it doubles
+// as the last line against jump glitches.
+const WEBCAM_AIM_STIFFNESS = 16; // per second
+const WEBCAM_MAX_HAND_SPEED = 6; // m/s; nothing a wrist does is faster
+
 function driveAimFromWebcam(dt) {
   const displacement = camTracker.position;
 
-  desktopAim.x = THREE.MathUtils.clamp(WEBCAM_REST.x + displacement.x, -REACH_X, REACH_X);
-  desktopAim.y = THREE.MathUtils.clamp(
+  const targetX = THREE.MathUtils.clamp(WEBCAM_REST.x + displacement.x, -REACH_X, REACH_X);
+  const targetY = THREE.MathUtils.clamp(
     WEBCAM_REST.y + displacement.y,
     REACH_Y_BOTTOM,
     REACH_Y_TOP
   );
+  const ease = 1 - Math.exp(-WEBCAM_AIM_STIFFNESS * dt);
+  const maxStep = WEBCAM_MAX_HAND_SPEED * dt;
+  desktopAim.x += THREE.MathUtils.clamp((targetX - desktopAim.x) * ease, -maxStep, maxStep);
+  desktopAim.y += THREE.MathUtils.clamp((targetY - desktopAim.y) * ease, -maxStep, maxStep);
   desktopYaw = (desktopAim.x / REACH_X) * 0.5;
 
   // Route the existing aim assist: it compares the predicted crossing with
@@ -793,7 +904,9 @@ function driveAimFromWebcam(dt) {
   playerRig.localToWorld(_aimWorld);
   _aimWorld.project(camera);
   _pointerNdc.set(_aimWorld.x, _aimWorld.y);
+  assist = ASSIST_PROFILES.webcam;
   meetIncomingBall(desktopAim);
+  assist = ASSIST_PROFILES.mouse;
   desktopAim.x = THREE.MathUtils.clamp(desktopAim.x, -REACH_X, REACH_X);
   desktopAim.y = THREE.MathUtils.clamp(desktopAim.y, REACH_Y_BOTTOM, REACH_Y_TOP);
 
@@ -921,6 +1034,7 @@ function updateDesktopBat(dt) {
   }
 
   if (desktopThrust > 0) desktopThrust -= dt;
+  if (desktopRecover > 0) desktopRecover -= dt;
 
   // The bat holds a plane and lets the ball come to it.
   //
@@ -930,13 +1044,20 @@ function updateDesktopBat(dt) {
   // A held plane is crossed by anything that reaches you, which turns the
   // problem back into aiming, and aiming is what a mouse is good at.
   const target =
-    DESKTOP_REST_Z + desktopDepthBias - (desktopThrust > 0 ? DESKTOP_THRUST_DEPTH : 0);
+    desktopPlaneDepth() + desktopDepthBias - (desktopThrust > 0 ? DESKTOP_THRUST_DEPTH : 0);
   // Moved at a hand's pace rather than snapped, so the velocity Paddle.update
   // derives from it is one a person could actually produce — that velocity is
   // what the ball comes off, and it is also what the contact test uses to tell
   // a stroke from the bat running away.
   const step = (desktopThrust > 0 ? DESKTOP_THRUST_SPEED : DESKTOP_THRUST_SPEED * 0.6) * dt;
   desktopAim.z += THREE.MathUtils.clamp(target - desktopAim.z, -step, step);
+
+  // Vertical pace of the bat, smoothed: a single frame of mouse movement is
+  // far too twitchy to set a face angle from.
+  const rise = dt > 1e-5 ? (desktopAim.y - lastAimY) / dt : 0;
+  batRise = batRise * RISE_SMOOTHING + rise * (1 - RISE_SMOOTHING);
+  lastAimY = desktopAim.y;
+
   poseDesktopBat();
 }
 
@@ -1477,22 +1598,32 @@ const CAM_EASE = 6; // per second; enough to feel attached, not glued
 
 const _camAim = new THREE.Vector3();
 const _camLook = new THREE.Vector3();
+// The camera's own, slower copy of the aim. The position lerp smoothed where
+// the camera sat, but lookAt() re-aimed it from the raw bat every frame — so
+// each millimetre of tracker noise rotated the entire view, which reads as
+// the whole screen shaking even when the bat's wobble is too small to see.
+// The camera now follows this filtered aim for position and look alike; the
+// bat itself stays on the responsive value.
+const camFollow = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
+const CAM_AIM_EASE = 3.5; // per second — deliberately lazier than the bat
 
 function updateDesktopCamera(dt) {
   if (renderer.xr.isPresenting) return; // the headset owns the camera
 
+  camFollow.lerp(desktopAim, Math.min(1, dt * CAM_AIM_EASE));
+
   // Everything here is in rig space, so the guest's flipped rig turns the
   // view around with it and nothing else has to know.
   _camAim.set(
-    desktopAim.x * CAM_FOLLOW_X,
-    CAM_HEIGHT + (desktopAim.y - 0.95) * CAM_FOLLOW_Y,
-    desktopAim.z + CAM_BEHIND
+    camFollow.x * CAM_FOLLOW_X,
+    CAM_HEIGHT + (camFollow.y - 0.95) * CAM_FOLLOW_Y,
+    camFollow.z + CAM_BEHIND
   );
   camera.position.lerp(_camAim, Math.min(1, dt * CAM_EASE));
 
   // Look down the table, biased toward the side the bat is on, so moving wide
   // opens up the angle you are actually playing into.
-  _camLook.set(desktopAim.x * 0.45, TABLE.HEIGHT + 0.12, -TABLE.LENGTH * 0.42);
+  _camLook.set(camFollow.x * 0.45, TABLE.HEIGHT + 0.12, -TABLE.LENGTH * 0.42);
   playerRig.localToWorld(_camLook);
   camera.lookAt(_camLook);
 }
