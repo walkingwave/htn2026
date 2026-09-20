@@ -447,6 +447,10 @@ function applyHandedness() {
 
 function applyScenario() {
   const index = SCENARIOS.findIndex((s) => s.id === settings.get('scenario'));
+  // Clear first: the previous scenario's ball is held at *its* contact
+  // point, which is somewhere else entirely, so switching left it hanging
+  // over the table while a second one appeared at the new spot.
+  clearBalls();
   coach.setScenario(index < 0 ? 0 : index);
 }
 

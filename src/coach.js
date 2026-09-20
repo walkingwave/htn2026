@@ -20,11 +20,29 @@ import { solveLaunchTo, solveContact } from './ballistics.js';
 // So the ribbon is a promise: trace it at the right pace and the ball lands
 // where the scenario says it will.
 
-// How long the bat travels before and after the strike. Real strokes are
-// longer, but a short path is easier to trace accurately and the contact is
-// the part being taught.
-const BACKSWING_TIME = 0.34;
-const FOLLOW_TIME = 0.3;
+// How long the bat travels before and after the strike.
+const BACKSWING_TIME = 0.26;
+const FOLLOW_TIME = 0.22;
+
+// A real stroke accelerates into the ball and eases off after it — it does
+// not travel at one speed. That matters for more than looks: length is the
+// integral of speed over time, so treating the swing as constant-speed at
+// the contact speed made each limb over a metre long, which is several
+// times a real stroke and impossible to trace.
+//
+// Modelled as a ramp up to the contact speed and a partial ramp down:
+//
+//   before:  v(t) = v·t/B          distance = ½·v·B
+//   after:   v(t) = v·(1 − 0.8·s/F) distance = 0.6·v·F
+//
+// The times below only *size* the stroke. The real ones are derived from
+// the finished curve, because the arc through the control points is longer
+// than the straight limbs used to place them — measured at 30% longer — and
+// the bat walks the arc. Normalising against the straight length made the
+// trace arrive 30% over the taught speed.
+const FOLLOW_DECAY = 0.8; // how far the bat slows by the end of the finish
+const BACK_FRACTION = 0.5; // ∫ of the ramp up, as a fraction of v·B
+const FOLLOW_FRACTION = 1 - FOLLOW_DECAY / 2; // ∫ of the ramp down, over v·F
 
 export const SCENARIOS = [
   {
@@ -34,7 +52,7 @@ export const SCENARIOS = [
     contact: [0.16, TABLE.HEIGHT + 0.2, PLAY_AREA.PLAYER_Z - 0.34],
     spin: [0, 0, 0],
     land: { x: -0.42, z: -1.0 },
-    pace: 4.4,
+    pace: 4.0,
   },
   {
     id: 'drive',
@@ -58,7 +76,7 @@ export const SCENARIOS = [
     contact: [-0.26, TABLE.HEIGHT + 0.24, PLAY_AREA.PLAYER_Z - 0.5],
     spin: [-70, 0, 0],
     land: { x: 0.25, z: -0.8 },
-    pace: 4.6,
+    pace: 3.4,
   },
 ];
 
@@ -208,26 +226,39 @@ export class Coach {
 
     // Lay the path along the swing: back along the face normal before
     // contact, on through it after.
-    // Path length has to equal speed x time, or tracing it at the
-    // demonstrated pace delivers the wrong speed at contact. Shortening the
-    // limbs "for feel" meant the bat arrived at about three quarters of the
-    // solved speed, which the shots with margin survived and the delicate
-    // push did not — it died in the net every time.
     const dir = normal.clone().multiplyScalar(Math.sign(speed) || 1);
-    const back = this.contactSpeed * BACKSWING_TIME;
-    const through = this.contactSpeed * FOLLOW_TIME;
+    const back = this.contactSpeed * BACKSWING_TIME * BACK_FRACTION;
+    const through = this.contactSpeed * FOLLOW_TIME * FOLLOW_FRACTION;
+    this.backLength = back;
+    this.throughLength = through;
 
-    const start = contactPoint.clone().addScaledVector(dir, -back);
-    const mid = contactPoint.clone().addScaledVector(dir, -back * 0.42);
-    const after = contactPoint.clone().addScaledVector(dir, through * 0.5);
-    const end = contactPoint.clone().addScaledVector(dir, through);
+    // A stroke is an arc, not a line along the face normal. It comes from
+    // low and behind, rises through the ball, and finishes high and across
+    // the body — drawn straight it read as a shove and taught the wrong
+    // shape. The arc is built by offsetting the limbs perpendicular to the
+    // swing: down-and-back before contact, up-and-across after.
+    const up = new THREE.Vector3(0, 1, 0);
+    const across = new THREE.Vector3().crossVectors(dir, up).normalize();
+    if (across.lengthSq() < 1e-6) across.set(1, 0, 0);
 
-    // Real strokes rise through the ball rather than running dead straight,
-    // and that lift is what the player should feel they are doing.
-    start.y -= 0.06;
-    mid.y -= 0.03;
-    after.y += 0.05;
-    end.y += 0.11;
+    const start = contactPoint
+      .clone()
+      .addScaledVector(dir, -back)
+      .addScaledVector(up, -back * 0.42)
+      .addScaledVector(across, back * 0.12);
+    const mid = contactPoint
+      .clone()
+      .addScaledVector(dir, -back * 0.45)
+      .addScaledVector(up, -back * 0.16);
+    const after = contactPoint
+      .clone()
+      .addScaledVector(dir, through * 0.5)
+      .addScaledVector(up, through * 0.2);
+    const end = contactPoint
+      .clone()
+      .addScaledVector(dir, through)
+      .addScaledVector(up, through * 0.52)
+      .addScaledVector(across, -through * 0.3);
 
     this.curve = new THREE.CatmullRomCurve3(
       [start, mid, contactPoint.clone(), after, end],
@@ -235,8 +266,35 @@ export class Coach {
       'catmullrom',
       0.35
     );
-    this.duration = BACKSWING_TIME + FOLLOW_TIME;
-    this.contactAt = BACKSWING_TIME / this.duration;
+
+    // Contact is the middle of five control points, so it sits at t = 0.5 in
+    // curve space — half of the 200 sampled segments.
+    const lengths = this.curve.getLengths(200);
+    const arcTotal = lengths[200] || 1e-6;
+    const arcBack = lengths[100];
+    const arcThrough = Math.max(arcTotal - arcBack, 1e-6);
+
+    // The shot was solved for a bat closing straight along the face normal,
+    // but an arcing stroke brushes *up* through the ball, so only cos(theta)
+    // of its speed drives the contact. Left uncorrected every scenario
+    // landed short by exactly that much. Swinging faster to compensate is
+    // also what a real player does to brush the ball and still get depth.
+    const tangent = this.curve.getTangentAt(arcBack / arcTotal, _tangent);
+    const along = Math.abs(tangent.dot(dir));
+    this.contactSpeed /= Math.max(along, 0.5);
+
+    // Invert the profile to get the times the arc actually needs, so peak
+    // speed lands exactly on the contact speed the shot was solved for.
+    this.arcBack = arcBack;
+    this.arcThrough = arcThrough;
+    this.arcTotal = arcTotal;
+    this.backTime = (2 * arcBack) / Math.max(this.contactSpeed, 1e-3);
+    this.followTime =
+      arcThrough / Math.max(this.contactSpeed * FOLLOW_FRACTION, 1e-3);
+    this.duration = this.backTime + this.followTime;
+    // Where contact falls along the path by distance, which is what
+    // getPointAt is parameterised by.
+    this.contactAt = arcBack / arcTotal;
     this._polyline = this.curve.getSpacedPoints(RIBBON_SAMPLES);
 
     this.group.clear();
@@ -463,6 +521,25 @@ export class Coach {
     );
   }
 
+  // How far along the path the stroke should have travelled by `t`, as a
+  // fraction of its length. This is what makes the demonstration accelerate
+  // into the ball instead of gliding at one speed.
+  _profileU(t) {
+    const v = this.contactSpeed;
+    const total = this.arcTotal;
+    if (!total || total < 1e-6) return 0;
+
+    if (t <= this.backTime) {
+      const d = (v * t * t) / (2 * Math.max(this.backTime, 1e-6));
+      return Math.min(d / total, 1);
+    }
+    const s = Math.min(t - this.backTime, this.followTime);
+    const d =
+      this.arcBack +
+      v * (s - (FOLLOW_DECAY * s * s) / (2 * Math.max(this.followTime, 1e-6)));
+    return Math.min(d / total, 1);
+  }
+
   _closestOnPath(point) {
     let best = Infinity;
     let bestT = 0;
@@ -498,7 +575,10 @@ export class Coach {
     switch (this.state) {
       case COACH_STATE.READY:
       case COACH_STATE.SCORED: {
-        this._ghostT = (this._ghostT + dt / (this.duration + 0.7)) % 1;
+        // Idle demonstration loops the same accelerating profile, with a
+        // pause at the end so the stroke reads as a stroke.
+        this._demoT = ((this._demoT ?? 0) + dt) % (this.duration + 0.8);
+        this._ghostT = this._profileU(Math.min(this._demoT, this.duration));
         this.curve.getPointAt(this._ghostT, this.ghost.position);
 
         const atStart =
@@ -519,7 +599,7 @@ export class Coach {
 
       case COACH_STATE.TRACING: {
         this._elapsed += dt;
-        this._ghostT = Math.min(this._elapsed / this.duration, 1);
+        this._ghostT = this._profileU(this._elapsed);
         this.curve.getPointAt(this._ghostT, this.ghost.position);
 
         // Progress only moves forward: the trail should fill in as the
