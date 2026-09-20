@@ -5,6 +5,14 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
 // only when testing WebXR on a device that requires a secure LAN context.
 export default defineConfig(({ mode }) => ({
   plugins: mode === 'https' ? [basicSsl()] : [],
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        paddle: 'paddle.html',
+      },
+    },
+  },
   server: {
     host: true,
     port: 5173,
