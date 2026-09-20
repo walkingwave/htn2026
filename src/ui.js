@@ -656,6 +656,15 @@ export class UI {
     this.winEl.querySelector('[data-win-exit]').onclick = () => this.quitToMenu();
   }
 
+  // Force the line under the score to say something specific — used when the
+  // room dies, where "waiting for opponent" would be a lie.
+  setVersusState(text) {
+    this.versusHud.hidden = false;
+    const state = this.versusHud.querySelector('[data-versus-state]');
+    state.textContent = text;
+    state.dataset.live = 'false';
+  }
+
   setVersusOpponent(present) {
     this.versusHud.hidden = false;
     const state = this.versusHud.querySelector('[data-versus-state]');

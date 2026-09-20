@@ -177,6 +177,7 @@ class WebSocketTransport {
     this.onOpponent = null;
     this.socket = null;
     this.lanUrls = [];
+    this.onClosed = null;
   }
 
   async connect() {
@@ -239,6 +240,11 @@ class WebSocketTransport {
       );
       this.socket.addEventListener('close', (event) => {
         this.onOpponent?.(false);
+        // Distinct from "the opponent stepped away": the room itself is gone,
+        // and nothing either player does will reach the other until they open
+        // a new one. Said out loud rather than left as a match that quietly
+        // never resumes.
+        if (settled) this.onClosed?.(event.reason);
         // The relay says why it hung up — "Room is full" above all — and that
         // is the one thing the player needs to know. Swallowing it leaves
         // them staring at a lobby that simply never connects.
@@ -290,7 +296,14 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
       : new BroadcastChannelTransport(code, role);
 
   let opponentPresent = false;
+  let closed = false;
   const opponentSubscribers = new Set();
+  const closedSubscribers = new Set();
+  transport.onClosed = (reason) => {
+    if (closed) return;
+    closed = true;
+    closedSubscribers.forEach((cb) => cb(reason));
+  };
   transport.onOpponent = (present) => {
     if (present === opponentPresent) return;
     opponentPresent = present;
@@ -320,6 +333,13 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
       // Fire immediately with current state so late subscribers are in sync.
       cb(opponentPresent);
     },
+    // The room died under us — server restarted, network dropped, laptop lid
+    // closed. Only the LAN relay can tell; the other transports have nothing
+    // to report it with.
+    onClosed(cb) {
+      closedSubscribers.add(cb);
+      if (closed) cb();
+    },
     get opponentPresent() {
       return opponentPresent;
     },
@@ -329,6 +349,7 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
     close() {
       transport.close();
       opponentSubscribers.clear();
+      closedSubscribers.clear();
     },
   };
 }

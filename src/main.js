@@ -490,13 +490,8 @@ const DESKTOP_REST_Z = -0.72; // blade's resting depth, a little in front of you
 // the length of your arm.
 const DESKTOP_THRUST_DEPTH = 0.14; // metres forward at the top of the swing
 const DESKTOP_THRUST_TIME = 0.1; // seconds pushing before it comes back
-const DESKTOP_THRUST_SPEED = 2.4; // m/s — the bat's own pace, not a teleport
+const DESKTOP_THRUST_SPEED = 1.5; // m/s — the bat's own pace, not a teleport
 const DESKTOP_DRIVE_PITCH = 0.3; // radians the face closes at full stroke
-const LIFT_PER_RISE = 0.22; // radians of open face per m/s of upward motion
-const LIFT_LIMIT = 0.5; // and a ceiling, so nobody scoops it into the ceiling
-const RISE_SMOOTHING = 0.75; // the bat's vertical pace, smoothed over frames
-let batRise = 0; // m/s, positive upward
-let lastAimY = 0.95;
 
 // The wheel nudges the bat nearer or further than where it would meet the
 // ball, for anyone who wants to take it early or late. A bias rather than an
@@ -597,18 +592,7 @@ function poseDesktopBat() {
   // for you, in proportion to how far through the stroke you are.
   const drive = THREE.MathUtils.clamp(desktopThrust / DESKTOP_THRUST_TIME, 0, 1);
 
-  // And the face follows the stroke, the way a wrist does: lift the bat
-  // through the ball and it opens, so the ball goes up and over; pull down
-  // through it and it closes into a drive. Without this the angle was fixed
-  // and the player had no way to get a hanging ball over the net at all —
-  // target practice was unplayable for want of a way to lift.
-  const lift = THREE.MathUtils.clamp(batRise * LIFT_PER_RISE, -LIFT_LIMIT, LIFT_LIMIT);
-
-  desktopRig.rotation.set(
-    lift - drive * DESKTOP_DRIVE_PITCH,
-    Math.PI / 2 + desktopYaw,
-    0
-  );
+  desktopRig.rotation.set(-drive * DESKTOP_DRIVE_PITCH, Math.PI / 2 + desktopYaw, 0);
   desktopRig.quaternion.setFromEuler(desktopRig.rotation);
   _bladeOffset
     .copy(desktopPaddle.mesh.getObjectByName('blade').position)
@@ -703,7 +687,13 @@ function swingDesktopBat() {
 // them. The mouse keeps the light touch it was tuned with.
 const ASSIST_PROFILES = {
   mouse: { range: 0.14, max: 0.16, slew: 0.9, horizon: 0.12 },
-  webcam: { range: 0.24, max: 0.26, slew: 1.8, horizon: 0.18 },
+  // The webcam profile is a live view onto the tuning panel's values.
+  webcam: {
+    get range() { return webcamTuning.assistRange; },
+    get max() { return webcamTuning.assistPull; },
+    get slew() { return webcamTuning.assistSlew; },
+    get horizon() { return webcamTuning.assistHorizon; },
+  },
 };
 let assist = ASSIST_PROFILES.mouse;
 const assistOffset = new THREE.Vector2();
@@ -823,7 +813,7 @@ function startWebcamBat() {
       ui.setCamStatus('Show the marker side of the paddle');
       ui.toast('Show the printed markers to the camera — click to set neutral');
     } else if (state === TRACKER_STATE.TRACKING) {
-      ui.setCamStatus('Tracking · flick forward to swing · V re-zeros');
+      ui.setCamStatus('Tracking · flick to swing · V re-zeros · T tunes');
     } else if (state === TRACKER_STATE.LOST) {
       ui.setCamStatus('Lost the markers — show the paddle face');
     }
@@ -864,10 +854,38 @@ function stopWebcamBat() {
 // flick the paddle toward the screen and the thrust fires, which is the
 // same motion as an actual stroke.
 const WEBCAM_REST = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
-// A push toward the webcam this fast (metres/second of raw displacement) is
-// a swing, not repositioning. Slow drift never fires it.
-const WEBCAM_SWING_SPEED = 0.35;
-const WEBCAM_SWING_COOLDOWN = 0.45;
+
+// Everything that decides how the webcam paddle FEELS, in one tunable
+// bundle. Feel cannot be dialled in from measurements alone — it depends on
+// the player's camera, room, and reach — so the panel on the T key exposes
+// these live and persists what the player settles on.
+const WEBCAM_TUNING_KEY = 'paddlelab-webcam-tuning';
+const WEBCAM_DEFAULTS = {
+  gainX: 2.2, // virtual metres per real metre, sideways
+  gainY: 1.6, // and vertically
+  stiffness: 16, // per second; higher = snappier, noisier
+  maxSpeed: 6, // m/s ceiling on paddle travel
+  swingSpeed: 0.35, // m/s push toward the camera that counts as a swing
+  swingCooldown: 0.45,
+  assistRange: 0.24, // screen fraction where the pull engages
+  assistPull: 0.26, // metres it may move the paddle
+  assistSlew: 1.8, // m/s the pull creeps in at
+  assistHorizon: 0.18, // seconds ahead the crossing is predicted
+  camEase: 3.5, // how lazily the view follows the paddle
+};
+const webcamTuning = { ...WEBCAM_DEFAULTS };
+try {
+  Object.assign(webcamTuning, JSON.parse(localStorage.getItem(WEBCAM_TUNING_KEY)) ?? {});
+} catch {
+  // corrupt entry — defaults are fine
+}
+function saveWebcamTuning() {
+  try {
+    localStorage.setItem(WEBCAM_TUNING_KEY, JSON.stringify(webcamTuning));
+  } catch {
+    // private browsing; the sliders still work for this session
+  }
+}
 let webcamPrevZ = null;
 let webcamZVel = 0;
 let webcamSwingCooldown = 0;
@@ -879,20 +897,21 @@ const _aimWorld = new THREE.Vector3();
 // staying inside a frame or two of a real swing — and because a solve spike
 // now moves the aim at a bounded rate instead of teleporting it, it doubles
 // as the last line against jump glitches.
-const WEBCAM_AIM_STIFFNESS = 16; // per second
-const WEBCAM_MAX_HAND_SPEED = 6; // m/s; nothing a wrist does is faster
-
 function driveAimFromWebcam(dt) {
   const displacement = camTracker.position;
 
-  const targetX = THREE.MathUtils.clamp(WEBCAM_REST.x + displacement.x, -REACH_X, REACH_X);
+  const targetX = THREE.MathUtils.clamp(
+    WEBCAM_REST.x + displacement.x * webcamTuning.gainX,
+    -REACH_X,
+    REACH_X
+  );
   const targetY = THREE.MathUtils.clamp(
-    WEBCAM_REST.y + displacement.y,
+    WEBCAM_REST.y + displacement.y * webcamTuning.gainY,
     REACH_Y_BOTTOM,
     REACH_Y_TOP
   );
-  const ease = 1 - Math.exp(-WEBCAM_AIM_STIFFNESS * dt);
-  const maxStep = WEBCAM_MAX_HAND_SPEED * dt;
+  const ease = 1 - Math.exp(-webcamTuning.stiffness * dt);
+  const maxStep = webcamTuning.maxSpeed * dt;
   desktopAim.x += THREE.MathUtils.clamp((targetX - desktopAim.x) * ease, -maxStep, maxStep);
   desktopAim.y += THREE.MathUtils.clamp((targetY - desktopAim.y) * ease, -maxStep, maxStep);
   desktopYaw = (desktopAim.x / REACH_X) * 0.5;
@@ -919,13 +938,85 @@ function driveAimFromWebcam(dt) {
   webcamPrevZ = displacement.z;
   webcamSwingCooldown -= dt;
   if (
-    webcamZVel > WEBCAM_SWING_SPEED &&
+    webcamZVel > webcamTuning.swingSpeed &&
     webcamSwingCooldown <= 0 &&
     camTracker.confidence > 0.4
   ) {
     swingDesktopBat();
-    webcamSwingCooldown = WEBCAM_SWING_COOLDOWN;
+    webcamSwingCooldown = webcamTuning.swingCooldown;
   }
+}
+
+// --- Webcam tuning panel ------------------------------------------------
+// Feel is personal and room-dependent, so rather than shipping one guess,
+// T opens sliders over every parameter above. Values persist per browser.
+let tuningPanel = null;
+
+const TUNING_ROWS = [
+  ['gainX', 'Reach · sideways', 1, 4, 0.1],
+  ['gainY', 'Reach · vertical', 0.8, 3, 0.1],
+  ['stiffness', 'Response (snappy ↔ smooth)', 6, 30, 1],
+  ['maxSpeed', 'Max paddle speed', 2, 10, 0.5],
+  ['swingSpeed', 'Swing flick threshold', 0.15, 0.8, 0.05],
+  ['assistRange', 'Assist · catch radius', 0.08, 0.4, 0.02],
+  ['assistPull', 'Assist · strength', 0.08, 0.4, 0.02],
+  ['assistSlew', 'Assist · speed', 0.5, 3, 0.1],
+  ['assistHorizon', 'Assist · look-ahead', 0.08, 0.3, 0.01],
+  ['camEase', 'Camera follow', 1, 8, 0.5],
+];
+
+function buildTuningPanel() {
+  const el = document.createElement('div');
+  el.id = 'webcam-tuning';
+  el.style.cssText =
+    'position:fixed;right:12px;top:12px;z-index:40;background:rgba(11,11,12,0.95);' +
+    'border-left:6px solid #e2231a;padding:14px 16px;width:280px;' +
+    'font:12px ui-monospace,monospace;color:#f2efe6;';
+  el.innerHTML =
+    '<div style="color:#e2231a;font-weight:700;margin-bottom:8px">PADDLE TUNING</div>' +
+    '<div data-rows></div>' +
+    '<button data-reset style="margin-top:8px;background:none;border:1px solid #555;' +
+    'color:#f2efe6;font:inherit;padding:3px 10px;cursor:pointer">Reset defaults</button>' +
+    '<div style="color:rgba(242,239,230,0.4);margin-top:6px">T to close · saved automatically</div>';
+  document.body.appendChild(el);
+
+  const rows = el.querySelector('[data-rows]');
+  const renderRows = () => {
+    rows.innerHTML = '';
+    for (const [key, label, min, max, step] of TUNING_ROWS) {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:block;margin:6px 0';
+      const value = document.createElement('span');
+      value.style.cssText = 'float:right;color:#e2231a';
+      value.textContent = webcamTuning[key];
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = min;
+      input.max = max;
+      input.step = step;
+      input.value = webcamTuning[key];
+      input.style.cssText = 'width:100%;accent-color:#e2231a';
+      input.oninput = () => {
+        webcamTuning[key] = Number(input.value);
+        value.textContent = input.value;
+        saveWebcamTuning();
+      };
+      row.append(label + ' ', value, input);
+      rows.appendChild(row);
+    }
+  };
+  renderRows();
+  el.querySelector('[data-reset]').onclick = () => {
+    Object.assign(webcamTuning, WEBCAM_DEFAULTS);
+    saveWebcamTuning();
+    renderRows();
+  };
+  return el;
+}
+
+function toggleTuningPanel() {
+  if (!tuningPanel) tuningPanel = buildTuningPanel();
+  else tuningPanel.hidden = !tuningPanel.hidden;
 }
 
 placeDesktopBat(window.innerWidth / 2, window.innerHeight * 0.55);
@@ -965,6 +1056,10 @@ window.addEventListener('keydown', (e) => {
 
   // Re-learn the bat's colour without leaving the game. Lighting changes as
   // you move around a room, and a key beats going back to the menu for it.
+  if (e.code === 'KeyT' && usingWebcamBat()) {
+    toggleTuningPanel();
+    return;
+  }
   if (e.code === 'KeyV' && camTracker) {
     if (camTracker.calibrateColour()) ui.toast('Neutral pose re-zeroed');
     else ui.toast('Show the markers to the camera first');
@@ -1051,12 +1146,6 @@ function updateDesktopBat(dt) {
   // a stroke from the bat running away.
   const step = (desktopThrust > 0 ? DESKTOP_THRUST_SPEED : DESKTOP_THRUST_SPEED * 0.6) * dt;
   desktopAim.z += THREE.MathUtils.clamp(target - desktopAim.z, -step, step);
-
-  // Vertical pace of the bat, smoothed: a single frame of mouse movement is
-  // far too twitchy to set a face angle from.
-  const rise = dt > 1e-5 ? (desktopAim.y - lastAimY) / dt : 0;
-  batRise = batRise * RISE_SMOOTHING + rise * (1 - RISE_SMOOTHING);
-  lastAimY = desktopAim.y;
 
   poseDesktopBat();
 }
@@ -1382,6 +1471,15 @@ async function enterVersus(role, code) {
     if (netMode === 'guest') applyHostState(state);
   });
 
+  // A dead room is not the same as an absent opponent, and the player needs
+  // to know which they are looking at: one resolves itself when the other
+  // player comes back, the other never does.
+  room.onClosed((reason) => {
+    ui.setVersusOpponent(false);
+    ui.toast(reason ? `Match ended: ${reason.toLowerCase()}` : 'Connection lost');
+    ui.setVersusState('Disconnected — quit and open a new room');
+  });
+
   room.onOpponent((present) => {
     ui.setVersusOpponent(present);
     // The first moment both players are in the room, the host puts a ball up.
@@ -1605,12 +1703,14 @@ const _camLook = new THREE.Vector3();
 // The camera now follows this filtered aim for position and look alike; the
 // bat itself stays on the responsive value.
 const camFollow = new THREE.Vector3(0, 0.95, DESKTOP_REST_Z);
+// (webcam mode reads this from the tuning panel instead)
 const CAM_AIM_EASE = 3.5; // per second — deliberately lazier than the bat
 
 function updateDesktopCamera(dt) {
   if (renderer.xr.isPresenting) return; // the headset owns the camera
 
-  camFollow.lerp(desktopAim, Math.min(1, dt * CAM_AIM_EASE));
+  const camEase = usingWebcamBat() ? webcamTuning.camEase : CAM_AIM_EASE;
+  camFollow.lerp(desktopAim, Math.min(1, dt * camEase));
 
   // Everything here is in rig space, so the guest's flipped rig turns the
   // view around with it and nothing else has to know.

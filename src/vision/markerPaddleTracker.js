@@ -63,12 +63,6 @@ const MARKER_CENTRES_MM = {
 // expresses the window as a blur radius: 1, 6, 11 ≈ OpenCV windows 3, 13, 23.
 const FALLBACK_BLUR_RADII = [1, 6, 11];
 
-// How far real paddle motion moves the virtual bat. The camera sees a few
-// tens of centimetres of hand travel; the bat needs most of a metre of
-// reach, so lateral motion is amplified.
-const HORIZONTAL_GAIN = 2.2;
-const VERTICAL_GAIN = 1.6;
-
 class OneEuroFilter {
   constructor({ minCutoff = 1, beta = 0, derivativeCutoff = 1 } = {}) {
     this.minCutoff = minCutoff;
@@ -291,9 +285,9 @@ export class MarkerPaddleTracker {
     this._lastBounds = assist ? { ...assist } : boundsAroundMarkers(boardPose.markers);
     this.confidence = boardPose.usesWholeBoardPose ? 1 : 0.7;
 
+    // Raw metres; how far real motion moves the virtual paddle is the
+    // game's decision (it is player-tunable there), not the tracker's.
     const position = boardPose.position.clone();
-    position.x *= HORIZONTAL_GAIN;
-    position.y *= VERTICAL_GAIN;
     // Depth from the marker-centre baseline where available: two centres a
     // known distance apart measure the whole board, which is far steadier
     // than one marker's apparent size.
@@ -363,8 +357,8 @@ export class MarkerPaddleTracker {
     const focal = frameWidth; // ~53° horizontal FOV assumption
     const depth = THREE.MathUtils.clamp((focal * paddleDiameter) / bounds.diameter, 0.2, 3);
     return new THREE.Vector3(
-      -((bounds.centerX - frameWidth / 2) / focal) * depth * HORIZONTAL_GAIN,
-      ((this.frame.height / 2 - bounds.centerY) / focal) * depth * VERTICAL_GAIN,
+      -((bounds.centerX - frameWidth / 2) / focal) * depth,
+      ((this.frame.height / 2 - bounds.centerY) / focal) * depth,
       -depth
     );
   }
