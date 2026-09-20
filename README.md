@@ -88,7 +88,9 @@ Scoring: a **hit** is any paddle contact, a **return** is a hit that lands back 
 
 ## Versus — play a friend
 
-Pick **Versus** on the start menu (<kbd>3</kbd>), then either host a match or type in the code a friend read out to you. Hosting shows a room code and a link; open that link on the other device and it lands on the join step with the code already filled in. Once both sides are in, pick your entry (VR, passthrough or computer) and the host serves after a three-second countdown.
+Pick **Versus** on the start menu (<kbd>3</kbd>), then either host a match or type in the code a friend read out to you. Hosting shows a room code and a link; open that link on the other device and it lands on the join step with the code already filled in. Whoever reaches the room first is the host — you can both press Join and it still works.
+
+After a three-second countdown the ball is tossed up in front of the server's bat for them to hit, the way a real point starts. A toss nobody swings at costs nothing: it is not a serve until it has been struck, so the ball is simply put up again.
 
 Games are to 11, win by 2, and the server alternates with the point — the winner of a point serves the next one.
 
