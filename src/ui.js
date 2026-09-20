@@ -77,7 +77,7 @@ export class UI {
     // Arriving on a ?room=CODE link is an invitation, so the menu opens on
     // Versus with the code already filled in — one button from playing.
     if (invitedRoom) {
-      this.setGame('versus');
+      this.chooseGame('versus');
       this.lobbyCode.value = invitedRoom;
       this._setLobbyStatus(`Invited to room ${invitedRoom} — join to play.`);
     }
@@ -89,11 +89,13 @@ export class UI {
     const el = document.createElement('div');
     el.id = 'menu';
     el.innerHTML = `
+      <div class="crt"></div>
       <div>
         <h1 class="title">Paddle<span>·</span>Lab XR<span class="blink">_</span></h1>
         <p class="tagline">Hack the North 2026</p>
       </div>
-      <div class="step">
+
+      <div class="screen" data-screen="game">
         <div class="step__head"><span class="step__num">1</span>Pick a game</div>
         <div class="game-pick">
           <button class="game" data-game="arcade">
@@ -112,45 +114,56 @@ export class UI {
             <span class="game__blurb">Play a friend on another device</span>
           </button>
         </div>
+        <div class="prompt blink">↑ ↓ SELECT · ENTER CONTINUE</div>
       </div>
-      <div class="step">
+
+      <div class="screen" data-screen="play" hidden>
+        <button class="crumb" data-back>‹ <b data-crumb-game>ARCADE</b> — change game</button>
         <div class="step__head"><span class="step__num">2</span>Pick how to play</div>
         <div class="menu-list" data-list></div>
-      </div>
-      <div class="step lobby" data-lobby hidden>
-        <div class="step__head"><span class="step__num">✦</span>Set up the match</div>
-        <div class="lobby__row">
-          <button class="key" data-lobby-host><b>▸</b>Start a room</button>
-          <span class="lobby__or">or join one</span>
-          <input
-            class="lobby__code"
-            data-lobby-code
-            maxlength="6"
-            placeholder="CODE"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <button class="key" data-lobby-join><b>▸</b>Join</button>
+        <div class="lobby" data-lobby hidden>
+          <div class="step__head"><span class="step__num">✦</span>Set up the match</div>
+          <div class="lobby__row">
+            <button class="key" data-lobby-host><b>▸</b>Start a room</button>
+            <span class="lobby__or">or join one</span>
+            <input
+              class="lobby__code"
+              data-lobby-code
+              maxlength="6"
+              placeholder="CODE"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="key" data-lobby-join><b>▸</b>Join</button>
+          </div>
+          <div class="lobby__status" data-lobby-status></div>
+          <div class="lobby__share" data-lobby-share hidden>
+            <span class="lobby__link" data-lobby-link></span>
+            <button class="key" data-lobby-copy><b>⧉</b>Copy link</button>
+            <button class="key" data-lobby-leave><b>×</b>Leave</button>
+          </div>
         </div>
-        <div class="lobby__status" data-lobby-status></div>
-        <div class="lobby__share" data-lobby-share hidden>
-          <span class="lobby__link" data-lobby-link></span>
-          <button class="key" data-lobby-copy><b>⧉</b>Copy link</button>
-          <button class="key" data-lobby-leave><b>×</b>Leave</button>
-        </div>
+        <div class="prompt blink">↑ ↓ SELECT · ENTER START</div>
       </div>
+
       <div class="hint">
-        <b>1 2 3</b> game &nbsp;·&nbsp; <b>↑ ↓</b> how to play &nbsp;·&nbsp;
-        <b>Enter</b> begin &nbsp;·&nbsp; <b>L</b> scores<br />
+        <b>Esc</b> back &nbsp;·&nbsp; <b>L</b> scores<br />
         <span data-menu-note></span>
       </div>
     `;
     document.body.appendChild(el);
     this.menu = el;
     this.list = el.querySelector('[data-list]');
+    this._screens = {
+      game: el.querySelector('[data-screen="game"]'),
+      play: el.querySelector('[data-screen="play"]'),
+    };
+    this._crumbGame = el.querySelector('[data-crumb-game]');
+    this._screen = 'game';
+    el.querySelector('[data-back]').onclick = () => this.setScreen('game');
 
     for (const btn of el.querySelectorAll('[data-game]')) {
-      btn.onclick = () => this.setGame(btn.dataset.game);
+      btn.onclick = () => this.chooseGame(btn.dataset.game);
     }
 
     this.lobby = el.querySelector('[data-lobby]');
@@ -179,6 +192,32 @@ export class UI {
     ];
     this._renderMenu();
     this._syncGamePick();
+  }
+
+  // The menu is two screens shown one after the other — pick a game, then
+  // pick how to play it — the way a cabinet asks one question at a time.
+  // One screen with both questions on it meant nobody read the second one.
+  setScreen(name) {
+    this._screen = name;
+    this._screens.game.hidden = name !== 'game';
+    this._screens.play.hidden = name !== 'play';
+    if (name === 'play') {
+      this._crumbGame.textContent = (this.settings.get('game') || 'arcade').toUpperCase();
+      // Land the cursor on something you can actually press Enter on —
+      // carrying over a selection parked on a greyed-out headset row made
+      // Enter silently do nothing.
+      if (this._entries[this._selected]?.disabled) {
+        const first = this._entries.findIndex((entry) => !entry.disabled);
+        if (first >= 0) this._selected = first;
+        this._renderMenu();
+      }
+    }
+  }
+
+  // Choosing a game answers screen one, so it also turns the page.
+  chooseGame(value) {
+    this.setGame(value);
+    this.setScreen('play');
   }
 
   // Arcade is the drills and rally; Coach teaches one stroke at a time. It
@@ -419,6 +458,7 @@ export class UI {
 
   showMenu() {
     this.menu.hidden = false;
+    if (this._screens) this.setScreen('game');
     if (this.bar) this.bar.hidden = true;
     if (this.settingsEl) this.settingsEl.hidden = true;
   }
@@ -592,11 +632,25 @@ export class UI {
         return;
       }
 
-      if (e.code === 'Digit1') this.setGame('arcade');
-      else if (e.code === 'Digit2') this.setGame('coach');
-      else if (e.code === 'Digit3') this.setGame('versus');
+      if (e.code === 'Digit1') this.chooseGame('arcade');
+      else if (e.code === 'Digit2') this.chooseGame('coach');
+      else if (e.code === 'Digit3') this.chooseGame('versus');
       else if (e.code === 'KeyL') this.toggleScores();
-      else if (e.code === 'ArrowUp') this._moveMenu(-1);
+      else if (e.code === 'Escape' || e.code === 'Backspace') {
+        if (this._screen === 'play') this.setScreen('game');
+      } else if (this._screen === 'game') {
+        // Arrows walk the cursor down the games; Enter turns the page. The
+        // cursor position IS the game setting, so there is no separate
+        // highlight state to fall out of sync.
+        const games = ['arcade', 'coach', 'versus'];
+        const at = Math.max(0, games.indexOf(this.settings.get('game')));
+        if (e.code === 'ArrowUp') this.setGame(games[(at + games.length - 1) % games.length]);
+        else if (e.code === 'ArrowDown') this.setGame(games[(at + 1) % games.length]);
+        else if (e.code === 'Enter' || e.code === 'Space') {
+          e.preventDefault();
+          this.chooseGame(games[at]);
+        }
+      } else if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);
       else if (e.code === 'Enter' || e.code === 'Space') {
         e.preventDefault();
