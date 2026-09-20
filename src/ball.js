@@ -52,6 +52,12 @@ export class Ball {
     this.countedHit = false;
     this.countedReturn = false;
     this.countedMiss = false;
+    // Versus serves wait as a vertical bounce until the server strikes them.
+    // Reset alongside every other per-rally flag so a pooled ball cannot carry
+    // a previous server's state into a drill or the next point.
+    this.isServeHold = false;
+    this.serveOwner = null;
+    this.serveBounceSpeed = null;
   }
 
   serve(position, velocity, spin) {
@@ -71,6 +77,9 @@ export class Ball {
     this.countedHit = false;
     this.countedReturn = false;
     this.countedMiss = false;
+    this.isServeHold = false;
+    this.serveOwner = null;
+    this.serveBounceSpeed = null;
   }
 
   deactivate() {

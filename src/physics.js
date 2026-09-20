@@ -120,6 +120,15 @@ export class PhysicsWorld {
     if (!onTable || p.y >= surfaceY || v.y >= 0) return;
 
     p.y = surfaceY;
+    // A pending serve is a deliberately held, vertical bounce. Re-arm its
+    // launch speed on every table contact so drag/restitution never makes it
+    // decay while the server lines up a shot.
+    if (ball.isServeHold) {
+      v.set(0, ball.serveBounceSpeed ?? 2.15, 0);
+      ball.spin.set(0, 0, 0);
+      this.onBounce?.(ball, 'table');
+      return;
+    }
     if (this._resolveContact(ball, _up, TABLE_COR, BALL.FRICTION_TABLE, null, 'table')) {
       this.onBounce?.(ball, 'table');
     }
@@ -300,6 +309,9 @@ export class PhysicsWorld {
     );
 
     ball.touchedByPaddle = true;
+    // The moment the server strikes the held ball it becomes an ordinary
+    // rally ball, with normal spin and energy loss from that point onward.
+    ball.isServeHold = false;
     ball.retireIn = null;
     this.onBounce?.(ball, 'paddle');
   }

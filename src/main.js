@@ -525,13 +525,20 @@ function startVersusServe() {
 function serveVersusBall() {
   const ball = balls.find((b) => !b.active);
   if (!ball) return;
-  // Server alternates ends: host serves toward -Z (the guest), guest toward +Z.
-  const dir = match.server === 'host' ? -1 : 1;
+  // A serve is held on the server's side as a gentle vertical bounce, rather
+  // than being fired automatically across the table.  That makes serving a
+  // deliberate stroke: the player can line up and hit it whenever ready.
+  // The ball stays within the normal desktop paddle window at either end.
+  const server = match.server;
+  const z = server === 'host' ? 1.03 : BOT_HOME_Z;
   ball.serve(
-    new THREE.Vector3((Math.random() * 2 - 1) * 0.3, TABLE.HEIGHT + 0.35, -dir * 0.8),
-    new THREE.Vector3((Math.random() * 2 - 1) * 0.6, 1.4, dir * 3.4)
+    new THREE.Vector3((Math.random() * 2 - 1) * 0.12, TABLE.HEIGHT + BALL.RADIUS, z),
+    new THREE.Vector3(0, 2.15, 0)
   );
   ball.floorCounted = false; // ad-hoc flag; Ball.serve() doesn't reset it
+  ball.isServeHold = true;
+  ball.serveOwner = server;
+  ball.serveBounceSpeed = 2.15;
   versusBall = ball;
   broadcastHostState();
 }
@@ -766,13 +773,25 @@ function startBotGame({ fly = false } = {}) {
 function predictIntercept(ball) {
   const p = ball.mesh.position.clone();
   const v = ball.velocity.clone();
-  const g = -9.81, dt = 1 / 120, surfaceY = TABLE.HEIGHT + BALL.RADIUS;
-  let bounced = false;
-  for (let i = 0; i < 600; i++) {
-    v.y += g * dt;
+  const spin = ball.spin.clone();
+  const dt = 1 / 240;
+  const surfaceY = TABLE.HEIGHT + BALL.RADIUS;
+  for (let i = 0; i < 1200; i++) {
+    // Mirror the flight forces used by PhysicsWorld.  The old prediction only
+    // knew gravity, so a real topspin/dragged return often arrived somewhere
+    // other than where the bot was waiting.
+    const speed = v.length();
+    const accel = new THREE.Vector3(0, -9.81, 0);
+    if (speed > 1e-4) {
+      accel.addScaledVector(v, -0.112 * speed);
+      accel.addScaledVector(spin.clone().cross(v), 0.0062);
+    }
+    v.addScaledVector(accel, dt);
     p.addScaledVector(v, dt);
-    if (p.y <= surfaceY && v.y < 0 && Math.abs(p.x) < TABLE.WIDTH / 2 && p.z < 0 && !bounced) {
-      p.y = surfaceY; v.y = -v.y * 0.9; bounced = true;
+    spin.multiplyScalar(Math.pow(BALL.SPIN_DECAY, dt));
+    if (p.y <= surfaceY && v.y < 0 && Math.abs(p.x) < TABLE.WIDTH / 2 && Math.abs(p.z) < TABLE.LENGTH / 2) {
+      p.y = surfaceY;
+      v.y = -v.y * 0.82;
     }
     if (p.z <= BOT_HOME_Z) break;
   }
@@ -783,11 +802,23 @@ function updateBotPaddle(dt) {
   const ball = versusBall;
   let targetX = remoteAnchor.position.x;
   let targetY = remoteAnchor.position.y;
+  const botServing = vsBot && ball?.isServeHold && ball.serveOwner === 'guest';
 
   const minX = -(TABLE.WIDTH / 2 - 0.12);
   const maxX = TABLE.WIDTH / 2 - 0.12;
   const minY = TABLE.HEIGHT + 0.05;
   const maxY = TABLE.HEIGHT + 0.45;
+
+  const incoming = ball && ball.active && ball.velocity.z < -0.05;
+  const intercept = incoming ? predictIntercept(ball) : null;
+
+  // On the bot's turn, it receives the same held, bouncing ball as a human
+  // server. Track that ball while it bounces so its release still reads as a
+  // paddle stroke rather than a ball appearing from a launcher.
+  if (botServing) {
+    targetX = ball.mesh.position.x;
+    targetY = ball.mesh.position.y;
+  }
 
   if (useFlyBrain) {
     // Connectome reservoir. Step every frame (even with no ball) so activity
@@ -801,8 +832,12 @@ function updateBotPaddle(dt) {
         }
       : { x: 0, y: TABLE.HEIGHT + 0.2, vx: 0, vy: 0, z: 0, vz: -3 };
     const out = flyBrain.step(s);
-    targetX = out.targetX;
-    if (out.targetY != null) targetY = out.targetY;
+    // Keep advancing the connectome for its controller/viz, but use the same
+    // physics-aware intercept as the standard bot for the final catch point.
+    // This prevents a model artifact (or its analytic fallback) from aiming
+    // at a pre-bounce location after the player adds spin.
+    targetX = botServing ? targetX : (intercept?.x ?? out.targetX);
+    targetY = botServing ? targetY : (intercept?.y ?? out.targetY);
 
     // Near-unbeatable: track the predicted intercept almost exactly.
     const k = Math.min(1, dt * 18);
@@ -815,6 +850,7 @@ function updateBotPaddle(dt) {
     remotePaddle.update(dt);
     remotePaddle.bladeNormal.y += 0.28;
     remotePaddle.bladeNormal.normalize();
+    releaseBotServe(ball);
     return;
   }
 
@@ -822,10 +858,9 @@ function updateBotPaddle(dt) {
   // enough to actually get there (the old gain of ~0.12/frame was too slow to
   // reach anything but a ball hit straight at it).
   const k = Math.min(1, dt * 12);
-  if (ball && ball.active && ball.velocity.z < 0) {
-    const hit = predictIntercept(ball);
-    targetX = hit.x;
-    targetY = hit.y;
+  if (intercept) {
+    targetX = intercept.x;
+    targetY = intercept.y;
   }
   targetX = THREE.MathUtils.clamp(targetX, minX, maxX);
   targetY = THREE.MathUtils.clamp(targetY, minY, maxY);
@@ -839,6 +874,20 @@ function updateBotPaddle(dt) {
   // net instead of driving flat into it.
   remotePaddle.bladeNormal.y += 0.32;
   remotePaddle.bladeNormal.normalize();
+  releaseBotServe(ball);
+}
+
+function releaseBotServe(ball) {
+  if (!vsBot || !ball?.isServeHold || ball.serveOwner !== 'guest') return;
+  // Let the ball visibly rise and fall once, then send it over the net from
+  // the bottom of its descent.  A direct velocity here avoids relying on a
+  // zero-depth, purely vertical contact that the swept paddle solver rightly
+  // treats as non-impacting.
+  if (ball.velocity.y < 0 && ball.mesh.position.y <= TABLE.HEIGHT + 0.14) {
+    ball.velocity.set((Math.random() - 0.5) * 0.45, 1.75, 3.8);
+    ball.spin.set((Math.random() - 0.5) * 35, 0, 0);
+    ball.isServeHold = false;
+  }
 }
 
 function endBotMatch(winner) {
