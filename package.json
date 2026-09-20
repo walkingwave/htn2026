@@ -15,6 +15,7 @@
     "js-aruco2": "^2.0.0",
     "openai": "^7.20.0",
     "pg": "^8.23.0",
+    "qrcode": "^1.5.4",
     "three": "^0.170.0"
   },
   "devDependencies": {

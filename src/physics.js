@@ -309,6 +309,7 @@ export class PhysicsWorld {
 
     // Struck: a held ball is released by the hit and flies from here.
     ball.frozen = false;
+    ball.serveToss = null;
     ball.touchedByPaddle = true;
     ball.lastHitBy = paddle;
     ball.retireIn = null;

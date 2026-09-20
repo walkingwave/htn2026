@@ -65,10 +65,13 @@ class PredictivePositionFilter {
 }
 
 export class MarkerPaddleTracker {
-  constructor() {
+  constructor({ assistOnly = false } = {}) {
+    this.assistOnly = assistOnly;
+    this.screenBounds = null;
     this.state = TRACKER_STATE.IDLE;
     this.error = null;
     this.confidence = 0;
+    this.markerCount = 0;
     this.fps = 0;
 
     // Latest pose as a controller would report it: `position` is the raw
@@ -88,8 +91,15 @@ export class MarkerPaddleTracker {
     this.video.playsInline = true;
     this.video.muted = true;
 
-    this.frame = document.createElement('canvas');
-    this.frameCtx = this.frame.getContext('2d', { willReadFrequently: true });
+    const frameCanvas = document.createElement('canvas');
+    if (!frameCanvas || typeof frameCanvas.getContext !== 'function') {
+      throw new Error('Canvas 2D is unavailable; phone CV needs a browser with canvas support.');
+    }
+    this.frame = frameCanvas;
+    this.frameCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
+    if (!this.frameCtx) {
+      throw new Error('Could not create a Canvas 2D context for phone CV.');
+    }
 
     this.debugCanvas = null;
     this.debugCtx = null;
@@ -123,6 +133,9 @@ export class MarkerPaddleTracker {
     if (this._stream) return;
     this._setState(TRACKER_STATE.REQUESTING);
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access is unavailable. Open the desktop arena over HTTPS or localhost.');
+      }
       this._stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'user',
@@ -168,12 +181,16 @@ export class MarkerPaddleTracker {
     this._stream = null;
     this.video.srcObject = null;
     this._predictor.reset();
+    this.markerCount = 0;
+    this.screenBounds = null;
     this._setState(TRACKER_STATE.IDLE);
   }
 
   attachDebugCanvas(canvas) {
-    this.debugCanvas = canvas;
-    this.debugCtx = canvas?.getContext('2d') ?? null;
+    this.debugCanvas = canvas ?? null;
+    this.debugCtx = typeof canvas?.getContext === 'function'
+      ? canvas.getContext('2d')
+      : null;
   }
 
   // Kept under the colour tracker's name so the game's calibration gesture —
@@ -243,9 +260,22 @@ export class MarkerPaddleTracker {
     this._lastFrameTime = now;
 
     this._lastMarkers = result.markers;
+    this.markerCount = result.markers?.filter((marker) => marker.id >= 1 && marker.id <= 4).length ?? 0;
     this._drawDebug(result);
 
+    this.screenBounds = result.assist?.bounds ?? null;
     if (!result.pose) {
+      // Phone mode only accepts a board when at least two of its known markers
+      // are visible. One black square can be a false positive; two matching
+      // IDs establish that the tracked object is our phone target.
+      const phoneMarkerLock = this.markerCount >= 2;
+      if (this.assistOnly && result.assist && phoneMarkerLock) {
+        this._missed = 0;
+        this.confidence = 0.65;
+        this.position.copy(new THREE.Vector3().fromArray(result.assist.position));
+        if (this.state !== TRACKER_STATE.TRACKING) this._setState(TRACKER_STATE.TRACKING);
+        return;
+      }
       // Brief colour fallback keeps position alive through a blurred swing,
       // but only just after a confirmed marker pose.
       if (result.recentPose && result.assist && this._neutralPosition) {

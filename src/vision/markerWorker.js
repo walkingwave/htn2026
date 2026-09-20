@@ -288,7 +288,13 @@ self.onmessage = (event) => {
   const flowMarkers = recoverWithOpticalFlow(paddleMarkers, state.detector.grey);
   rememberFrame(state.detector.grey, flowMarkers);
 
-  const assist = findPaddleByColour(imageData, state.activeFace, flowMarkers);
+  const colourAssist = findPaddleByColour(imageData, state.activeFace, flowMarkers);
+  // Phone mode uses a black/white screen target rather than the red rubber
+  // used by the physical paddle. A marker-derived bounds estimate gives the
+  // desktop a stable object centre even when no red pixels are present.
+  const phoneMarkers = flowMarkers.filter((marker) => FRONT_IDS.has(marker.id));
+  const markerAssist = phoneMarkers.length >= 2 ? boundsAroundMarkers(phoneMarkers) : null;
+  const assist = markerAssist ?? colourAssist;
   const boardPose = estimateBoardPose(flowMarkers, width, height);
 
   if (boardPose) {
@@ -663,11 +669,14 @@ function boundsAroundMarkers(markers) {
   const top = Math.min(...corners.map((c) => c.y));
   const bottom = Math.max(...corners.map((c) => c.y));
   const padding = Math.max(right - left, bottom - top) * 0.35;
+  const width = right - left + padding * 2;
+  const height = bottom - top + padding * 2;
   return {
     left: left - padding,
     top: top - padding,
-    width: right - left + padding * 2,
-    height: bottom - top + padding * 2,
+    width,
+    height,
+    diameter: Math.max(width, height),
     centerX: (left + right) / 2,
     centerY: (top + bottom) / 2,
   };

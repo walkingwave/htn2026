@@ -40,6 +40,7 @@ export class Ball {
     // the ball exactly where the stroke should meet it, which removes the
     // question of timing a moving feed to a swing entirely.
     this.frozen = false;
+    this.serveToss = null;
 
     // Scoring bookkeeping, owned here so that serving a ball is the single
     // point where a ball's life resets. Hanging these off the retire path
@@ -64,6 +65,7 @@ export class Ball {
     this.touchedByPaddle = false;
     this.isFeed = false;
     this.frozen = false;
+    this.serveToss = null;
     this.scoredTarget = false;
     this.awaitingOutcome = false; // struck, but not yet landed anywhere
     this.countedHit = false;
@@ -74,6 +76,28 @@ export class Ball {
   deactivate() {
     this.active = false;
     this.mesh.visible = false;
+    this.serveToss = null;
+  }
+
+  // A serve waits for a real stroke rather than falling away under gravity.
+  // It bobs vertically at a fixed x/z point, giving every input method the
+  // same clear, repeatable ball to hit.
+  holdForServe(position, { amplitude = 0.12, angularSpeed = 4.2 } = {}) {
+    this.serve(position, _axis.set(0, 0, 0));
+    this.frozen = true;
+    this.serveToss = {
+      centerY: position.y,
+      amplitude,
+      angularSpeed,
+      phase: Math.PI / 2,
+    };
+  }
+
+  updateServeToss(dt) {
+    if (!this.serveToss || !this.frozen) return;
+    const toss = this.serveToss;
+    toss.phase += toss.angularSpeed * dt;
+    this.mesh.position.y = toss.centerY + toss.amplitude * Math.sin(toss.phase);
   }
 
   // Spins the mesh so the painted seam and logo actually rotate. Without this

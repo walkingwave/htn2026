@@ -220,7 +220,7 @@ export class UI {
       { id: 'vr', label: 'A VR headset', note: 'headset', disabled: true },
       { id: 'camera', label: 'A ping pong paddle', note: 'webcam', disabled: false },
       { id: 'camera-hand', label: 'A hand', note: 'webcam · hand tracking', disabled: false },
-      { id: 'phone', label: 'A phone', note: 'beta', disabled: true },
+      { id: 'phone', label: 'A phone', note: 'motion + haptics', disabled: false },
       { id: 'desktop', label: 'Nothing — just the mouse', note: '', disabled: false },
     ];
     this._renderMenu();
@@ -481,7 +481,11 @@ export class UI {
   _activateMenu(index) {
     const entry = this._entries[index];
     if (!entry || entry.disabled) return;
-    if (entry.id === 'camera') {
+    if (entry.id === 'phone') {
+      this.settings.set('paddleSource', 'phone');
+      this.phonePair.hidden = false;
+      this._startPhonePair();
+    } else if (entry.id === 'camera') {
       this.settings.set('paddleSource', 'camera');
       this._launch(null);
     } else if (entry.id === 'camera-hand') {

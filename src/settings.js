@@ -35,6 +35,7 @@ export const OPTIONS = {
     { label: 'Real paddle', value: 'hand' },
     { label: 'Webcam paddle', value: 'camera' },
     { label: 'Hand tracking', value: 'camera-hand' },
+    { label: 'Phone paddle', value: 'phone' },
   ],
   // Arcade is the drills and rally; Coach teaches strokes one at a time;
   // Versus is a networked match against another player.

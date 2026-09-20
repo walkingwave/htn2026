@@ -30,17 +30,26 @@ export function makeRoomCode() {
   return code;
 }
 
-export function roomLinkFor(code, origin = window.location.origin) {
+export function roomLinkFor(code, origin = window.location.origin, relay = null) {
   const url = new URL(origin);
   url.search = '';
   url.hash = '';
   url.searchParams.set('room', code);
+  if (relay) url.searchParams.set('relay', relay);
   return url.toString();
 }
 
 export function roomFromUrl() {
   try {
     return new URL(window.location.href).searchParams.get('room');
+  } catch {
+    return null;
+  }
+}
+
+export function roomRelayFromUrl() {
+  try {
+    return new URL(window.location.href).searchParams.get('relay');
   } catch {
     return null;
   }
@@ -109,6 +118,157 @@ class SupabaseTransport {
   }
 }
 
+// Supabase only introduces the two browsers. Once the SDP exchange is done,
+// game packets use a WebRTC data channel directly between them. On the same
+// Wi-Fi this resolves to a LAN candidate automatically, with no host process
+// or IP address for players to manage.
+class WebRTCTransport {
+  constructor(code, role) {
+    this.code = code;
+    this.role = role;
+    this.handlers = {};
+    this.onOpponent = null;
+    this.onClosed = null;
+    this.channel = null;
+    this.pc = null;
+    this.data = null;
+    this.pendingCandidates = [];
+    this.offerStarted = false;
+    this.connected = false;
+  }
+
+  async connect() {
+    this.channel = supabase.channel(`${CHANNEL_PREFIX}${this.code}`, {
+      config: { broadcast: { self: false }, presence: { key: this.role } },
+    });
+    this.channel.on('broadcast', { event: 'signal' }, ({ payload }) => {
+      this._handleSignal(payload).catch((error) => {
+        console.error('WebRTC signalling failed', error);
+        this.onClosed?.(error.message);
+      });
+    });
+    this.channel.on('presence', { event: 'sync' }, () => this._onPresence());
+
+    await new Promise((resolve, reject) => {
+      this.channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          this.channel.track({ role: this.role, at: Date.now() });
+          resolve();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          reject(new Error('Realtime signalling failed — check Supabase Realtime.'));
+        }
+      });
+    });
+  }
+
+  _onPresence() {
+    const peers = Object.values(this.channel.presenceState()).flat();
+    const guestPresent = peers.some((peer) => peer.role === 'guest');
+    if (this.role === 'host' && guestPresent && !this.offerStarted) {
+      this.offerStarted = true;
+      this._startOffer().catch((error) => {
+        console.error('WebRTC offer failed', error);
+        this.onClosed?.(error.message);
+      });
+    }
+    if (!guestPresent && !this.connected) this.offerStarted = false;
+  }
+
+  _createPeer(host) {
+    if (this.pc) return this.pc;
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+    this.pc = pc;
+    pc.onicecandidate = ({ candidate }) => {
+      if (candidate) this._signal('candidate', candidate.toJSON());
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') this._setConnected(true);
+      if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+        this._setConnected(false);
+      }
+    };
+    if (host) this._attachDataChannel(pc.createDataChannel('flyball'));
+    else pc.ondatachannel = ({ channel }) => this._attachDataChannel(channel);
+    return pc;
+  }
+
+  _attachDataChannel(channel) {
+    this.data = channel;
+    channel.onopen = () => this._setConnected(true);
+    channel.onclose = () => this._setConnected(false);
+    channel.onmessage = ({ data }) => {
+      const message = decodeMessage(String(data));
+      if (!message) return;
+      const handler = this.handlers[message.type];
+      if (handler) handler(message.data);
+    };
+  }
+
+  _setConnected(present) {
+    if (present === this.connected) return;
+    this.connected = present;
+    this.onOpponent?.(present);
+  }
+
+  async _startOffer() {
+    const pc = this._createPeer(true);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    this._signal('offer', pc.localDescription);
+  }
+
+  _signal(kind, data) {
+    this.channel?.send({
+      type: 'broadcast',
+      event: 'signal',
+      payload: { kind, data },
+    });
+  }
+
+  async _handleSignal(signal) {
+    if (!signal?.kind) return;
+    if (signal.kind === 'offer' && this.role === 'guest') {
+      const pc = this._createPeer(false);
+      await pc.setRemoteDescription(signal.data);
+      await this._flushCandidates();
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      this._signal('answer', pc.localDescription);
+    } else if (signal.kind === 'answer' && this.role === 'host' && this.pc) {
+      await this.pc.setRemoteDescription(signal.data);
+      await this._flushCandidates();
+    } else if (signal.kind === 'candidate') {
+      if (this.pc?.remoteDescription) await this.pc.addIceCandidate(signal.data);
+      else this.pendingCandidates.push(signal.data);
+    }
+  }
+
+  async _flushCandidates() {
+    const candidates = this.pendingCandidates.splice(0);
+    for (const candidate of candidates) await this.pc.addIceCandidate(candidate);
+  }
+
+  send(type, data) {
+    if (this.data?.readyState === 'open') this.data.send(encodeMessage(type, data));
+  }
+
+  on(type, cb) {
+    this.handlers[type] = cb;
+  }
+
+  close() {
+    this._setConnected(false);
+    this.data?.close();
+    this.pc?.close();
+    if (this.channel) supabase.removeChannel(this.channel);
+    this.data = null;
+    this.pc = null;
+    this.channel = null;
+  }
+}
+
 class BroadcastChannelTransport {
   constructor(code, role) {
     this.code = code;
@@ -170,7 +330,7 @@ class BroadcastChannelTransport {
 }
 
 class WebSocketTransport {
-  constructor(code, role) {
+  constructor(code, role, relay = null) {
     this.code = code;
     this.role = role;
     this.handlers = {};
@@ -178,14 +338,14 @@ class WebSocketTransport {
     this.socket = null;
     this.lanUrls = [];
     this.onClosed = null;
+    this.relay = relay;
   }
 
   async connect() {
     if (typeof WebSocket === 'undefined') {
       throw new Error('WebSockets are unavailable in this browser.');
     }
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.socket = new WebSocket(`${protocol}//${window.location.host}${WS_PATH}`);
+    this.socket = new WebSocket(relaySocketUrl(this.relay));
     await new Promise((resolve, reject) => {
       let settled = false;
       const fail = (error) => {
@@ -275,22 +435,25 @@ class WebSocketTransport {
 }
 
 // Create a room handle. role is 'host' (created the game) or 'guest' (joined).
-export function createRoom({ code, role, transport: requested = 'auto' }) {
-  if (requested === 'supabase' && !supabase) {
+export function createRoom({ code, role, transport: requested = 'auto', relay = null }) {
+  if ((requested === 'supabase' || requested === 'webrtc') && !supabase) {
     throw new Error(
       'Online multiplayer needs VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
     );
   }
-  // In dev the page is served by the Vite host, which carries the relay, so
-  // that is the transport that works between a laptop and a headset on the
-  // same network without any account or key.
+  const useWebRTC =
+    requested === 'webrtc' || (requested === 'auto' && Boolean(supabase));
+  // Keep the Vite relay as a no-account development fallback. Production
+  // matches use Supabase for signalling and direct WebRTC for game packets.
   const useWebSocket =
-    requested === 'websocket' || (requested === 'auto' && import.meta.env.DEV);
+    requested === 'websocket' ||
+    (requested === 'auto' && !useWebRTC && import.meta.env.DEV);
   const useSupabase =
-    requested === 'supabase' ||
-    (requested === 'auto' && !useWebSocket && Boolean(supabase));
-  const transport = useWebSocket
-    ? new WebSocketTransport(code, role)
+    requested === 'supabase';
+  const transport = useWebRTC
+    ? new WebRTCTransport(code, role)
+    : useWebSocket
+    ? new WebSocketTransport(code, role, relay)
     : useSupabase
       ? new SupabaseTransport(code, role)
       : new BroadcastChannelTransport(code, role);
@@ -318,7 +481,7 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
     get role() {
       return transport.role ?? role;
     },
-    kind: useWebSocket ? 'websocket' : useSupabase ? 'supabase' : 'local',
+    kind: useWebRTC ? 'webrtc' : useWebSocket ? 'websocket' : useSupabase ? 'supabase' : 'local',
     async connect() {
       await transport.connect();
     },
@@ -352,4 +515,22 @@ export function createRoom({ code, role, transport: requested = 'auto' }) {
       closedSubscribers.clear();
     },
   };
+}
+
+function relaySocketUrl(relay) {
+  if (!relay) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${WS_PATH}`;
+  }
+
+  const raw = /^wss?:\/\//i.test(relay) || /^https?:\/\//i.test(relay)
+    ? relay
+    : `wss://${relay}`;
+  const url = new URL(raw);
+  url.protocol = url.protocol === 'http:' ? 'ws:' : 'wss:';
+  if (!url.port) url.port = '5173';
+  url.pathname = WS_PATH;
+  url.search = '';
+  url.hash = '';
+  return url.toString();
 }
