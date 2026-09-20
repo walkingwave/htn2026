@@ -337,7 +337,7 @@ export class UI {
         this._setLobbyStatus(
           this.realtimeAvailable
             ? 'Create or join a four-player room. The host starts the bracket when all four arrive.'
-            : 'Create or join a four-player room on this Wi-Fi. The host starts the bracket when all four arrive.'
+            : this._realtimeSetupMessage('tournament')
         );
       }
       this._syncTournamentStartButton();
@@ -351,7 +351,7 @@ export class UI {
         this._setLobbyStatus(
           this.realtimeAvailable
             ? 'Host a match, or enter a friend’s code.'
-            : 'Host a match, or enter a friend’s code. Without Supabase keys you can play anyone on this Wi-Fi.'
+            : this._realtimeSetupMessage('versus')
         );
       }
     }
@@ -368,16 +368,29 @@ export class UI {
   // two players on two different ones.
   _transportNote() {
     const kind = this._versus?.kind;
+    if (kind === 'local') {
+      return 'Same-browser fallback: this build needs Supabase Realtime before another device can join.';
+    }
     if (kind === 'webrtc') return 'Connected directly over WebRTC.';
     if (kind === 'websocket') return 'Connected over this Wi-Fi.';
     if (kind === 'supabase') return 'Connected over the internet.';
-    if (kind === 'local') return 'Local only — this connects tabs on this machine, not another device.';
     return '';
   }
 
   _setLobbyStatus(text, tone = '') {
     this.lobbyStatus.textContent = text;
     this.lobbyStatus.dataset.tone = tone;
+  }
+
+  _realtimeSetupMessage(mode) {
+    if (import.meta.env.DEV) {
+      return mode === 'tournament'
+        ? 'Create or join a four-player room on this Wi-Fi. Share the host’s LAN link; the host starts once all four arrive.'
+        : 'Host a match, or enter a friend’s code. This development server can relay to devices on this Wi-Fi.';
+    }
+    return mode === 'tournament'
+      ? 'This build has no Supabase Realtime configuration, so a tournament only works between tabs in this browser.'
+      : 'This build has no Supabase Realtime configuration, so a friend match only works between tabs in this browser.';
   }
 
   async _hostMatch() {
@@ -392,8 +405,7 @@ export class UI {
       this.lobbyShare.hidden = false;
       this._setLobbyStatus(
         `Room ${this._versus.code} — waiting for your opponent. ` +
-          `Send them this link; it has to be opened on this machine’s address, not their own. ` +
-          this._transportNote()
+          `${this._shareInstruction()} ${this._transportNote()}`
       );
     } catch (err) {
       console.error('Failed to host a match', err);
@@ -427,7 +439,7 @@ export class UI {
       // that is theirs to make.
       this._setLobbyStatus(
         this._versus.role === 'host'
-          ? `Room ${code} — you got there first, so you serve. Waiting for them.`
+          ? `Room ${code} — you got there first, so you serve. ${this._shareInstruction()} ${this._transportNote()}`
           : `Joined ${code} — waiting for the host to serve. ${this._transportNote()}`
       );
     } catch (err) {
@@ -445,6 +457,20 @@ export class UI {
     if (kind === 'websocket') return 'Bracket synced over this Wi-Fi.';
     if (kind === 'local') return 'Local-only bracket — open it in four tabs on this device.';
     return '';
+  }
+
+  _shareInstruction() {
+    const kind = this._versus?.kind;
+    if (kind === 'websocket') {
+      return 'Share the link exactly as shown while both devices are on this Wi-Fi.';
+    }
+    if (kind === 'webrtc' || kind === 'supabase') {
+      return 'Share the link — your friend can open it from the deployed site on their own device.';
+    }
+    if (kind === 'local') {
+      return 'This build only connects tabs in this browser; use a Supabase-configured deployed build for another device.';
+    }
+    return 'Share the room code or link with your opponent.';
   }
 
   _syncTournamentStartButton() {
