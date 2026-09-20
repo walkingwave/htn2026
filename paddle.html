@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Webcam Paddle Pose Test</title>
+    <style>
+      :root { color: #eef3ff; background: #0b1020; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body { padding: 24px; }
+      main { max-width: 1240px; margin: 0 auto; }
+      h1 { margin: 0; font-size: clamp(1.45rem, 3vw, 2.2rem); }
+      .intro { color: #aebbd4; margin: 8px 0 18px; }
+      .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+      button, select, input, .back-link { border: 1px solid #354264; background: #171f35; color: inherit; border-radius: 8px; padding: 9px 11px; font: inherit; }
+      button { cursor: pointer; background: #4a65d6; border-color: #6e87f2; font-weight: 650; }
+      button:hover { background: #5a73e6; }
+      button:disabled { cursor: default; opacity: .72; }
+      .back-link { margin-left: auto; color: #c6d1e8; text-decoration: none; }
+      .back-link:hover { border-color: #6e87f2; }
+      label { display: flex; align-items: center; gap: 7px; color: #c6d1e8; font-size: .9rem; }
+      input { width: 5.2rem; }
+      #status { display: inline-flex; flex-basis: 100%; width: fit-content; align-items: center; border-radius: 999px; padding: 7px 10px; background: #222b43; color: #c7d0e2; font-size: .88rem; }
+      #status.tracking { background: #124831; color: #b8f4d0; }
+      #status.error { background: #5a2330; color: #ffd0d7; }
+      #confidence { display: inline-flex; align-items: center; border-radius: 999px; padding: 7px 10px; background: #222b43; color: #c7d0e2; font-size: .88rem; }
+      #confidence.high { background: #124831; color: #b8f4d0; }
+      #confidence.medium { background: #5b4817; color: #ffe6a6; }
+      #confidence.low { background: #5a2330; color: #ffd0d7; }
+      .views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      .panel { background: #12192b; border: 1px solid #2a3654; border-radius: 14px; overflow: hidden; }
+      .panel h2 { font-size: 1rem; padding: 13px 14px; margin: 0; border-bottom: 1px solid #2a3654; }
+      .stage { position: relative; aspect-ratio: 4 / 3; background: #060a13; overflow: hidden; }
+      #video, #video-overlay, #virtual-view canvas { width: 100%; height: 100%; display: block; object-fit: cover; }
+      #video, #video-overlay { transform: scaleX(-1); }
+      #video-overlay { position: absolute; inset: 0; pointer-events: none; }
+      #virtual-view { position: absolute; inset: 0; }
+      .legend { margin: 0; min-height: 76px; padding: 12px 14px; color: #aebbd4; font-size: .9rem; line-height: 1.45; }
+      details { margin-top: 16px; border: 1px solid #2a3654; border-radius: 12px; background: #12192b; padding: 12px 14px; color: #c6d1e8; }
+      summary { cursor: pointer; font-weight: 650; }
+      details ul { margin: 10px 0 2px; padding-left: 22px; color: #aebbd4; line-height: 1.5; }
+      @media (max-width: 760px) { body { padding: 14px; } .views { grid-template-columns: 1fr; } .back-link { margin-left: 0; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Webcam Paddle Pose Test</h1>
+      <p class="intro">Show the webcam either marker board: front IDs 1–4 or back IDs 5–8. The virtual paddle should match its position and angle.</p>
+      <div class="toolbar">
+        <button id="start-camera">Start webcam</button>
+        <button id="calibrate" disabled>Calibrate neutral pose</button>
+        <button id="auto-calibrate" disabled>Auto-calibrate camera</button>
+        <label>Camera <select id="camera-select"><option value="">Default camera</option></select></label>
+        <label>Dictionary <select id="dictionary"><option value="MATLAB_DICT_4X4_250">MATLAB DICT_4X4_250</option></select></label>
+        <label>Marker size <input id="marker-size" type="number" min="1" max="20" step="0.1" value="3" /> cm</label>
+        <label>Focal scale <input id="focal-scale" type="number" min="0.5" max="2" step="0.01" value="1" /></label>
+        <label>Lens k1 <input id="lens-k1" type="number" min="-1" max="1" step="0.01" value="0" /></label>
+        <a class="back-link" href="/">Back to game</a>
+        <span id="confidence" class="low">Confidence: waiting for markers</span>
+        <span id="status">Camera not started</span>
+      </div>
+      <section class="views">
+        <article class="panel"><h2>Webcam — detected marker corners</h2><div class="stage"><video id="video" playsinline muted></video><canvas id="video-overlay"></canvas></div><p class="legend">Cyan is the colour-paddle assist: red for IDs 1–4, black for IDs 5–8. Dashed amber boxes are square candidates.</p></article>
+        <article class="panel"><h2>Virtual paddle — player point of view</h2><div class="stage"><div id="virtual-view"></div></div><p class="legend">Moving the real paddle toward the webcam moves the virtual paddle farther into the scene, matching your point of view.</p></article>
+      </section>
+      <details>
+        <summary>Physical target checklist</summary>
+        <ul>
+          <li>Keep a white quiet border around every black marker and make the sheets lie flat.</li>
+          <li>Use matte tape and even front lighting to avoid reflections over the marker cells.</li>
+          <li>Keep at least two markers visible for stable tracking; four visible markers give the best pose.</li>
+          <li>For automatic camera calibration, keep all four markers visible and slowly tilt the board until 24 samples are collected.</li>
+          <li>Tune focal scale if depth or tilt is consistently exaggerated; use lens k1 only to correct edge-of-frame lens curvature.</li>
+        </ul>
+      </details>
+    </main>
+    <script type="module" src="/src/webcamTest.js"></script>
+  </body>
+</html>

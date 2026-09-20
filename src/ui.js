@@ -111,6 +111,7 @@ export class UI {
         entries: [
           { id: 'vr', label: 'A VR Headset', note: vrOk ? '' : 'no headset', disabled: !vrOk },
           { id: 'paddle', label: 'A Ping Pong Paddle', note: 'webcam' },
+          { id: 'paddle-test', label: 'Paddle Tracking Test', note: 'diagnostic' },
           { id: 'phone', label: 'A Phone', note: 'beta' },
           { id: 'mouse', label: 'Nothing — just the mouse' },
         ],
@@ -208,6 +209,10 @@ export class UI {
       this._flow.mode = entry.id;
       this._gotoStep('input');
     } else if (step === 'input') {
+      if (entry.id === 'paddle-test') {
+        window.location.href = '/paddle.html';
+        return;
+      }
       this._flow.input = entry.id;
       this._gotoStep('background');
     } else if (step === 'background') {
