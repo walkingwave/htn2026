@@ -129,7 +129,7 @@ Copy `.env.example` to `.env.local` and fill it in for the Supabase path. Nothin
 
 Press <kbd>L</kbd> on the start menu. One board per game, because Arcade, Coach and Versus ask completely different things of you and a single number across them would mean nothing. Set the name you want on the board at the top of that screen.
 
-A run is recorded when you quit to the menu, and only if you actually played one — walking in and straight back out does not put a zero on the board. Scores go to Supabase when `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are set (table `leaderboard_entries`, columns `player_name`, `score`, `best_streak`, `category`), and to this browser's `localStorage` when they aren't. If the backend is unreachable mid-submit the run is kept locally rather than lost.
+A run is recorded when you quit to the menu, and only if you actually played one — walking in and straight back out does not put a zero on the board. Scores go to Tiger Cloud through `/api/leaderboard` when `TIGER_DATABASE_URL` is configured (table `leaderboard_entries`, columns `player_name`, `score`, `best_streak`, `category`), and to this browser's `localStorage` when it isn't. If the backend is unreachable mid-submit the run is kept locally rather than lost.
 
 There is no seeded demo data: an empty board means nobody has played yet.
 
@@ -204,6 +204,26 @@ src/
 ## Input architecture
 
 Controllers, WebXR hands, a mouse, webcam hand tracking, and marker tracking all place the same `Paddle` object. Physics reads that paddle's world-space centre, face normal, linear velocity, and angular velocity, so rendering, collisions, scoring, and multiplayer do not need input-specific implementations.
+
+## Service roles
+
+The production data architecture assigns each service one job:
+
+```text
+Supabase Realtime
+  → live multiplayer Broadcast, Presence, paddle packets, ball state, and score updates
+
+Tiger Cloud / TimescaleDB
+  → canonical leaderboard, match results, coaching events, telemetry, and analytics
+
+Backboard.io
+  → per-player AI memory and recurring coaching trends
+
+Vercel Functions
+  → server-side bridge to Tiger Cloud, OpenAI, Gemini, ElevenLabs, Backboard, and Linq
+```
+
+Tiger leaderboard and telemetry setup lives in `tiger/schema.sql` and `tiger/README.md`. Set `TIGER_DATABASE_URL` only in the Vercel/server environment; never expose it with a `VITE_` prefix. The browser calls `/api/leaderboard` and `/api/telemetry`, while Supabase remains the low-latency realtime transport.
 
 ## Ideas / next steps
 

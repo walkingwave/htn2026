@@ -33,7 +33,7 @@ import {
   isRealtimeAvailable,
 } from './net.js';
 import { VersusMatch } from './versus.js';
-import { summarizeMatch, analyzeShot, narrate, recordProfileEvent, getProfileSummary } from './backendApi.js';
+import { summarizeMatch, analyzeShot, narrate, recordProfileEvent, recordTelemetry, getProfileSummary } from './backendApi.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
@@ -227,12 +227,24 @@ const coach = new Coach({
         narrate(analysis, 'a').catch(() => {});
       })
       .catch(() => {});
+    const playerId = settings.get('playerName') || 'anonymous';
     recordProfileEvent(
       { type: 'coach_score', scenario: coach.scenario.id, score },
-      settings.get('playerName') || 'anonymous'
+      playerId
     )
       .then(() => ui.setCoachProfileStatus('PROFILE SYNCED'))
       .catch(() => {});
+    recordTelemetry({
+      player_id: playerId,
+      event_type: 'coach_score',
+      scenario: coach.scenario.id,
+      total: score.total,
+      path: score.path,
+      sync: score.sync,
+      face: score.face,
+      timing: score.timing,
+      payload: score,
+    }).catch(() => {});
   },
 });
 scene.add(coach.group);
@@ -1504,12 +1516,22 @@ function handleVersusHostBounce(ball, event) {
         narrate(summary, 'b').catch(() => {});
       })
       .catch(() => {});
+    const playerId = settings.get('playerName') || 'anonymous';
     recordProfileEvent({
       type: 'versus_result',
       scoreHost: match.scoreHost,
       scoreGuest: match.scoreGuest,
       winner,
-    }, settings.get('playerName') || 'anonymous').catch(() => {});
+    }, playerId).catch(() => {});
+    recordTelemetry({
+      player_id: playerId,
+      event_type: 'versus_result',
+      payload: {
+        scoreHost: match.scoreHost,
+        scoreGuest: match.scoreGuest,
+        winner,
+      },
+    }).catch(() => {});
   } else startVersusServe();
 }
 

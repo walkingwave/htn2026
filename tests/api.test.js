@@ -7,6 +7,8 @@ import narrateHandler from '../api/coach/narrate.js';
 import profileEventHandler from '../api/profile/event.js';
 import profileSummaryHandler from '../api/profile/summary.js';
 import inviteHandler from '../api/contact/invite.js';
+import leaderboardHandler from '../api/leaderboard.js';
+import telemetryHandler from '../api/telemetry.js';
 
 const ORIGINAL_ENV = { ...process.env };
 const originalFetch = globalThis.fetch;
@@ -178,4 +180,19 @@ test('provider routes fail clearly when credentials are missing', async () => {
   await shotHandler(mockRequest({ shot: 'test' }), res);
   assert.equal(res.statusCode, 503);
   assert.match(res.payload.error, /OPENAI_API_KEY/);
+});
+
+test('Tiger leaderboard and telemetry routes fail clearly before database setup', async () => {
+  delete process.env.TIGER_DATABASE_URL;
+  delete process.env.DATABASE_URL;
+
+  const leaderboardRes = mockResponse();
+  await leaderboardHandler({ method: 'GET', url: '/api/leaderboard?category=arcade' }, leaderboardRes);
+  assert.equal(leaderboardRes.statusCode, 503);
+  assert.match(leaderboardRes.payload.error, /TIGER_DATABASE_URL/);
+
+  const telemetryRes = mockResponse();
+  await telemetryHandler(mockRequest({ event_type: 'coach_score' }), telemetryRes);
+  assert.equal(telemetryRes.statusCode, 503);
+  assert.match(telemetryRes.payload.error, /TIGER_DATABASE_URL/);
 });

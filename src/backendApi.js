@@ -124,3 +124,7 @@ export function getProfileSummary(playerId, threadId) {
 export function sendInvite(phoneNumber, roomLink) {
   return request('/api/contact/invite', { phoneNumber, roomLink });
 }
+
+export function recordTelemetry(events) {
+  return request('/api/telemetry', { events: Array.isArray(events) ? events : [events] });
+}

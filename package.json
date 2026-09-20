@@ -13,6 +13,7 @@
     "@mediapipe/tasks-vision": "^1.0.1",
     "@supabase/supabase-js": "^2.116.0",
     "js-aruco2": "^2.0.0",
+    "pg": "^8.23.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

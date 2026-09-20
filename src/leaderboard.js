@@ -1,18 +1,12 @@
-import { supabase } from './supabaseClient.js';
-
 // Scores worth keeping after you take the headset off.
 //
-// Supabase when it is configured, localStorage when it isn't — the same
-// arrangement the rest of the networking uses, and for the same reason: the
-// feature should work at a table with no accounts and no keys, and reach
-// further when someone has set it up.
-//
-// There is no seeded demo data. An empty board says nobody has played yet,
-// which is true and useful; inventing rivals would not be.
+// Tiger Cloud is the canonical store for shared leaderboard data. The browser
+// talks to Vercel Functions rather than opening a database connection, keeping
+// the Tiger connection string server-only. localStorage remains the fallback
+// for offline/local play.
 
 const LOCAL_KEY = 'paddlelab-xr.scores.v1';
-const LEGACY_LOCAL_KEY = 'pingpong-trainer.scores.v1'; // pre-rebrand; read, never written
-const TABLE = 'leaderboard_entries';
+const LEGACY_LOCAL_KEY = 'pingpong-trainer.scores.v1';
 const LIMIT = 25;
 
 function readLocal() {
@@ -22,7 +16,7 @@ function readLocal() {
     );
     return Array.isArray(stored) ? stored : [];
   } catch {
-    return []; // private browsing, or a corrupt entry
+    return [];
   }
 }
 
@@ -30,23 +24,17 @@ function writeLocal(entry) {
   try {
     localStorage.setItem(LOCAL_KEY, JSON.stringify([entry, ...readLocal()].slice(0, 200)));
   } catch {
-    // Blocked storage shouldn't cost you the run you just played.
+    // Blocked storage should not cost the player the run they just played.
   }
 }
 
-// What a run was worth. Each game is scored on what it is actually asking of
-// you, so the numbers are only ever compared within a category.
 export function scoreFor(summary, category) {
   if (category === 'coach') {
-    // A lesson is graded out of 100 per stroke; reward the best trace you
-    // managed, and a little for the work of getting there.
     return Math.max(0, Math.round(summary.lessonBest * 12 + summary.lessonAttempts * 3));
   }
   if (category === 'versus') {
-    // Points you took off a real opponent, and the match if you won it.
     return Math.max(0, Math.round(summary.pointsWon * 100 + (summary.matchWon ? 500 : 0)));
   }
-  // Arcade: returns are the thing, streaks show control, misses cost.
   return Math.max(
     0,
     Math.round(
@@ -60,12 +48,16 @@ export function scoreFor(summary, category) {
   );
 }
 
-// Whether a run is worth recording at all. Walking into the menu and straight
-// back out should not put a zero on the board.
 export function isWorthRecording(summary, category) {
   if (category === 'coach') return summary.lessonAttempts > 0;
   if (category === 'versus') return summary.pointsWon > 0 || summary.matchWon;
   return summary.hits > 0;
+}
+
+function localEntry(entry, error) {
+  const local = { ...entry, created_at: new Date().toISOString() };
+  writeLocal(local);
+  return { ...local, storage: 'local', ...(error ? { error } : {}) };
 }
 
 export async function submitScore(playerName, summary, category) {
@@ -76,20 +68,18 @@ export async function submitScore(playerName, summary, category) {
     category,
   };
 
-  if (!supabase) {
-    const local = { ...entry, created_at: new Date().toISOString() };
-    writeLocal(local);
-    return { ...local, storage: 'local' };
+  try {
+    const response = await fetch('/api/leaderboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    });
+    if (!response.ok) throw new Error(`Tiger leaderboard request failed (${response.status})`);
+    const data = await response.json();
+    return { ...data.entry, storage: data.storage || 'tiger' };
+  } catch (error) {
+    return localEntry(entry, error);
   }
-
-  const { data, error } = await supabase.from(TABLE).insert(entry).select().single();
-  if (error) {
-    // A network blip shouldn't lose the run: keep it locally and say so.
-    const local = { ...entry, created_at: new Date().toISOString() };
-    writeLocal(local);
-    return { ...local, storage: 'local', error };
-  }
-  return { ...data, storage: 'supabase' };
 }
 
 export async function getLeaderboard(category) {
@@ -98,16 +88,12 @@ export async function getLeaderboard(category) {
     .sort((a, b) => b.score - a.score)
     .slice(0, LIMIT);
 
-  if (!supabase) return local;
-
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('*')
-    .eq('category', category)
-    .order('score', { ascending: false })
-    .limit(LIMIT);
-
-  // Falling back to what's on this machine beats an empty screen when the
-  // backend is unreachable.
-  return error ? local : data;
+  try {
+    const response = await fetch(`/api/leaderboard?category=${encodeURIComponent(category)}`);
+    if (!response.ok) throw new Error(`Tiger leaderboard request failed (${response.status})`);
+    const data = await response.json();
+    return Array.isArray(data.entries) ? data.entries : local;
+  } catch {
+    return local;
+  }
 }

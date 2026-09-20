@@ -1,6 +1,9 @@
--- Leaderboard storage. Optional: with no Supabase project configured the game
--- keeps scores in the browser instead (see src/leaderboard.js), so this only
--- matters if you want one board shared between machines.
+-- Legacy leaderboard storage for existing Supabase projects.
+-- New deployments use Tiger Cloud as the canonical leaderboard and telemetry
+-- database (see tiger/schema.sql). Supabase is reserved for Realtime
+-- multiplayer; this schema is retained so existing projects are not broken.
+--
+-- If you apply this to a new project, it is not required for the current app.
 --
 -- Apply to a Supabase project, then set VITE_SUPABASE_URL and
 -- VITE_SUPABASE_ANON_KEY (see .env.example).
