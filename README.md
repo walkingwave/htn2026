@@ -220,10 +220,13 @@ Backboard.io
   → per-player AI memory and recurring coaching trends
 
 Vercel Functions
-  → server-side bridge to Tiger Cloud, OpenAI, Gemini, ElevenLabs, Backboard, and Linq
+  → server-side bridge to Tiger Cloud, OpenAI, Gemini, Baseten, ElevenLabs, Backboard, and Linq
+
+Baseten
+  → OpenAI-compatible GLM-5.3-Fast inference for FlyBrain/post-match analysis; configured with `BASETEN_API_KEY` and `BASETEN_MODEL_ID`
 ```
 
-Tiger leaderboard and telemetry setup lives in `tiger/schema.sql` and `tiger/README.md`. Set `TIGER_DATABASE_URL` only in the Vercel/server environment; never expose it with a `VITE_` prefix. The browser calls `/api/leaderboard` and `/api/telemetry`, while Supabase remains the low-latency realtime transport.
+Tiger leaderboard and telemetry setup lives in `tiger/schema.sql` and `tiger/README.md`. Set `TIGER_DATABASE_URL` only in the Vercel/server environment; never expose it with a `VITE_` prefix. The browser calls `/api/leaderboard` and `/api/telemetry`, while Supabase remains the low-latency realtime transport. Baseten post-match analysis is exposed through `/api/coach/postmatch`; the existing Gemini route remains a fallback if Baseten is unavailable.
 
 ## Ideas / next steps
 

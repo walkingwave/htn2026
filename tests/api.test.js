@@ -3,6 +3,7 @@ import test, { afterEach } from 'node:test';
 
 import shotHandler from '../api/coach/shot.js';
 import matchHandler from '../api/coach/match.js';
+import postmatchHandler from '../api/coach/postmatch.js';
 import narrateHandler from '../api/coach/narrate.js';
 import profileEventHandler from '../api/profile/event.js';
 import profileSummaryHandler from '../api/profile/summary.js';
@@ -72,6 +73,25 @@ test('OpenAI shot route validates and forwards a server-side request', async () 
   assert.equal(request.url, 'https://api.openai.com/v1/responses');
   assert.equal(request.options.headers.Authorization, 'Bearer test-openai-key');
   assert.match(request.options.body, /drive/);
+});
+
+test('Baseten post-match route uses the OpenAI-compatible API', async () => {
+  process.env.BASETEN_API_KEY = 'test-baseten-key';
+  process.env.BASETEN_MODEL_ID = 'zai-org/GLM-5.3-Fast';
+  let request;
+  globalThis.fetch = async (url, options) => {
+    request = { url, options };
+    return jsonResponse({ choices: [{ message: { content: 'Strong serve placement; prioritize backhand timing; drill cross-court blocks.' } }] });
+  };
+
+  const res = mockResponse();
+  await postmatchHandler(mockRequest({ match: { scoreHost: 11, scoreGuest: 8 } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.match(res.payload.summary, /Strong serve placement/);
+  assert.equal(request.url, 'https://inference.baseten.co/v1/chat/completions');
+  assert.equal(request.options.headers.Authorization, 'Bearer test-baseten-key');
+  assert.match(request.options.body, /GLM-5\.3-Fast/);
 });
 
 test('Gemini match route returns a holistic summary', async () => {

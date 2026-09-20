@@ -22,6 +22,10 @@ export function analyzeShot(shot, context = {}) {
 }
 
 export function summarizeMatch(match) {
+  return request('/api/coach/postmatch', { match }).catch(() => summarizeMatchWithGemini(match));
+}
+
+export function summarizeMatchWithGemini(match) {
   return request('/api/coach/match', { match });
 }
 
