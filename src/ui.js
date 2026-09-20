@@ -179,7 +179,7 @@ export class UI {
     this._crumbGame = el.querySelector('[data-crumb-game]');
     this._screen = 'game';
     this._productChoices = ['tournament', 'friend', 'bot', 'fly', 'drills'];
-    this._gameIndex = 2;
+    this._gameIndex = 0;
     el.querySelector('[data-back]').onclick = () => this.setScreen('game');
 
     for (const btn of el.querySelectorAll('[data-game]')) {
