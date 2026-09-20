@@ -242,6 +242,10 @@ const physics = new PhysicsWorld();
 physics.onBounce = (ball, event, paddle) => {
   sfx.contact(event, ball.velocity.length());
 
+  // The coach's live drills report where your return actually went, so it
+  // needs to see what happens to the ball it served.
+  coach.onBallEvent(ball, event, paddle);
+
   // The opponent's returns arrive through the same contact path as yours,
   // so they have to be told apart: one is an exchange in the rally, the
   // other is a hit on your scorecard.
@@ -553,7 +557,15 @@ function tick(dt) {
       ball.serve(position, ZERO, spin);
       ball.frozen = true;
     },
-    () => balls.find((b) => b.active && b.frozen) ?? null
+    () => balls.find((b) => b.active && b.frozen) ?? null,
+    // Serve a live ball for the reaction drills, returned so the coach can
+    // follow what happens to it.
+    (position, velocity, spin) => {
+      const ball = balls.find((b) => !b.active);
+      if (!ball) return null;
+      ball.serve(position, velocity, spin);
+      return ball;
+    }
   );
 
   if (guide > 0.08) hapticGuide(guide);

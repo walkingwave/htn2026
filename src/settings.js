@@ -41,6 +41,8 @@ export const OPTIONS = {
     { label: 'Serve', value: 'serve' },
     { label: 'Drive', value: 'drive' },
     { label: 'Push', value: 'push' },
+    { label: 'Return', value: 'return' },
+    { label: 'Block', value: 'block' },
   ],
   // How hard the rally opponent is to beat.
   difficulty: [
