@@ -230,7 +230,7 @@ Tiger leaderboard and telemetry setup lives in `tiger/schema.sql` and `tiger/REA
 
 ## Sponsor tracks
 
-Each sponsor API does one job in the product, keeping credentials server-side while turning technical integrations into clear, user-facing capabilities:
+Each sponsor has a role in the product, turning technical integrations into clear, user-facing capabilities:
 
 [Sponsor] Tiger Data — Leaderboard and Telemetry: Serves as the durable data plane via Tiger Cloud (TimescaleDB). leaderboard_entries tracks canonical per-category rankings, while a coaching_events hypertable logs stroke scores and match results for real-time telemetry and deep post-match analytics.
 
