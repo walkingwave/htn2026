@@ -1,5 +1,6 @@
 import './phone.css';
 import { encodeMessage, decodeMessage } from './multiplayerProtocol.js';
+import { markerBoardMarkup } from './phoneMarkers.js';
 
 const params = new URLSearchParams(window.location.search);
 const code = (params.get('phone') || '').toUpperCase();
@@ -12,7 +13,7 @@ const state = {
   connected: false, permission: false, calibrated: false,
   beta: 0, gamma: 0, zeroBeta: 0, zeroGamma: 0,
   lastSent: 0, lastFlick: -Infinity, lastHealth: 0,
-  gravity: 9.81, swingArmed: true, reconnectTimer: null,
+  gravity: 9.81, swingArmed: true, reconnectTimer: null, confirmed: false, cvLocked: false,
 };
 
 app.innerHTML = `
@@ -25,7 +26,12 @@ app.innerHTML = `
       <div class="phone-status" data-status>Connecting to room <b>${code || '—'}</b>…</div>
       <button class="phone-button" data-start>Enable motion controls</button>
       <button class="phone-button phone-button--secondary" data-calibrate hidden>Calibrate neutral pose</button>
+      <button class="phone-button phone-button--confirm" data-confirm hidden>Confirm phone and start</button>
       <div class="phone-meter"><span data-meter></span></div>
+      <div class="phone-cv-target" aria-label="Keep this marker board visible to the desktop camera">
+        <div class="phone-cv-target__label">KEEP THIS FACING THE DESKTOP CAMERA</div>
+        <div class="phone-marker-board">${markerBoardMarkup()}</div>
+      </div>
       <p class="phone-help" data-help>Use portrait mode and hold the phone flat, screen facing the ball.</p>
     </section>
     <footer class="phone-footer">Keep the phone secure · motion, haptics, and reconnect are enabled</footer>
@@ -35,6 +41,7 @@ const status = app.querySelector('[data-status]');
 const help = app.querySelector('[data-help]');
 const startButton = app.querySelector('[data-start]');
 const calibrateButton = app.querySelector('[data-calibrate]');
+const confirmButton = app.querySelector('[data-confirm]');
 const meter = app.querySelector('[data-meter]');
 
 function setStatus(text, tone = '') { status.textContent = text; status.dataset.tone = tone; }
@@ -53,8 +60,16 @@ function connect() {
   socket.addEventListener('message', (event) => {
     const message = decodeMessage(String(event.data)); if (!message) return;
     if (message.type === '__joined') {
-      state.connected = true; setStatus(state.calibrated ? 'Ready · tilt to aim, flick to swing' : 'Connected · calibrate your neutral pose', 'good');
-      socket.send(encodeMessage('phone-hello', { version: 2, sensors: ['orientation', 'motion'], haptics: Boolean(navigator.vibrate) }));
+      state.connected = true;
+      state.confirmed = false;
+      confirmButton.hidden = !state.calibrated;
+      confirmButton.disabled = !state.cvLocked;
+      setStatus(state.calibrated ? 'Connected · confirm when ready' : 'Connected · enable motion, then calibrate', 'good');
+    } else if (message.type === 'phone-cv-status') {
+      state.cvLocked = Boolean(message.data?.locked);
+      confirmButton.disabled = !state.cvLocked;
+      if (state.cvLocked && state.calibrated) setStatus('CV locked · confirm when ready', 'good');
+      else if (!state.cvLocked) setStatus('Connected · hold the marker board in the desktop camera', '');
     } else if (message.type === 'phone-haptic') {
       if (navigator.vibrate) navigator.vibrate(message.data?.pattern || message.data?.duration || 35);
     } else if (message.type === '__presence' && !message.data?.present) {
@@ -86,7 +101,15 @@ function sendPose(timestamp, flick = false) {
   state.lastSent = timestamp;
   const pose = orientationPose();
   meter.style.transform = `scaleX(${Math.min(1, Math.hypot(pose.x, pose.y) / 1.2)})`;
-  socket.send(encodeMessage('phone-pose', { ...pose, beta: state.beta, gamma: state.gamma, flick, at: Date.now() }));
+  socket.send(encodeMessage('phone-pose', {
+    ...pose,
+    roll: state.gamma - state.zeroGamma,
+    pitch: state.beta - state.zeroBeta,
+    beta: state.beta,
+    gamma: state.gamma,
+    flick,
+    at: Date.now(),
+  }));
   if (timestamp - state.lastHealth > 2000) {
     state.lastHealth = timestamp;
     socket.send(encodeMessage('phone-hello', { version: 2, battery: navigator.getBattery ? 'available' : 'unknown', at: Date.now() }));
@@ -129,11 +152,28 @@ async function enableMotion() {
 function calibrate() {
   state.zeroBeta = state.beta; state.zeroGamma = state.gamma; state.calibrated = true;
   calibrateButton.textContent = 'Recalibrate neutral pose';
-  setStatus(state.connected ? 'Ready · tilt to aim, flick to swing' : 'Calibrated · reconnecting…', 'good');
-  help.textContent = 'Green meter = aim movement. The desktop sends haptics on contact.';
+  confirmButton.hidden = false;
+  setStatus('Calibrated · confirm when ready', 'good');
+  help.textContent = 'Tilt to aim, then confirm when you are holding the phone securely.';
   socket?.send(encodeMessage('phone-calibrate', { beta: state.zeroBeta, gamma: state.zeroGamma }));
   if (navigator.vibrate) navigator.vibrate([20, 30, 20]);
 }
-startButton.addEventListener('click', enableMotion); calibrateButton.addEventListener('click', calibrate);
+function confirmPhone() {
+  if (!state.calibrated || !state.connected || !state.cvLocked) {
+    setStatus('Connect, calibrate, and wait for the desktop camera lock.', 'bad');
+    return;
+  }
+  state.confirmed = true;
+  confirmButton.hidden = true;
+  setStatus('Confirmed · tilt to aim, flick to swing', 'good');
+  socket?.send(encodeMessage('phone-hello', {
+    version: 2,
+    ready: true,
+    sensors: ['orientation', 'motion'],
+    haptics: Boolean(navigator.vibrate),
+  }));
+  if (navigator.vibrate) navigator.vibrate([25, 40, 25]);
+}
+startButton.addEventListener('click', enableMotion); calibrateButton.addEventListener('click', calibrate); confirmButton.addEventListener('click', confirmPhone);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 connect();

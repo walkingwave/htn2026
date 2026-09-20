@@ -46,6 +46,7 @@ const RELAYED = new Set([
   'phone-hello',
   'phone-pose',
   'phone-calibrate',
+  'phone-cv-status',
   'phone-haptic',
 ]);
 

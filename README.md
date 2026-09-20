@@ -27,13 +27,17 @@ The dev server runs on **HTTPS** (self-signed cert via `@vitejs/plugin-basic-ssl
 
 ### Phone paddle (mobile branch)
 
-On the desktop start screen choose **A phone**. PaddleLab opens a short-lived room and renders a QR code. Scan it with the phone on the same Wi-Fi, tap **Enable motion controls**, then tap **Calibrate neutral pose** while holding the phone like a racket.
+On the desktop start screen choose **A phone**. PaddleLab opens a short-lived room and renders a QR code. The desktop camera also starts in pairing mode. Scan the code with the phone on the same Wi-Fi, tap **Enable motion controls**, tap **Calibrate neutral pose**, hold the marker board on the phone screen in front of the desktop camera, and finally tap **Confirm phone and start**.
 
-- Phone tilt maps to the paddle's horizontal and vertical aim.
+The phone is a hybrid controller:
+
+- Desktop webcam CV determines the phone's screen-space location and maps it into the virtual paddle's playable area.
+- Phone orientation determines the paddle's face angle. This keeps sensor drift from moving the paddle around while still preserving wrist/face orientation.
 - A quick forward acceleration is treated as a swing.
 - Paddle contacts send a short haptic pulse back to supported phones.
+- The phone page displays four high-contrast ArUco-compatible markers so the existing worker can lock the phone without a second CV stack.
+- The desktop does not enter the arena until both the CV lock and the phone's explicit confirmation are received.
 - The phone page is `/` with a `?phone=<room-code>` link; it is not a native iOS app yet, so it works in Safari without App Store packaging.
-- Camera CV is intentionally optional. The desktop webcam can later validate a phone marker, but sensor input remains the authoritative low-latency control path.
 
 Use the **Network URL** printed by Vite for the QR link. `localhost` only works on the laptop itself, not on the phone.
 

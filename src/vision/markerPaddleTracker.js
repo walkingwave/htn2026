@@ -65,7 +65,9 @@ class PredictivePositionFilter {
 }
 
 export class MarkerPaddleTracker {
-  constructor() {
+  constructor({ assistOnly = false } = {}) {
+    this.assistOnly = assistOnly;
+    this.screenBounds = null;
     this.state = TRACKER_STATE.IDLE;
     this.error = null;
     this.confidence = 0;
@@ -168,6 +170,7 @@ export class MarkerPaddleTracker {
     this._stream = null;
     this.video.srcObject = null;
     this._predictor.reset();
+    this.screenBounds = null;
     this._setState(TRACKER_STATE.IDLE);
   }
 
@@ -245,7 +248,16 @@ export class MarkerPaddleTracker {
     this._lastMarkers = result.markers;
     this._drawDebug(result);
 
+    this.screenBounds = result.assist?.bounds ?? null;
     if (!result.pose) {
+      const phoneMarkerLock = result.markers?.some((marker) => marker.id >= 1 && marker.id <= 4);
+      if (this.assistOnly && result.assist && phoneMarkerLock) {
+        this._missed = 0;
+        this.confidence = 0.65;
+        this.position.copy(new THREE.Vector3().fromArray(result.assist.position));
+        if (this.state !== TRACKER_STATE.TRACKING) this._setState(TRACKER_STATE.TRACKING);
+        return;
+      }
       // Brief colour fallback keeps position alive through a blurred swing,
       // but only just after a confirmed marker pose.
       if (result.recentPose && result.assist && this._neutralPosition) {

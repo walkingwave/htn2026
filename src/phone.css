@@ -16,4 +16,11 @@ h1 { font-size: clamp(32px, 10vw, 54px); line-height: .98; margin: 18px 0; lette
 .phone-button--secondary { background: #332a42; }
 .phone-meter { height: 6px; margin: 24px 0 8px; border-radius: 99px; background: #31283b; overflow: hidden; }
 .phone-meter span { display: block; height: 100%; width: 100%; transform-origin: left; transform: scaleX(0); background: linear-gradient(90deg, #ed3d4d, #f7c957); transition: transform .08s linear; }
+.phone-cv-target { margin-top: 20px; padding: 12px; border: 1px solid rgba(255,255,255,.18); border-radius: 14px; background: #f8f4ec; color: #17131d; }
+.phone-cv-target__label { margin-bottom: 8px; font-size: 9px; font-weight: 900; letter-spacing: .12em; text-align: center; }
+.phone-marker-board { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.phone-marker { position: relative; aspect-ratio: 1; background: white; }
+.phone-marker svg { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.phone-marker span { position: absolute; z-index: 1; right: 5px; bottom: 3px; color: white; font-size: 10px; font-weight: 900; opacity: .65; }
+.phone-button--confirm { background: #3b9b67; }
 .phone-footer { width: min(100%, 480px); color: #81768d; font-size: 11px; text-align: center; }

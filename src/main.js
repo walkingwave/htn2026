@@ -661,7 +661,19 @@ function poseDesktopBat() {
   // for you, in proportion to how far through the stroke you are.
   const drive = THREE.MathUtils.clamp(desktopThrust / DESKTOP_THRUST_TIME, 0, 1);
 
-  desktopRig.rotation.set(-drive * DESKTOP_DRIVE_PITCH, Math.PI / 2 + desktopYaw, 0);
+  const phonePitch =
+    settings.get('paddleSource') === PADDLE_SOURCE.PHONE && phoneLastPose
+      ? THREE.MathUtils.clamp((phoneLastPose.pitch ?? 0) / 70, -0.42, 0.42)
+      : 0;
+  const phoneRoll =
+    settings.get('paddleSource') === PADDLE_SOURCE.PHONE && phoneLastPose
+      ? THREE.MathUtils.clamp((phoneLastPose.roll ?? 0) / 70, -0.35, 0.35)
+      : 0;
+  desktopRig.rotation.set(
+    -drive * DESKTOP_DRIVE_PITCH + phonePitch,
+    Math.PI / 2 + desktopYaw,
+    phoneRoll
+  );
   desktopRig.quaternion.setFromEuler(desktopRig.rotation);
   _bladeOffset
     .copy(desktopPaddle.mesh.getObjectByName('blade').position)
@@ -1265,10 +1277,18 @@ function updateDesktopBat(dt) {
   const phoneDriving = settings.get('paddleSource') === PADDLE_SOURCE.PHONE;
   if (phoneDriving) {
     pointerActive = false;
+    // CV owns location. Its assist-only tracker returns camera-relative x/y;
+    // map that measured position into the same playable desktop volume.
+    if (phoneCamTracker?.state === TRACKER_STATE.TRACKING) {
+      desktopAim.x = THREE.MathUtils.clamp(phoneCamTracker.position.x * 2.2, -REACH_X, REACH_X);
+      desktopAim.y = THREE.MathUtils.clamp(0.95 + phoneCamTracker.position.y * 1.65, REACH_Y_BOTTOM, REACH_Y_TOP);
+    }
+    // Phone orientation owns the face direction/tilt, while flick still owns
+    // the stroke gesture. CV never tries to infer wrist rotation.
     if (phoneLastPose) {
-      desktopAim.x = THREE.MathUtils.clamp(phoneLastPose.x * REACH_X, -REACH_X, REACH_X);
-      desktopAim.y = THREE.MathUtils.clamp(0.95 + phoneLastPose.y * 0.55, REACH_Y_BOTTOM, REACH_Y_TOP);
-      desktopYaw = (desktopAim.x / REACH_X) * 0.5;
+      // Phone IMU owns orientation. Keep location entirely in the camera
+      // tracker so device-specific sensor drift cannot move the paddle around.
+      desktopYaw = THREE.MathUtils.clamp((phoneLastPose.roll ?? 0) / 70, -0.35, 0.35);
       if (phoneLastPose.flick) {
         swingDesktopBat();
         phoneLastPose.flick = false;
@@ -1345,7 +1365,10 @@ let room = null; // active room handle
 // networked match.
 let phoneRoom = null;
 let phoneConnected = false;
+let phoneConfirmed = false;
+let phoneCvLocked = false;
 let phoneLastPose = null;
+let phoneCamTracker = null;
 const match = new VersusMatch();
 let versusBall = null; // the rally ball (host authoritative)
 let versusServeTimer = 0; // countdown before the host's next serve
@@ -1422,8 +1445,19 @@ async function openPhonePair() {
   if (phoneRoom) return phoneRoom;
   const code = makeRoomCode();
   phoneRoom = createRoom({ code, role: 'host', transport: 'websocket' });
-  phoneRoom.on('phone-hello', () => {
+  phoneRoom.on('phone-hello', (payload) => {
+    // Joining or enabling sensors is not enough; only the explicit phone
+    // confirmation plus a camera lock may release the desktop into gameplay.
+    if (!payload?.ready) return;
+    phoneConfirmed = true;
     phoneConnected = true;
+    maybeStartPhone();
+  });
+  phoneRoom.on('phone-cv-status', ({ locked } = {}) => {
+    phoneCvLocked = Boolean(locked);
+    if (phoneCvLocked) ui.phoneCvReady();
+    else ui.phoneCvWaiting();
+    maybeStartPhone();
   });
   phoneRoom.on('phone-pose', (pose) => {
     if (!pose || !Number.isFinite(pose.x) || !Number.isFinite(pose.y)) return;
@@ -1432,13 +1466,22 @@ async function openPhonePair() {
   });
   phoneRoom.onOpponent((present) => {
     phoneConnected = present;
-    if (!present) phoneLastPose = null;
+    if (present) {
+      phoneRoom?.send('phone-cv-status', { locked: phoneCvLocked });
+      if (!phoneCvLocked) ui.phoneCvWaiting();
+    } else {
+      phoneLastPose = null;
+      phoneConfirmed = false;
+      phoneCvLocked = false;
+      ui.phoneDisconnected();
+    }
   });
   phoneRoom.onClosed(() => {
     phoneConnected = false;
     phoneLastPose = null;
   });
   await phoneRoom.connect();
+  startPhoneCv();
   const origin = phoneRoom.lanUrls?.[0] || window.location.origin;
   const linkUrl = new URL(origin);
   linkUrl.search = '';
@@ -1446,10 +1489,45 @@ async function openPhonePair() {
   return { code, link: linkUrl.toString() };
 }
 
+function maybeStartPhone() {
+  if (phoneConfirmed && phoneCvLocked) ui.phoneReady();
+}
+
+function startPhoneCv() {
+  if (phoneCamTracker) return;
+  phoneCamTracker = new MarkerPaddleTracker({ assistOnly: true });
+  phoneCamTracker.onState = (state, error) => {
+    if (state === TRACKER_STATE.TRACKING) {
+      phoneCvLocked = true;
+      phoneRoom?.send('phone-cv-status', { locked: true });
+      ui.phoneCvReady();
+      maybeStartPhone();
+    } else if (state === TRACKER_STATE.LOST || state === TRACKER_STATE.ERROR) {
+      phoneCvLocked = false;
+      phoneRoom?.send('phone-cv-status', { locked: false, error: error ?? null });
+      ui.phoneCvWaiting();
+    }
+  };
+  ui.showCamPreview(phoneCamTracker);
+  phoneCamTracker.start().catch((error) => {
+    phoneCvLocked = false;
+    ui.phoneCvWaiting();
+    ui.toast(error?.message ?? 'Desktop camera is required for phone location');
+  });
+}
+
+function stopPhoneCv() {
+  phoneCamTracker?.stop();
+  phoneCamTracker = null;
+}
+
 function closePhonePair() {
+  stopPhoneCv();
   phoneRoom?.close();
   phoneRoom = null;
   phoneConnected = false;
+  phoneConfirmed = false;
+  phoneCvLocked = false;
   phoneLastPose = null;
 }
 

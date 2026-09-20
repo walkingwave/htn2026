@@ -69,6 +69,7 @@ export class UI {
     this._lastRevision = -1;
     this._versus = null; // { role, code, link, kind } once a room is open
     this._versusTransport = 'auto';
+    this._phoneStarted = false;
 
     this._buildMenu();
     this._buildBar();
@@ -171,6 +172,7 @@ export class UI {
           <div class="phone-pair__link" data-phone-link></div>
           <button class="key" data-phone-copy><b>⧉</b>Copy phone link</button>
           <div class="lobby__status" data-phone-status>Waiting for phone…</div>
+          <div class="phone-pair__cv">Desktop camera lock required before start</div>
         </div>
         <div class="lobby" data-lobby hidden>
           <div class="lobby__relay" data-lan-relay-row hidden>
@@ -556,9 +558,11 @@ export class UI {
       this.phoneLink.textContent = pairing.link;
       this.phoneQr.src = await QRCode.toDataURL(pairing.link, { width: 220, margin: 1, errorCorrectionLevel: 'M' });
       this.phoneStatus.textContent = 'Scan the code, enable motion, then calibrate.';
-      this.menu.hidden = true;
-      this.bar.hidden = false;
-      this.onStart?.(null);
+      this.phoneStatus.dataset.tone = '';
+      // Stay on this screen. The arena must not start until the phone has
+      // joined the room and explicitly sent phone-hello after motion setup.
+      this.menu.hidden = false;
+      this.bar.hidden = true;
     } catch (error) {
       this.phoneStatus.textContent = error.message || 'Could not open phone pairing.';
       this.phoneStatus.dataset.tone = 'bad';
@@ -570,6 +574,34 @@ export class UI {
     if (!link) return;
     try { await navigator.clipboard.writeText(link); this.toast('Phone link copied'); }
     catch { this.toast('Select the link and copy it'); }
+  }
+
+  phoneReady() {
+    if (this._phoneStarted) return;
+    this._phoneStarted = true;
+    this.phoneStatus.textContent = 'Phone connected · motion controls are ready.';
+    this.phoneStatus.dataset.tone = 'good';
+    this.menu.hidden = true;
+    this.bar.hidden = false;
+    this.onStart?.(null);
+  }
+
+  phoneCvWaiting() {
+    if (this._phoneStarted) return;
+    this.phoneStatus.textContent = 'Phone connected · find the red marker board in the desktop camera…';
+    this.phoneStatus.dataset.tone = '';
+  }
+
+  phoneCvReady() {
+    if (this._phoneStarted) return;
+    this.phoneStatus.textContent = 'CV locked · confirm on the phone to start.';
+    this.phoneStatus.dataset.tone = 'good';
+  }
+
+  phoneDisconnected() {
+    if (this._phoneStarted) return;
+    this.phoneStatus.textContent = 'Waiting for the phone to scan and connect…';
+    this.phoneStatus.dataset.tone = '';
   }
 
   // Whether a networked match is set up and ready to play.
