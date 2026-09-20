@@ -48,6 +48,10 @@ const RELAYED = new Set([
   'phone-calibrate',
   'phone-cv-status',
   'phone-haptic',
+  // Tournament lobby messages are carried on a separate room from a live
+  // 1v1 table. The relay only forwards this wrapped payload after a client
+  // has joined a valid tournament room.
+  'tournament',
 ]);
 
 export function isClientMessage(message) {

@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient.js';
-import { encodeMessage, MULTIPLAYER_PROTOCOL } from './multiplayerProtocol.js';
+import { encodeMessage, isValidRoomCode, MULTIPLAYER_PROTOCOL } from './multiplayerProtocol.js';
 
 // Networking for online versus. Three interchangeable transports sit behind
 // one interface so the game code never cares how bytes move:
@@ -63,6 +63,44 @@ export function clearRoomFromUrl() {
   } catch {
     /* no-op */
   }
+}
+
+// Tournament invitations deliberately carry an explicit mode flag. A normal
+// ?room= code is still a one-on-one friend match; otherwise opening a shared
+// bracket link would quietly drop somebody into the wrong lobby.
+export function tournamentLinkFor(code, origin = window.location.origin, relay = null) {
+  const url = new URL(origin);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('room', code);
+  url.searchParams.set('tournament', '1');
+  if (relay) url.searchParams.set('relay', relay);
+  return url.toString();
+}
+
+export function tournamentFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    return url.searchParams.get('tournament') === '1' ? url.searchParams.get('room') : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearTournamentFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    url.searchParams.delete('tournament');
+    window.history.replaceState({}, '', url.toString());
+  } catch {
+    /* no-op */
+  }
+}
+
+export function makeTournamentPlayerId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `player-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function isRealtimeAvailable() {
@@ -513,6 +551,320 @@ export function createRoom({ code, role, transport: requested = 'auto', relay = 
       transport.close();
       opponentSubscribers.clear();
       closedSubscribers.clear();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Four-player tournament lobby
+//
+// The lobby is intentionally separate from a live match room. Supabase
+// Broadcast/Presence can hold all four bracket entrants, then each scheduled
+// pair gets the established two-player WebRTC room above. Keeping the two
+// channels separate means idle semifinalists cannot receive or influence a
+// different table's paddle or ball packets.
+// ---------------------------------------------------------------------------
+
+function normaliseTournamentPlayer(player) {
+  const id = String(player?.id ?? '').trim();
+  if (!id) throw new Error('Tournament player id is required.');
+  const name = String(player?.name ?? 'Player').trim().slice(0, 24) || 'Player';
+  const joinedAt = Number(player?.joinedAt) || Date.now();
+  return { id, name, joinedAt };
+}
+
+function sortTournamentPlayers(players) {
+  const unique = new Map();
+  for (const raw of players ?? []) {
+    try {
+      const player = normaliseTournamentPlayer(raw);
+      const previous = unique.get(player.id);
+      if (!previous || player.joinedAt < previous.joinedAt) unique.set(player.id, player);
+    } catch {
+      // A malformed presence payload is not a tournament entrant.
+    }
+  }
+  return [...unique.values()].sort(
+    (a, b) => a.joinedAt - b.joinedAt || a.id.localeCompare(b.id)
+  );
+}
+
+class TournamentTransportBase {
+  constructor(code, player) {
+    this.code = code;
+    this.player = normaliseTournamentPlayer(player);
+    this.handlers = {};
+    this.rosterSubscribers = new Set();
+    this._players = [this.player];
+  }
+
+  get players() {
+    return this._players.map((player) => ({ ...player }));
+  }
+
+  on(type, cb) {
+    this.handlers[type] = cb;
+  }
+
+  onRoster(cb) {
+    this.rosterSubscribers.add(cb);
+    cb(this.players);
+  }
+
+  _setPlayers(players) {
+    const next = sortTournamentPlayers(players);
+    const previous = JSON.stringify(this._players);
+    this._players = next;
+    if (JSON.stringify(next) !== previous) {
+      const snapshot = this.players;
+      this.rosterSubscribers.forEach((cb) => cb(snapshot));
+    }
+  }
+
+  _dispatch(payload) {
+    if (!payload || typeof payload.type !== 'string') return;
+    this.handlers[payload.type]?.(payload.data);
+  }
+}
+
+class SupabaseTournamentTransport extends TournamentTransportBase {
+  constructor(code, player) {
+    super(code, player);
+    this.channel = null;
+  }
+
+  async connect() {
+    this.channel = supabase.channel(`${CHANNEL_PREFIX}tournament-${this.code}`, {
+      config: { broadcast: { self: false }, presence: { key: this.player.id } },
+    });
+    this.channel.on('broadcast', { event: 'tournament' }, ({ payload }) => {
+      this._dispatch(payload);
+    });
+    this.channel.on('presence', { event: 'sync' }, () => {
+      this._setPlayers(Object.values(this.channel.presenceState()).flat());
+    });
+    await new Promise((resolve, reject) => {
+      this.channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') resolve();
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          reject(new Error('Tournament lobby could not connect to Realtime.'));
+        }
+      });
+    });
+    await this.channel.track(this.player);
+    this._setPlayers(Object.values(this.channel.presenceState()).flat());
+  }
+
+  send(type, data) {
+    this.channel?.send({
+      type: 'broadcast',
+      event: 'tournament',
+      payload: { type, data },
+    });
+  }
+
+  close() {
+    if (this.channel) supabase.removeChannel(this.channel);
+    this.channel = null;
+    this.rosterSubscribers.clear();
+  }
+}
+
+class BroadcastTournamentTransport extends TournamentTransportBase {
+  constructor(code, player) {
+    super(code, player);
+    this.bc = null;
+    this.members = new Map([[this.player.id, this.player]]);
+  }
+
+  async connect() {
+    if (typeof BroadcastChannel === 'undefined') {
+      throw new Error('This browser cannot open a local tournament lobby.');
+    }
+    this.bc = new BroadcastChannel(`${CHANNEL_PREFIX}tournament-${this.code}`);
+    this.bc.onmessage = ({ data }) => {
+      if (!data || data.from === this.player.id) return;
+      if (data.type === '__tournament-hello') {
+        try {
+          const entrant = normaliseTournamentPlayer(data.player);
+          this.members.set(entrant.id, entrant);
+          this._setPlayers([...this.members.values()]);
+          this._sendRoster();
+        } catch {
+          /* ignore malformed hello */
+        }
+      } else if (data.type === '__tournament-roster') {
+        for (const raw of data.players ?? []) {
+          try {
+            const entrant = normaliseTournamentPlayer(raw);
+            this.members.set(entrant.id, entrant);
+          } catch {
+            /* ignore malformed roster entry */
+          }
+        }
+        this._setPlayers([...this.members.values()]);
+      } else if (data.type === '__tournament-bye') {
+        this.members.delete(data.playerId);
+        this._setPlayers([...this.members.values()]);
+      } else if (data.type === 'tournament') {
+        this._dispatch(data.payload);
+      }
+    };
+    this.bc.postMessage({ type: '__tournament-hello', from: this.player.id, player: this.player });
+    this._setPlayers([...this.members.values()]);
+  }
+
+  _sendRoster() {
+    this.bc?.postMessage({
+      type: '__tournament-roster',
+      from: this.player.id,
+      players: [...this.members.values()],
+    });
+  }
+
+  send(type, data) {
+    this.bc?.postMessage({ type: 'tournament', from: this.player.id, payload: { type, data } });
+  }
+
+  close() {
+    this.bc?.postMessage({ type: '__tournament-bye', from: this.player.id, playerId: this.player.id });
+    this.bc?.close();
+    this.bc = null;
+    this.rosterSubscribers.clear();
+  }
+}
+
+class WebSocketTournamentTransport extends TournamentTransportBase {
+  constructor(code, player, relay = null) {
+    super(code, player);
+    this.socket = null;
+    this.relay = relay;
+    this.lanUrls = [];
+  }
+
+  async connect() {
+    if (typeof WebSocket === 'undefined') {
+      throw new Error('WebSockets are unavailable in this browser.');
+    }
+    this.socket = new WebSocket(relaySocketUrl(this.relay));
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        if (error) reject(error);
+        else resolve();
+      };
+      const timeout = setTimeout(
+        () => finish(new Error('LAN tournament relay did not respond. Restart npm run dev and try again.')),
+        8000
+      );
+      this.socket.addEventListener('open', () => {
+        this.socket.send(
+          encodeMessage('__tournament-join', { code: this.code, player: this.player })
+        );
+      });
+      this.socket.addEventListener('message', ({ data }) => {
+        const message = decodeMessage(String(data));
+        if (!message) return;
+        if (message.type === '__tournament-joined') {
+          this.lanUrls = Array.isArray(message.data?.lanUrls) ? message.data.lanUrls : [];
+          this._setPlayers(message.data?.players);
+          finish();
+        } else if (message.type === '__tournament-roster') {
+          this._setPlayers(message.data?.players);
+        } else if (message.type === 'tournament') {
+          this._dispatch(message.data);
+        }
+      });
+      this.socket.addEventListener('error', () => finish(new Error('LAN tournament relay connection failed.')));
+      this.socket.addEventListener('close', (event) => {
+        if (!settled) finish(new Error(event.reason || 'LAN tournament relay closed before joining.'));
+      });
+    });
+  }
+
+  send(type, data) {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(encodeMessage('tournament', { type, data }));
+    }
+  }
+
+  close() {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(encodeMessage('__tournament-leave'));
+    }
+    this.socket?.close();
+    this.socket = null;
+    this.rosterSubscribers.clear();
+  }
+}
+
+// A room has exactly four seeded entrants. The first entrant coordinates the
+// canonical bracket; membership itself comes from Presence (or the LAN relay),
+// not a fragile client-maintained counter.
+export function createTournamentRoom({ code, player, transport: requested = 'auto', relay = null }) {
+  if (!isValidRoomCode(code)) throw new Error('Invalid tournament room code.');
+  const localPlayer = normaliseTournamentPlayer(player);
+  if ((requested === 'supabase') && !supabase) {
+    throw new Error('Online tournaments need VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  }
+  const useSupabase = requested === 'supabase' || (requested === 'auto' && Boolean(supabase));
+  const useWebSocket = requested === 'websocket' || (requested === 'auto' && !useSupabase && import.meta.env.DEV);
+  const transport = useSupabase
+    ? new SupabaseTournamentTransport(code, localPlayer)
+    : useWebSocket
+      ? new WebSocketTournamentTransport(code, localPlayer, relay)
+      : new BroadcastTournamentTransport(code, localPlayer);
+
+  const rosterSubscribers = new Set();
+  const admitted = (players) => players.slice(0, 4);
+  const notify = (players) => {
+    const accepted = admitted(players);
+    const member = accepted.some((entrant) => entrant.id === localPlayer.id);
+    rosterSubscribers.forEach((cb) => cb(accepted, { total: players.length, admitted: member }));
+  };
+  transport.onRoster(notify);
+
+  return {
+    code,
+    player: { ...localPlayer },
+    get kind() {
+      return useSupabase ? 'supabase' : useWebSocket ? 'websocket' : 'local';
+    },
+    get players() {
+      return admitted(transport.players);
+    },
+    get totalPlayers() {
+      return transport.players.length;
+    },
+    get admitted() {
+      return admitted(transport.players).some((entrant) => entrant.id === localPlayer.id);
+    },
+    get isHost() {
+      return this.admitted && this.players[0]?.id === localPlayer.id;
+    },
+    get lanUrls() {
+      return transport.lanUrls ?? [];
+    },
+    async connect() {
+      await transport.connect();
+      notify(transport.players);
+    },
+    send(type, data) {
+      transport.send(type, data);
+    },
+    on(type, cb) {
+      transport.on(type, cb);
+    },
+    onRoster(cb) {
+      rosterSubscribers.add(cb);
+      notify(transport.players);
+    },
+    close() {
+      rosterSubscribers.clear();
+      transport.close();
     },
   };
 }

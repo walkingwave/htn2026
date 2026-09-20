@@ -384,6 +384,20 @@ canvas {
   color: #3ddc84;
 }
 
+.lobby__roster {
+  align-self: flex-start;
+  max-width: 100%;
+  padding-left: 12px;
+  color: var(--paper);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+  text-transform: none;
+}
+.lobby__roster[hidden] {
+  display: none;
+}
+
 .lobby__share {
   display: flex;
   align-items: center;

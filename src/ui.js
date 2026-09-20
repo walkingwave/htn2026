@@ -38,8 +38,14 @@ export class UI {
     onVersusCreate,
     onVersusJoin,
     onVersusLeave,
+    onTournamentCreate,
+    onTournamentJoin,
+    onTournamentStart,
+    onTournamentLeave,
+    onTournamentLaunch,
     onRunSummary,
     invitedRoom = null,
+    invitedTournament = null,
     realtimeAvailable = false,
   }) {
     Object.assign(this, {
@@ -54,6 +60,11 @@ export class UI {
       onVersusCreate,
       onVersusJoin,
       onVersusLeave,
+      onTournamentCreate,
+      onTournamentJoin,
+      onTournamentStart,
+      onTournamentLeave,
+      onTournamentLaunch,
       onRunSummary,
       realtimeAvailable,
     });
@@ -64,6 +75,9 @@ export class UI {
     this._toastTimer = null;
     this._lastRevision = -1;
     this._versus = null; // { role, code, link, kind } once a room is open
+    this._tournament = null; // { code, link, players, isHost } once in a bracket lobby
+    this._tournamentStarted = false;
+    this._tournamentMatch = null;
 
     this._buildMenu();
     this._buildBar();
@@ -80,7 +94,11 @@ export class UI {
 
     // Arriving on a ?room=CODE link is an invitation, so the menu opens on
     // Versus with the code already filled in — one button from playing.
-    if (invitedRoom) {
+    if (invitedTournament) {
+      this.chooseGame('tournament');
+      this.lobbyCode.value = invitedTournament;
+      this._setLobbyStatus(`Invited to tournament ${invitedTournament} — join the bracket.`);
+    } else if (invitedRoom) {
       this.chooseGame('friend');
       this.lobbyCode.value = invitedRoom;
       this._setLobbyStatus(`Invited to room ${invitedRoom} — join to play.`);
@@ -149,8 +167,10 @@ export class UI {
               spellcheck="false"
             />
             <button class="key" data-lobby-join><b>▸</b>Join</button>
+            <button class="key" data-lobby-start hidden><b>▸</b>Start bracket</button>
           </div>
           <div class="lobby__status" data-lobby-status></div>
+          <div class="lobby__roster" data-lobby-roster hidden></div>
           <div class="lobby__share" data-lobby-share hidden>
             <span class="lobby__link" data-lobby-link></span>
             <button class="key" data-lobby-copy><b>⧉</b>Copy link</button>
@@ -190,10 +210,13 @@ export class UI {
     this.lobby = el.querySelector('[data-lobby]');
     this.lobbyCode = el.querySelector('[data-lobby-code]');
     this.lobbyStatus = el.querySelector('[data-lobby-status]');
+    this.lobbyRoster = el.querySelector('[data-lobby-roster]');
     this.lobbyShare = el.querySelector('[data-lobby-share]');
     this.lobbyLink = el.querySelector('[data-lobby-link]');
     el.querySelector('[data-lobby-host]').onclick = () => this._hostMatch();
     el.querySelector('[data-lobby-join]').onclick = () => this._joinMatch();
+    this.lobbyStart = el.querySelector('[data-lobby-start]');
+    this.lobbyStart.onclick = () => this._startTournament();
     el.querySelector('[data-lobby-copy]').onclick = () => this._copyRoomLink();
     el.querySelector('[data-lobby-leave]').onclick = () => this._leaveMatch();
     this.lobbyPhone = el.querySelector('[data-lobby-phone]');
@@ -297,17 +320,45 @@ export class UI {
   }
 
   _syncGamePick() {
-    const versus = this.settings.get('game') === 'versus';
-    this.lobby.hidden = !versus;
-    if (versus && !this._versus) {
-      this._setLobbyStatus(
-        this.realtimeAvailable
-          ? 'Host a match, or enter a friend’s code.'
-          : 'Host a match, or enter a friend’s code. Without Supabase keys you can play anyone on this Wi-Fi.'
-      );
+    const game = this.settings.get('game');
+    const versus = game === 'versus';
+    const tournament = game === 'tournament';
+    this.lobby.hidden = !versus && !tournament;
+
+    const hostButton = this.menu.querySelector('[data-lobby-host]');
+    const joinButton = this.menu.querySelector('[data-lobby-join]');
+    const lobbyOr = this.menu.querySelector('.lobby__or');
+    if (tournament) {
+      hostButton.innerHTML = '<b>▸</b>Create bracket room';
+      joinButton.innerHTML = '<b>▸</b>Join bracket';
+      lobbyOr.textContent = 'or join one';
+      this.lobbyRoster.hidden = !this._tournament;
+      if (!this._tournament) {
+        this._setLobbyStatus(
+          this.realtimeAvailable
+            ? 'Create or join a four-player room. The host starts the bracket when all four arrive.'
+            : 'Create or join a four-player room on this Wi-Fi. The host starts the bracket when all four arrive.'
+        );
+      }
+      this._syncTournamentStartButton();
+    } else {
+      hostButton.innerHTML = '<b>▸</b>Start a room';
+      joinButton.innerHTML = '<b>▸</b>Join';
+      lobbyOr.textContent = 'or join one';
+      this.lobbyStart.hidden = true;
+      this.lobbyRoster.hidden = true;
+      if (versus && !this._versus) {
+        this._setLobbyStatus(
+          this.realtimeAvailable
+            ? 'Host a match, or enter a friend’s code.'
+            : 'Host a match, or enter a friend’s code. Without Supabase keys you can play anyone on this Wi-Fi.'
+        );
+      }
     }
-    // Backing out of Versus should not leave a room open behind the menu.
+
+    // Backing out of a lobby should not leave any transport open behind it.
     if (!versus && this._versus) this._leaveMatch();
+    if (!tournament && this._tournament) this._leaveTournament();
   }
 
   // --- Versus lobby -----------------------------------------------------
@@ -330,6 +381,7 @@ export class UI {
   }
 
   async _hostMatch() {
+    if (this.settings.get('game') === 'tournament') return this._hostTournament();
     if (this._versus) return;
     this.sfx.ui();
     this._setLobbyStatus('Opening room…');
@@ -351,6 +403,7 @@ export class UI {
   }
 
   async _joinMatch() {
+    if (this.settings.get('game') === 'tournament') return this._joinTournament();
     if (this._versus) return;
     const code = this.lobbyCode.value.trim().toUpperCase();
     if (!code) {
@@ -381,6 +434,136 @@ export class UI {
       console.error('Failed to join a match', err);
       this._versus = null;
       this._setLobbyStatus(err.message ?? 'Could not join that room.', 'bad');
+    }
+  }
+
+  // --- Tournament lobby ------------------------------------------------
+
+  _tournamentTransportNote() {
+    const kind = this._tournament?.kind;
+    if (kind === 'supabase') return 'Bracket synced through Realtime.';
+    if (kind === 'websocket') return 'Bracket synced over this Wi-Fi.';
+    if (kind === 'local') return 'Local-only bracket — open it in four tabs on this device.';
+    return '';
+  }
+
+  _syncTournamentStartButton() {
+    if (!this.lobbyStart) return;
+    const room = this._tournament;
+    const canStart = Boolean(
+      room?.isHost &&
+      room?.admitted !== false &&
+      room?.players?.length === 4 &&
+      !this._tournamentStarted
+    );
+    this.lobbyStart.hidden = !room?.isHost || this._tournamentStarted;
+    this.lobbyStart.disabled = !canStart;
+    if (!canStart && room?.isHost && !this._tournamentStarted) {
+      this.lobbyStart.title = 'Four players are needed to start the bracket.';
+    } else {
+      this.lobbyStart.removeAttribute('title');
+    }
+  }
+
+  updateTournamentLobby(update) {
+    if (!update) return;
+    this._tournament = { ...(this._tournament ?? {}), ...update };
+    this._tournamentStarted = Boolean(update.started ?? this._tournamentStarted);
+    const players = this._tournament.players ?? [];
+    this.lobbyRoster.hidden = false;
+    this.lobbyRoster.textContent = `Players (${players.length}/4): ${players
+      .map((player) => player.name)
+      .join(' · ') || 'Waiting for players'}`;
+    this._syncTournamentStartButton();
+
+    if (this.settings.get('game') !== 'tournament') return;
+    if (this._tournament.admitted === false) {
+      this._setLobbyStatus('This tournament room is full. Ask the host for a new room code.', 'bad');
+    } else if (!this._tournamentStarted) {
+      const hostText = this._tournament.isHost
+        ? 'You are the host. Start the bracket when four players have joined.'
+        : 'Waiting for the host to start once four players have joined.';
+      this._setLobbyStatus(
+        `Room ${this._tournament.code} — ${players.length}/4 joined. ${hostText} ${this._tournamentTransportNote()}`
+      );
+    }
+  }
+
+  setTournamentMatch(match) {
+    this._tournamentMatch = match ?? null;
+    if (!match) return;
+    this._tournamentStarted = true;
+    const opponent = match.opponent?.name ?? 'your opponent';
+    const label = match.round === 1 ? 'final' : 'semifinal';
+    const text = `Your ${label} is ready against ${opponent}. Choose your controls to enter the table.`;
+    if (this.menu.hidden) this.toast(text);
+    else this._setLobbyStatus(text, 'good');
+  }
+
+  showTournamentWaiting(text) {
+    this._tournamentMatch = null;
+    if (this.menu.hidden) this.toast(text);
+    else this._setLobbyStatus(text);
+  }
+
+  async _hostTournament() {
+    if (this._tournament) return;
+    this.sfx.ui();
+    this._setLobbyStatus('Opening tournament room…');
+    try {
+      const room = await this.onTournamentCreate?.();
+      this._tournament = room;
+      this.lobbyCode.value = room.code;
+      this.lobbyLink.textContent = room.link;
+      this.lobbyShare.hidden = false;
+      this.updateTournamentLobby(room);
+    } catch (err) {
+      console.error('Failed to host tournament', err);
+      this._tournament = null;
+      this._setLobbyStatus(err.message ?? 'Could not open a tournament room.', 'bad');
+    }
+  }
+
+  async _joinTournament() {
+    if (this._tournament) return;
+    const code = this.lobbyCode.value.trim().toUpperCase();
+    if (!code) {
+      this._setLobbyStatus('Enter the tournament code your host gave you.', 'bad');
+      return;
+    }
+    if (!/^[A-Z0-9]{4,12}$/.test(code)) {
+      this._setLobbyStatus('Room codes are letters and numbers, six of them.', 'bad');
+      return;
+    }
+    this.sfx.ui();
+    this._setLobbyStatus(`Joining tournament ${code}…`);
+    try {
+      const room = await this.onTournamentJoin?.(code);
+      this._tournament = room;
+      this.lobbyShare.hidden = true;
+      this.updateTournamentLobby(room);
+    } catch (err) {
+      console.error('Failed to join tournament', err);
+      this._tournament = null;
+      this._setLobbyStatus(err.message ?? 'Could not join that tournament.', 'bad');
+    }
+  }
+
+  async _startTournament() {
+    if (!this._tournament?.isHost || this._tournamentStarted) return;
+    if (this._tournament.players?.length !== 4) {
+      this._setLobbyStatus('Wait for all four bracket players before starting.', 'bad');
+      return;
+    }
+    this.sfx.ui();
+    this._setLobbyStatus('Seeding the bracket…');
+    try {
+      await this.onTournamentStart?.();
+      this._tournamentStarted = true;
+      this._syncTournamentStartButton();
+    } catch (err) {
+      console.error('Failed to start tournament', err);
+      this._setLobbyStatus(err.message ?? 'Could not start the bracket.', 'bad');
     }
   }
 
@@ -423,6 +606,10 @@ export class UI {
   }
 
   _leaveMatch() {
+    if (this.settings.get('game') === 'tournament') {
+      this._leaveTournament();
+      return;
+    }
     this.onVersusLeave?.();
     this._versus = null;
     this.hideCoachPanel();
@@ -431,6 +618,21 @@ export class UI {
     this.hideCountdown();
     this._hideVersusWin();
     this._setLobbyStatus('Left the room.');
+  }
+
+  _leaveTournament() {
+    this.onTournamentLeave?.();
+    this._tournament = null;
+    this._tournamentStarted = false;
+    this._tournamentMatch = null;
+    this.lobbyShare.hidden = true;
+    this.lobbyRoster.hidden = true;
+    this.lobbyStart.hidden = true;
+    this.hideCoachPanel();
+    this.versusHud.hidden = true;
+    this.hideCountdown();
+    this._hideVersusWin();
+    this._setLobbyStatus('Left the tournament room.');
   }
 
   // Whether a networked match is set up and ready to play.
@@ -544,6 +746,27 @@ export class UI {
 
     this.sfx.unlock(); // first user gesture — the only moment audio can start
     this.sfx.ui();
+    if (this.settings.get('game') === 'tournament') {
+      if (!this._tournament || !this._tournamentStarted) {
+        this._setLobbyStatus('Create or join a bracket room, then wait for the host to start it.', 'bad');
+        this.sfx.ui(false);
+        return;
+      }
+      if (!this._tournamentMatch) {
+        this._setLobbyStatus('Your next bracket match is not ready yet.', 'bad');
+        this.sfx.ui(false);
+        return;
+      }
+      try {
+        const ready = await this.onTournamentLaunch?.(this._tournamentMatch);
+        if (ready === false) return;
+      } catch (err) {
+        console.error('Failed to enter tournament match', err);
+        this._setLobbyStatus(err.message ?? 'Could not enter your bracket match.', 'bad');
+        return;
+      }
+    }
+
     this.menu.hidden = true;
     this.bar.hidden = false;
     this.onStart?.(mode);
@@ -846,7 +1069,12 @@ export class UI {
     this.hideCountdown();
     this._hideVersusWin();
     this._versus = null;
+    this._tournament = null;
+    this._tournamentStarted = false;
+    this._tournamentMatch = null;
     this.lobbyShare.hidden = true;
+    this.lobbyRoster.hidden = true;
+    this.lobbyStart.hidden = true;
     this.xr.end();
     this.onExit?.(); // also closes the room, via main
     this.showMenu();
@@ -943,6 +1171,33 @@ export class UI {
     if (!snapshot || !this.tournamentHud) return;
     this._tournamentSnapshot = snapshot;
     this.tournamentHud.hidden = false;
+    const nameFor = (player) => player?.name ?? player ?? 'TBD';
+    const localId = this._tournament?.player?.id;
+    const activeMatch = snapshot.matches.find(
+      (match) =>
+        !match.winnerId &&
+        (match.player1?.id === localId || match.player2?.id === localId)
+    ) ?? snapshot.matches.find((match) => !match.winnerId && match.player1 && match.player2);
+    const champion = snapshot.players?.find((player) => player.id === snapshot.championId);
+    this.tournamentRound.textContent = snapshot.finished
+      ? (champion?.id === localId ? 'CHAMPION' : `CHAMPION: ${champion?.name ?? 'TBD'}`)
+      : activeMatch
+        ? `${activeMatch.round === 1 ? 'FINAL' : 'SEMIFINAL'} · FIRST TO ${snapshot.target}`
+        : 'WAITING FOR BRACKET RESULT';
+    this.tournamentScore.textContent = activeMatch
+      ? `${nameFor(activeMatch.player1)} ${activeMatch.score1} — ${activeMatch.score2} ${nameFor(activeMatch.player2)}`
+      : '';
+    this.tournamentBracket.textContent = snapshot.matches
+      .map((match) => {
+        const round = match.round === 1 ? 'FINAL' : `SEMIFINAL ${match.slot + 1}`;
+        const winner = match.winnerId
+          ? `  ✓ ${nameFor(match.player1?.id === match.winnerId ? match.player1 : match.player2)}`
+          : '';
+        return `${round}\n${nameFor(match.player1)} ${match.score1} — ${match.score2} ${nameFor(match.player2)}${winner}`;
+      })
+      .join('\n\n');
+    return;
+
     const current = snapshot.matches.find((match) => match.id === snapshot.currentMatchId);
     this.tournamentRound.textContent = snapshot.finished
       ? (current?.winner === 'You' ? 'CHAMPION' : 'TOURNAMENT COMPLETE')

@@ -39,17 +39,33 @@ function multiplayerRelay() {
       const rooms = new Map();
       const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 
+      const tournamentPlayers = (peers) =>
+        [...(peers ?? [])]
+          .map((peer) => peer.player)
+          .filter(Boolean)
+          .sort((a, b) => a.joinedAt - b.joinedAt || a.id.localeCompare(b.id));
+
+      const broadcastTournamentRoster = (peers) => {
+        const data = { players: tournamentPlayers(peers) };
+        for (const peer of peers ?? []) {
+          if (peer.readyState === 1) peer.send(encodeMessage('__tournament-roster', data));
+        }
+      };
+
       const removeClient = (client) => {
         if (!client.room) return;
         const peers = rooms.get(client.room);
         peers?.delete(client);
         if (peers?.size === 0) rooms.delete(client.room);
+        else if (client.kind === 'tournament') broadcastTournamentRoster(peers);
         else {
           for (const peer of peers) {
             peer.send(encodeMessage('__presence', { present: false }));
           }
         }
         client.room = null;
+        client.kind = null;
+        client.player = null;
       };
 
       // A TCP socket can stay open long after the device behind it has gone —
@@ -72,6 +88,8 @@ function multiplayerRelay() {
       wss.on('connection', (client, request) => {
         client.room = null;
         client.role = null;
+        client.kind = null;
+        client.player = null;
         client.isAlive = true;
         client.on('pong', () => {
           client.isAlive = true;
@@ -80,6 +98,38 @@ function multiplayerRelay() {
         client.on('message', (raw) => {
           const message = decodeMessage(raw.toString());
           if (!message) return client.close(1003, 'Invalid multiplayer message');
+
+          if (message.type === '__tournament-join') {
+            const code = message.data?.code;
+            const rawPlayer = message.data?.player;
+            const id = typeof rawPlayer?.id === 'string' ? rawPlayer.id.trim() : '';
+            const name = typeof rawPlayer?.name === 'string' ? rawPlayer.name.trim() : '';
+            if (!isValidRoomCode(code) || !id || id.length > 96 || name.length > 24) {
+              return client.close(1008, 'Invalid tournament join');
+            }
+
+            const roomKey = `tournament:${code}`;
+            const peers = rooms.get(roomKey) ?? new Set();
+            for (const peer of [...peers]) {
+              if (peer.readyState !== 1 /* OPEN */) peers.delete(peer);
+            }
+            if (peers.size >= 4) return client.close(1008, 'Tournament room is full');
+
+            client.room = roomKey;
+            client.kind = 'tournament';
+            // The relay clock decides the bracket seed, not a device clock.
+            client.player = { id, name: name || 'Player', joinedAt: Date.now() };
+            peers.add(client);
+            rooms.set(roomKey, peers);
+            client.send(
+              encodeMessage('__tournament-joined', {
+                players: tournamentPlayers(peers),
+                lanUrls: lanUrlsFor(request),
+              })
+            );
+            broadcastTournamentRoster(peers);
+            return;
+          }
 
           if (message.type === '__join') {
             const code = message.data?.code;
@@ -125,8 +175,12 @@ function multiplayerRelay() {
           }
 
           if (!client.room) return;
-          if (message.type === '__leave') return client.close(1000, 'Left room');
+          if (message.type === '__leave' || message.type === '__tournament-leave') {
+            return client.close(1000, 'Left room');
+          }
           if (!isClientMessage(message)) return;
+          if (client.kind === 'tournament' && message.type !== 'tournament') return;
+          if (client.kind !== 'tournament' && message.type === 'tournament') return;
 
           const peers = rooms.get(client.room);
           if (!peers) return;

@@ -26,12 +26,17 @@ import { FlyBrainViz } from './flybrain/flyBrainViz.js';
 import { Coach, SCENARIOS } from './coach.js';
 import {
   createRoom,
+  createTournamentRoom,
   makeRoomCode,
+  makeTournamentPlayerId,
   roomLinkFor,
   roomFromUrl,
   roomRelayFromUrl,
   clearRoomFromUrl,
+  clearTournamentFromUrl,
   isRealtimeAvailable,
+  tournamentFromUrl,
+  tournamentLinkFor,
 } from './net.js';
 import { VersusMatch } from './versus.js';
 import { Tournament } from './tournament.js';
@@ -304,13 +309,12 @@ const ui = new UI({
     clearBalls();
     // A versus match is served by the host over the network, so the ball
     // machine stays down for it.
-    machine.enabled = settings.get('game') !== 'versus';
+    machine.enabled = !['versus', 'tournament'].includes(settings.get('game'));
     game.reset();
     const selectedGame = settings.get('game');
     if (selectedGame === 'tournament') {
       const rallyIndex = MODES.findIndex((entry) => entry.type === 'rally');
       if (rallyIndex >= 0) machine.modeIndex = rallyIndex;
-      tournament.reset();
       ui.updateTournament(tournament.snapshot());
     }
     ui.showCoachReady(
@@ -336,7 +340,7 @@ const ui = new UI({
   },
   onExit: () => {
     machine.enabled = false;
-    leaveVersus();
+    leaveTournament();
     clearBalls();
     stopWebcamBat();
     stopHandPaddle();
@@ -374,6 +378,11 @@ const ui = new UI({
     return { role: room.role, code, kind: room.kind };
   },
   onVersusLeave: () => leaveVersus(),
+  onTournamentCreate: () => createTournamentLobby(),
+  onTournamentJoin: (code) => joinTournamentLobby(code),
+  onTournamentStart: () => startTournamentBracket(),
+  onTournamentLeave: () => leaveTournament(),
+  onTournamentLaunch: (assignment) => enterTournamentMatch(assignment),
   onPhonePair: () => openPhonePair(),
   // What the run was worth, read at the moment you quit. Versus is scored on
   // what you took off a real opponent; the other two on the trainer's stats.
@@ -393,12 +402,13 @@ const ui = new UI({
         ? match.scoreGuest
         : match.scoreHost,
     matchWon: settings.get('game') === 'tournament'
-      ? tournament.finished && tournament.matches.at(-1)?.winner === 0
+      ? tournament.finished && tournament.championId === tournamentLobby?.player?.id
       : Boolean(netMode) && match.winner === netMode,
   }),
   // A link with ?room=CODE means someone invited you: the lobby opens on the
   // join step with the code already filled in.
   invitedRoom: roomFromUrl(),
+  invitedTournament: tournamentFromUrl(),
   invitedRelay: roomRelayFromUrl(),
   realtimeAvailable: isRealtimeAvailable(),
 });
@@ -1566,6 +1576,15 @@ let phoneLastPose = null;
 let phoneCamTracker = null;
 const match = new VersusMatch();
 const tournament = new Tournament();
+// The shared bracket lobby lives for the whole tournament. `room` remains the
+// active two-player table only, so people waiting in the other semifinal never
+// receive another match's paddle or ball packets.
+let tournamentLobby = null;
+let tournamentStarted = false;
+let tournamentMatch = null; // { id, player1, player2, opponent, code, playersByRole }
+let tournamentTransition = false;
+let tournamentLink = '';
+let tournamentRevision = 0;
 let versusBall = null; // the rally ball (host authoritative)
 let versusServeTimer = 0; // countdown before the host's next serve
 let netSendAccum = 0; // throttle for outbound state
@@ -1817,12 +1836,27 @@ function broadcastHostState() {
 }
 
 function tournamentPointsWon() {
+  const localId = tournamentLobby?.player?.id;
   return tournament.matches.reduce((total, match) => {
-    return total + (match.player1?.id === 0 ? match.score1 : match.player2?.id === 0 ? match.score2 : 0);
+    return total + (
+      match.player1?.id === localId
+        ? match.score1
+        : match.player2?.id === localId
+          ? match.score2
+          : 0
+    );
   }, 0);
 }
 
 function handleTournamentFloor(ball) {
+  // A real tournament only scores through the authoritative host in
+  // handleVersusHostBounce(). This is a guard for a stray local ball while a
+  // bracket is still waiting in the lobby; it must never fabricate a bot
+  // result into the shared bracket.
+  if (!tournamentMatch || !netMode) {
+    ball.deactivate();
+    return;
+  }
   if (ball.tournamentPointCounted || tournament.finished) return;
   ball.tournamentPointCounted = true;
 
@@ -1916,6 +1950,10 @@ function handleVersusHostBounce(ball, event) {
   game.revision++; // repaint the in-world board
   broadcastHostState();
   if (winner) {
+    if (tournamentMatch) {
+      completeTournamentMatch(winner);
+      return;
+    }
     ui.showVersusWin(winner === 'host', match.snapshot());
     summarizeMatch({
       scoreHost: match.scoreHost,
@@ -2009,7 +2047,10 @@ function applyHostState(state) {
     }
   }
 
-  if (match.winner) ui.showVersusWin(match.winner === 'guest', match.snapshot());
+  if (match.winner) {
+    if (tournamentMatch) ui.showTournamentWaiting('Match complete — updating the bracket…');
+    else ui.showVersusWin(match.winner === 'guest', match.snapshot());
+  }
 }
 
 function runVersusGuest(dt) {
@@ -2106,7 +2147,7 @@ async function enterVersus(role, code, transport = 'auto', relay = null) {
   return room;
 }
 
-function leaveVersus() {
+function leaveVersus({ preserveTournament = false } = {}) {
   if (!netMode && !room) return;
   room?.close();
   room = null;
@@ -2127,8 +2168,252 @@ function leaveVersus() {
   applyHandedness(); // restores bat visibility the versus branch took over
   machine.mesh.visible = true;
   opponent.mesh.visible = true;
-  clearRoomFromUrl();
+  if (!preserveTournament) clearRoomFromUrl();
   game.revision++;
+}
+
+// --- Shared tournament bracket -------------------------------------------
+
+function tournamentLobbyView() {
+  if (!tournamentLobby) return null;
+  return {
+    code: tournamentLobby.code,
+    link: tournamentLink,
+    kind: tournamentLobby.kind,
+    players: tournamentLobby.players,
+    player: tournamentLobby.player,
+    isHost: tournamentLobby.isHost,
+    admitted: tournamentLobby.admitted,
+    started: tournamentStarted,
+  };
+}
+
+function updateTournamentLobbyUi() {
+  const view = tournamentLobbyView();
+  if (view) ui.updateTournamentLobby(view);
+}
+
+async function connectTournamentLobby(code, transport = 'auto', relay = null) {
+  if (tournamentLobby) leaveTournament();
+  const player = {
+    id: makeTournamentPlayerId(),
+    name: String(settings.get('playerName') || 'Player').trim().slice(0, 24) || 'Player',
+    joinedAt: Date.now(),
+  };
+  const lobby = createTournamentRoom({ code, player, transport, relay });
+  tournamentLobby = lobby;
+  tournament.localPlayerId = lobby.player.id;
+  tournamentStarted = false;
+  tournamentRevision = 0;
+  tournamentLink = '';
+
+  lobby.on('state-request', () => {
+    if (lobby.isHost && tournamentStarted) broadcastTournamentState();
+  });
+  lobby.on('state', (payload) => applyTournamentState(payload));
+  lobby.on('result', (report) => acceptTournamentResult(report));
+  lobby.onRoster(() => {
+    updateTournamentLobbyUi();
+    // A host re-announces the canonical bracket after a reconnecting player
+    // joins, so a late tab never sits on a blank ladder.
+    if (lobby.isHost && tournamentStarted) broadcastTournamentState();
+  });
+
+  try {
+    await lobby.connect();
+    if (!lobby.admitted) throw new Error('This tournament room is already full.');
+    const origin = relay ? window.location.origin : lobby.lanUrls?.[0] || window.location.origin;
+    tournamentLink = tournamentLinkFor(code, origin, relay);
+    updateTournamentLobbyUi();
+    lobby.send('state-request', { playerId: lobby.player.id });
+    return tournamentLobbyView();
+  } catch (error) {
+    lobby.close();
+    if (tournamentLobby === lobby) tournamentLobby = null;
+    tournamentLink = '';
+    throw error;
+  }
+}
+
+function createTournamentLobby() {
+  return connectTournamentLobby(makeRoomCode());
+}
+
+function joinTournamentLobby(code) {
+  return connectTournamentLobby(code.trim().toUpperCase());
+}
+
+function startTournamentBracket() {
+  if (!tournamentLobby?.isHost) throw new Error('Only the tournament host can start the bracket.');
+  if (tournamentLobby.players.length !== 4) throw new Error('A bracket needs four joined players.');
+  tournament.reset(tournamentLobby.players);
+  tournamentStarted = true;
+  tournamentRevision += 1;
+  broadcastTournamentState();
+}
+
+function broadcastTournamentState() {
+  if (!tournamentLobby || !tournamentStarted) return;
+  const payload = { revision: tournamentRevision, snapshot: tournament.snapshot() };
+  applyTournamentState(payload);
+  tournamentLobby.send('state', payload);
+}
+
+function applyTournamentState(payload) {
+  if (!payload?.snapshot || !tournamentLobby) return false;
+  const revision = Number(payload.revision);
+  if (!Number.isInteger(revision) || revision < tournamentRevision) return false;
+  if (!tournament.apply(payload.snapshot)) return false;
+  tournamentStarted = true;
+  tournamentRevision = revision;
+  updateTournamentLobbyUi();
+  ui.updateTournament(tournament.snapshot());
+  reconcileTournamentBracket();
+  return true;
+}
+
+function tournamentAssignment(bracketMatch) {
+  const player = tournamentLobby?.player;
+  if (!player || !bracketMatch) return null;
+  const localIsFirst = bracketMatch.player1?.id === player.id;
+  const opponent = localIsFirst ? bracketMatch.player2 : bracketMatch.player1;
+  if (!opponent || (!localIsFirst && bracketMatch.player2?.id !== player.id)) return null;
+  const suffix = bracketMatch.id === 'semi-1' ? 'A' : bracketMatch.id === 'semi-2' ? 'B' : 'F';
+  return {
+    id: bracketMatch.id,
+    round: bracketMatch.round,
+    player1: bracketMatch.player1,
+    player2: bracketMatch.player2,
+    opponent,
+    code: `${tournamentLobby.code}-${suffix}`,
+  };
+}
+
+function closeTournamentMatchRoom() {
+  if (room || netMode) leaveVersus({ preserveTournament: true });
+  tournamentMatch = null;
+}
+
+async function enterTournamentMatch(assignment) {
+  if (!tournamentLobby?.admitted || !tournamentStarted) {
+    throw new Error('The tournament bracket is not ready.');
+  }
+  const bracketMatch = tournament.getMatch(assignment?.id);
+  const next = tournamentAssignment(bracketMatch);
+  if (!next) throw new Error('This is not your active bracket match.');
+  if (tournamentMatch?.id === next.id && room) return true;
+
+  closeTournamentMatchRoom();
+  // The bracket seed requests a side, but the LAN relay still owns the final
+  // host/guest assignment in case both players arrive at the exact same time.
+  const requestedRole = next.player1.id === tournamentLobby.player.id ? 'host' : 'guest';
+  tournamentMatch = { ...next, playersByRole: null };
+  const activeRoom = await enterVersus(requestedRole, next.code);
+  if (!tournamentLobby || tournamentMatch?.id !== next.id || activeRoom !== room) return false;
+
+  const localRole = activeRoom.role;
+  const otherRole = localRole === 'host' ? 'guest' : 'host';
+  tournamentMatch.playersByRole = {
+    [localRole]: tournamentLobby.player.id,
+    [otherRole]: next.opponent.id,
+  };
+  ui.updateTournament(tournament.snapshot());
+  return true;
+}
+
+function reconcileTournamentBracket() {
+  if (!tournamentLobby?.admitted || !tournamentStarted) return;
+  const localId = tournamentLobby.player.id;
+  const next = tournament.matchFor(localId);
+  const currentResult = tournamentMatch && tournament.getMatch(tournamentMatch.id);
+  if (currentResult?.winnerId && currentResult.id !== next?.id) closeTournamentMatchRoom();
+
+  if (tournament.finished) {
+    const champion = tournament.playerById(tournament.championId)?.name ?? 'TBD';
+    ui.showTournamentWaiting(
+      tournament.championId === localId ? 'Tournament champion!' : `Tournament complete — ${champion} wins.`
+    );
+    return;
+  }
+
+  if (!next) {
+    const played = tournament.matches.find(
+      (bracketMatch) =>
+        bracketMatch.winnerId &&
+        (bracketMatch.player1?.id === localId || bracketMatch.player2?.id === localId)
+    );
+    const message = played?.winnerId === localId
+      ? 'You advanced — waiting for the other semifinal.'
+      : played
+        ? 'You are out — watch the bracket for the final.'
+        : 'Waiting for the current bracket result.';
+    ui.showTournamentWaiting(message);
+    return;
+  }
+
+  const assignment = tournamentAssignment(next);
+  if (!assignment) return;
+  ui.setTournamentMatch(assignment);
+  // Once a semifinal winner is known, the two finalists are already on their
+  // game screens. Move them into the final automatically instead of making
+  // them back out through the menu while the other players wait.
+  if (ui.menu.hidden && tournamentMatch?.id !== assignment.id && !tournamentTransition) {
+    tournamentTransition = true;
+    enterTournamentMatch(assignment)
+      .catch((error) => ui.showTournamentWaiting(error.message ?? 'Could not enter the next bracket match.'))
+      .finally(() => {
+        tournamentTransition = false;
+      });
+  }
+}
+
+function acceptTournamentResult(report) {
+  if (!tournamentLobby?.isHost || !tournamentStarted || !report) return false;
+  const bracketMatch = tournament.getMatch(report.matchId);
+  if (!bracketMatch) return false;
+  if (
+    report.reporterId !== bracketMatch.player1?.id &&
+    report.reporterId !== bracketMatch.player2?.id
+  ) return false;
+  if (!tournament.recordMatchResult(report)) return false;
+  tournamentRevision += 1;
+  broadcastTournamentState();
+  return true;
+}
+
+function submitTournamentResult(report) {
+  if (!tournamentLobby) return;
+  if (tournamentLobby.isHost) acceptTournamentResult(report);
+  else tournamentLobby.send('result', report);
+}
+
+function completeTournamentMatch(winnerRole) {
+  const context = tournamentMatch;
+  if (!context?.playersByRole || !tournamentLobby) return;
+  const winnerId = context.playersByRole[winnerRole];
+  const playerOneIsHost = context.playersByRole.host === context.player1.id;
+  const score1 = playerOneIsHost ? match.scoreHost : match.scoreGuest;
+  const score2 = playerOneIsHost ? match.scoreGuest : match.scoreHost;
+  submitTournamentResult({
+    matchId: context.id,
+    winnerId,
+    score1,
+    score2,
+    reporterId: tournamentLobby.player.id,
+  });
+}
+
+function leaveTournament() {
+  closeTournamentMatchRoom();
+  tournamentLobby?.close();
+  tournamentLobby = null;
+  tournamentStarted = false;
+  tournamentMatch = null;
+  tournamentTransition = false;
+  tournamentLink = '';
+  tournamentRevision = 0;
+  tournament.localPlayerId = null;
+  clearTournamentFromUrl();
 }
 
 // The board reads the match straight off these, so it can show a score
@@ -2249,8 +2534,7 @@ function applyGame() {
   if (tournamentMode) {
     const rallyIndex = MODES.findIndex((entry) => entry.type === 'rally');
     if (rallyIndex >= 0) machine.modeIndex = rallyIndex;
-    tournament.reset();
-    if (ui.menu.hidden) ui.updateTournament(tournament.snapshot());
+    if (tournamentStarted && ui.menu.hidden) ui.updateTournament(tournament.snapshot());
   } else if (ui.tournamentHud) {
     ui.tournamentHud.hidden = true;
   }
