@@ -70,6 +70,10 @@ export const OPPONENT_SKILL = {
   easy: { reach: 1.1, maxSpeed: 2.1, error: 0.20, missChance: 0.34, pace: 3.8 },
   normal: { reach: 1.7, maxSpeed: 3.2, error: 0.10, missChance: 0.07, pace: 4.4 },
   hard: { reach: 2.1, maxSpeed: 4.0, error: 0.05, missChance: 0.02, pace: 4.9 },
+  // The fly's paddle placement comes from the connectome reservoir (or its
+  // analytic fallback) instead of our predictor — see `brain` below. It gets
+  // the physique of `hard` with almost nothing let through.
+  fly: { reach: 2.2, maxSpeed: 4.6, error: 0, missChance: 0.01, pace: 4.7, useBrain: true },
 };
 
 const _p = new THREE.Vector3();
@@ -99,6 +103,10 @@ export class Opponent {
     this.active = false;
     this.state = 'idle'; // idle | tracking | swinging | recover
     this.targetBall = null;
+    // Optional FlyBrain controller. On the 'fly' difficulty it decides WHERE
+    // the paddle waits (its readout maps ball state to a paddle target);
+    // everything about how the stroke is played stays ours.
+    this.brain = null;
 
     this._intercept = new THREE.Vector3().copy(READY);
     this._swingVel = new THREE.Vector3();
@@ -194,7 +202,9 @@ export class Opponent {
 
       this.targetBall = ball;
       this.state = 'tracking';
+      this.brain?.reset?.();
       this._intercept.copy(plan.point);
+      this._applyBrain(ball);
       this._interceptVel.copy(plan.velocity);
       this._interceptSpin.copy(plan.spin);
       this._timeToHit = plan.time;
@@ -204,6 +214,35 @@ export class Opponent {
       this._willMiss = Math.random() < this.skill.missChance;
       return;
     }
+  }
+
+  // On the fly difficulty, the connectome readout decides where the paddle
+  // stands. Only x and y are its to give — the hitting plane, the arrival
+  // time and the stroke all stay on our physics, so the fly can be exactly
+  // as odd as a fly without ever swinging at empty air.
+  _applyBrain(ball) {
+    // Only the real connectome model gets to steer. The class's built-in
+    // analytic fallback extrapolates a straight line to the plane — no
+    // bounce, no drag, no Magnus — which on our physics put the paddle a
+    // third of a metre wide and pinned to its floor clamp. Absent the model,
+    // our own predictor (already copied into _intercept) is the fallback.
+    if (!this.skill.useBrain || !this.brain?.ready) return;
+    const p = ball.mesh.position;
+    const v = ball.velocity;
+    const out = this.brain.step({ x: p.x, y: p.y, z: p.z, vx: v.x, vy: v.y, vz: v.z });
+    // The readout was trained on a different court, so it proposes and our
+    // physics disposes: the fly's character shows in how the paddle drifts
+    // inside this window, and the window keeps it from swinging at air.
+    this._intercept.x = THREE.MathUtils.clamp(
+      out.targetX,
+      this._intercept.x - 0.3,
+      this._intercept.x + 0.3
+    );
+    this._intercept.y = THREE.MathUtils.clamp(
+      out.targetY,
+      this._intercept.y - 0.25,
+      this._intercept.y + 0.25
+    );
   }
 
   // Roll the ball forward through the same forces the simulation applies,
@@ -271,6 +310,7 @@ export class Opponent {
         this._interceptSpin.copy(plan.spin);
         this._timeToHit = plan.time;
       }
+      this._applyBrain(ball);
     }
 
     // Aim short of the real intercept when this ball is meant to get away

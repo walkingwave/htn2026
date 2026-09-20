@@ -55,6 +55,8 @@ export const OPTIONS = {
     { label: 'Easy', value: 'easy' },
     { label: 'Normal', value: 'normal' },
     { label: 'Hard', value: 'hard' },
+    // Paddle placement driven by a fruit fly's connectome (see flybrain.js)
+    { label: 'Fly brain', value: 'fly' },
   ],
 };
 

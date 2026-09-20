@@ -19,6 +19,7 @@ import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
 import { MarkerPaddleTracker, TRACKER_STATE } from './vision/markerPaddleTracker.js';
 import { Opponent } from './opponent.js';
+import { FlyBrain } from './flybrain.js';
 import { Coach, SCENARIOS } from './coach.js';
 import {
   createRoom,
@@ -190,6 +191,18 @@ scene.add(targetZone.mesh);
 const opponent = new Opponent();
 scene.add(opponent.mesh);
 machine.server = opponent; // in rally mode the opponent puts the ball in play
+
+// The "Fly brain" difficulty: paddle placement read out of a fruit fly's
+// connectome, used as a fixed reservoir. Without the exported model file
+// (public/flybrain/model.json — built on the flybrain branch) it plays a
+// near-perfect analytic intercept instead, so the difficulty always works.
+const flyBrain = new FlyBrain();
+// The fallback predicts to the fly's own hitting plane; point it at ours.
+flyBrain.planeZ = -(TABLE.LENGTH / 2) - 0.1;
+flyBrain.load().then((ok) => {
+  if (ok) console.info('[FlyBrain] connectome model loaded');
+});
+opponent.brain = flyBrain;
 
 // Coach mode: a lesson is a path the bat should travel, shown as a ribbon
 // and scored on how closely you trace it.
