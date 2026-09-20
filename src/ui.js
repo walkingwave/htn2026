@@ -70,6 +70,7 @@ export class UI {
     this._buildSettings();
     this._buildToast();
     this._buildCoachPanel();
+    this._buildTournamentHud();
     this._buildVersusHud();
     this._buildScores();
     this._buildCamPreview();
@@ -252,12 +253,10 @@ export class UI {
     this._setProductCursor(this._productChoices.indexOf(value), false);
     this._productMode = value;
     if (value === 'tournament') {
-      this.toast('Tournament mode is coming soon');
-      this.sfx.ui(false);
-      return;
-    }
-
-    if (value === 'friend') {
+      this.setGame('tournament');
+      const rallyIndex = MODES.findIndex((mode) => mode.type === 'rally');
+      if (rallyIndex >= 0) this.machine.modeIndex = rallyIndex;
+    } else if (value === 'friend') {
       this.setGame('versus');
     } else {
       this.setGame('arcade');
@@ -318,6 +317,7 @@ export class UI {
   // two players on two different ones.
   _transportNote() {
     const kind = this._versus?.kind;
+    if (kind === 'webrtc') return 'Connected directly over WebRTC.';
     if (kind === 'websocket') return 'Connected over this Wi-Fi.';
     if (kind === 'supabase') return 'Connected over the internet.';
     if (kind === 'local') return 'Local only — this connects tabs on this machine, not another device.';
@@ -564,6 +564,7 @@ export class UI {
     if (this._screens) this.setScreen('game');
     if (this.bar) this.bar.hidden = true;
     if (this.settingsEl) this.settingsEl.hidden = true;
+    if (this.tournamentHud) this.tournamentHud.hidden = true;
   }
 
   // --- Coaching panel --------------------------------------------------
@@ -622,6 +623,37 @@ export class UI {
       this.coachVoice.textContent = mode === 'auto' ? 'AUTO' : `VOICE ${mode.toUpperCase()}`;
       this.coachVoice.title = 'Cycle narrator: auto, narrator A, narrator B';
     }
+  }
+
+  // The coach is a live companion in every game, not just guided lessons.
+  // Showing a clear Ready state before the first ball makes its availability
+  // obvious in ordinary drills, bot play, and tournaments.
+  showCoachReady(label = 'Live coaching ready') {
+    if (!this.coachPanel) return;
+    this.coachPanel.hidden = false;
+    this.coachScenario.textContent = label;
+    this.coachScore.textContent = 'READY';
+    this.coachMetrics.textContent = 'LIVE TELEMETRY ARMED';
+    this.coachFeedback.textContent = 'Hit a ball for a precise technique correction.';
+    this.coachSummary.hidden = true;
+    this.setCoachProfileStatus('LIVE');
+  }
+
+  // Ordinary rally contacts do not have a prescribed path, so expose the
+  // measurable stroke qualities instead of pretending they are drill scores.
+  showLiveCoachShot(shot = {}) {
+    if (!this.coachPanel) return;
+    this.coachPanel.hidden = false;
+    this.coachScenario.textContent = shot.label || 'Live stroke';
+    this.coachScore.textContent = `${Math.round(shot.total ?? 0)}%`;
+    this.coachMetrics.textContent =
+      `PACE ${Math.round(shot.pace ?? 0)} · ` +
+      `DEPTH ${Math.round(shot.depth ?? 0)} · ` +
+      `FACE ${Math.round(shot.face ?? 0)} · ` +
+      `SPIN ${Math.round(shot.spin ?? 0)}`;
+    this.coachFeedback.textContent = shot.note || 'Reading this stroke…';
+    this.coachSummary.hidden = true;
+    this.setCoachProfileStatus('ANALYZING');
   }
 
   showCoachScore(score, scenario = '') {
@@ -768,7 +800,8 @@ export class UI {
   _machineCommandsAllowed(what) {
     const game = this.settings.get('game');
     if (game === 'arcade') return true;
-    this.toast(game === 'versus' ? `No ${what} in a match` : `No ${what} in Coach`);
+    const label = game === 'versus' ? 'a match' : game === 'tournament' ? 'a tournament' : 'Coach';
+    this.toast(`No ${what} in ${label}`);
     this.sfx.ui(false);
     return false;
   }
@@ -809,6 +842,7 @@ export class UI {
     this.settingsEl.hidden = true;
     this.scoresEl.hidden = true;
     this.versusHud.hidden = true;
+    this.tournamentHud.hidden = true;
     this.hideCountdown();
     this._hideVersusWin();
     this._versus = null;
@@ -884,6 +918,45 @@ export class UI {
     } else if (e.code === 'KeyC') {
       this.onRecenter?.();
     }
+  }
+
+  // --- Tournament and versus HUD ---------------------------------------
+
+  _buildTournamentHud() {
+    const el = document.createElement('aside');
+    el.id = 'tournament-hud';
+    el.hidden = true;
+    el.innerHTML = `
+      <div class=tournament__title>TOURNAMENT</div>
+      <div data-tournament-round></div>
+      <pre data-tournament-bracket></pre>
+      <div data-tournament-score></div>
+    `;
+    document.body.appendChild(el);
+    this.tournamentHud = el;
+    this.tournamentRound = el.querySelector('[data-tournament-round]');
+    this.tournamentBracket = el.querySelector('[data-tournament-bracket]');
+    this.tournamentScore = el.querySelector('[data-tournament-score]');
+  }
+
+  updateTournament(snapshot) {
+    if (!snapshot || !this.tournamentHud) return;
+    this._tournamentSnapshot = snapshot;
+    this.tournamentHud.hidden = false;
+    const current = snapshot.matches.find((match) => match.id === snapshot.currentMatchId);
+    this.tournamentRound.textContent = snapshot.finished
+      ? (current?.winner === 'You' ? 'CHAMPION' : 'TOURNAMENT COMPLETE')
+      : `ROUND ${(current?.round ?? 0) + 1} · FIRST TO ${snapshot.target}`;
+    this.tournamentScore.textContent = current
+      ? `${current.player1} ${current.score1} — ${current.score2} ${current.player2}`
+      : '';
+    this.tournamentBracket.textContent = snapshot.matches
+      .map((match) => {
+        const round = ['SEMIFINAL', 'FINAL', 'CHAMPIONSHIP'][match.round] ?? `ROUND ${match.round + 1}`;
+        const winner = match.winner ? `  ✓ ${match.winner}` : '';
+        return `${round}\n${match.player1} ${match.score1} — ${match.score2} ${match.player2}${winner}`;
+      })
+      .join('\n\n');
   }
 
   // --- Versus HUD -------------------------------------------------------
@@ -1121,6 +1194,18 @@ export class UI {
         ? `room ${this._versus.code} · ${this._versus.role}`
         : 'no room';
       this.bar.querySelector('[data-toggle-label]').textContent = 'Pause';
+      return;
+    }
+
+    if (mode === 'tournament') {
+      const current = this._tournamentSnapshot?.matches?.find(
+        (match) => match.id === this._tournamentSnapshot.currentMatchId
+      );
+      this.bar.querySelector('[data-bar-mode]').textContent = 'Tournament';
+      this.bar.querySelector('[data-bar-stats]').textContent = current
+        ? `${current.player1} ${current.score1} — ${current.score2} ${current.player2}`
+        : 'opening bracket';
+      this.bar.querySelector('[data-toggle-label]').textContent = 'Live';
       return;
     }
 

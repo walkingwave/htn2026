@@ -32,7 +32,7 @@ export function scoreFor(summary, category) {
   if (category === 'coach') {
     return Math.max(0, Math.round(summary.lessonBest * 12 + summary.lessonAttempts * 3));
   }
-  if (category === 'versus') {
+  if (category === 'versus' || category === 'tournament') {
     return Math.max(0, Math.round(summary.pointsWon * 100 + (summary.matchWon ? 500 : 0)));
   }
   return Math.max(
@@ -50,7 +50,9 @@ export function scoreFor(summary, category) {
 
 export function isWorthRecording(summary, category) {
   if (category === 'coach') return summary.lessonAttempts > 0;
-  if (category === 'versus') return summary.pointsWon > 0 || summary.matchWon;
+  if (category === 'versus' || category === 'tournament') {
+    return summary.pointsWon > 0 || summary.matchWon;
+  }
   return summary.hits > 0;
 }
 

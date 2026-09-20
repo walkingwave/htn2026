@@ -14,9 +14,15 @@ create table if not exists public.leaderboard_entries (
   score integer not null check (score >= 0),
   best_streak integer not null default 0 check (best_streak >= 0),
   -- One board per game: they ask completely different things of the player.
-  category text not null check (category in ('arcade', 'coach', 'versus')),
+  category text not null check (category in ('arcade', 'coach', 'versus', 'tournament')),
   created_at timestamptz not null default now()
 );
+
+alter table public.leaderboard_entries
+  drop constraint if exists leaderboard_entries_category_check;
+alter table public.leaderboard_entries
+  add constraint leaderboard_entries_category_check
+  check (category in ('arcade', 'coach', 'versus', 'tournament'));
 
 create index if not exists leaderboard_entries_category_score_idx
   on public.leaderboard_entries (category, score desc);

@@ -51,6 +51,7 @@ export class Ball {
     this.countedHit = false;
     this.countedReturn = false;
     this.countedMiss = false;
+    this.tournamentPointCounted = false;
   }
 
   serve(position, velocity, spin) {
@@ -71,6 +72,7 @@ export class Ball {
     this.countedHit = false;
     this.countedReturn = false;
     this.countedMiss = false;
+    this.tournamentPointCounted = false;
   }
 
   deactivate() {

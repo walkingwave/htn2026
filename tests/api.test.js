@@ -211,6 +211,12 @@ test('Tiger leaderboard and telemetry routes fail clearly before database setup'
   assert.equal(leaderboardRes.statusCode, 503);
   assert.match(leaderboardRes.payload.error, /TIGER_DATABASE_URL/);
 
+  // Tournament is a first-class board category, not a client-only label.
+  const tournamentRes = mockResponse();
+  await leaderboardHandler({ method: 'GET', url: '/api/leaderboard?category=tournament' }, tournamentRes);
+  assert.equal(tournamentRes.statusCode, 503);
+  assert.match(tournamentRes.payload.error, /TIGER_DATABASE_URL/);
+
   const telemetryRes = mockResponse();
   await telemetryHandler(mockRequest({ event_type: 'coach_score' }), telemetryRes);
   assert.equal(telemetryRes.statusCode, 503);

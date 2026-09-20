@@ -43,6 +43,7 @@ export const OPTIONS = {
     { label: 'Arcade', value: 'arcade' },
     { label: 'Coach', value: 'coach' },
     { label: 'Versus', value: 'versus' },
+    { label: 'Tournament', value: 'tournament' },
   ],
   // Which situation Coach drills.
   scenario: [
@@ -70,7 +71,7 @@ const DEFAULTS = {
   paddleSource: 'controller',
   difficulty: 'normal',
   scenario: 'serve',
-  game: 'arcade', // 'arcade' | 'coach' | 'versus'
+  game: 'arcade', // 'arcade' | 'coach' | 'versus' | 'tournament'
   sound: true,
   aimMarker: true,
   playerName: 'Player', // shown on the leaderboard

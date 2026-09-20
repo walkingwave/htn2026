@@ -536,7 +536,8 @@ canvas {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  pointer-events: none;
+  /* Controls stay clickable so narration can be toggled mid-rally. */
+  pointer-events: auto;
 }
 #versus[hidden] {
   display: none;
@@ -704,6 +705,47 @@ canvas {
   padding-top: 10px;
   border-top: 1px solid rgba(242, 239, 230, 0.18);
   color: var(--red);
+}
+
+/* The bracket deliberately sits opposite the top-right coach, so the two
+   live information surfaces remain readable together. */
+#tournament-hud {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 16;
+  width: min(300px, calc(100vw - 36px));
+  padding: 13px 15px 15px;
+  border-left: 2px solid var(--red);
+  background: rgba(11, 11, 12, 0.88);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.28);
+  color: var(--paper);
+  font-size: 10px;
+  line-height: 1.45;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#tournament-hud[hidden] {
+  display: none;
+}
+.tournament__title {
+  color: var(--red);
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+#tournament-hud [data-tournament-round] {
+  margin-top: 8px;
+  color: var(--paper);
+}
+#tournament-hud pre {
+  margin: 9px 0;
+  color: var(--dim);
+  font: inherit;
+  white-space: pre-wrap;
+}
+#tournament-hud [data-tournament-score] {
+  color: var(--paper);
+  font-weight: 700;
 }
 
 /* Bottom status line ----------------------------------------------------- */

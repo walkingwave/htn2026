@@ -6,7 +6,7 @@ import {
 } from './_lib/http.js';
 import { tigerQuery } from './_lib/tiger.js';
 
-const CATEGORIES = new Set(['arcade', 'coach', 'versus']);
+const CATEGORIES = new Set(['arcade', 'coach', 'versus', 'tournament']);
 
 function category(value) {
   const result = requiredString(value, 'category', 20);

@@ -7,9 +7,17 @@ create table if not exists public.leaderboard_entries (
   player_name text not null check (char_length(player_name) between 1 and 24),
   score integer not null check (score between 0 and 1000000),
   best_streak integer not null default 0 check (best_streak between 0 and 10000),
-  category text not null check (category in ('arcade', 'coach', 'versus')),
+  category text not null check (category in ('arcade', 'coach', 'versus', 'tournament')),
   created_at timestamptz not null default now()
 );
+
+-- Existing hackathon databases may have been created before tournament was a
+-- category. Refresh the named generated check so they can accept its scores.
+alter table public.leaderboard_entries
+  drop constraint if exists leaderboard_entries_category_check;
+alter table public.leaderboard_entries
+  add constraint leaderboard_entries_category_check
+  check (category in ('arcade', 'coach', 'versus', 'tournament'));
 
 create index if not exists leaderboard_entries_category_score_idx
   on public.leaderboard_entries (category, score desc, created_at asc);

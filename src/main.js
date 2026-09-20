@@ -11,7 +11,7 @@ import { VRMenu } from './vrMenu.js';
 import { Paddle, DESKTOP_PADDLE_SCALE } from './paddle.js';
 import { Ball } from './ball.js';
 import { PhysicsWorld } from './physics.js';
-import { BallMachine } from './ballMachine.js';
+import { BallMachine, MODES } from './ballMachine.js';
 import { Game, SCOREBOARD_POSITION } from './game.js';
 import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
@@ -34,6 +34,7 @@ import {
   isRealtimeAvailable,
 } from './net.js';
 import { VersusMatch } from './versus.js';
+import { Tournament } from './tournament.js';
 import { summarizeMatch, analyzeShot, narrate, recordProfileEvent, recordTelemetry, getProfileSummary } from './backendApi.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
@@ -225,9 +226,10 @@ const coach = new Coach({
     analyzeShot(score, { scenario: coach.scenario.id, advice: coach.advice })
       .then(({ analysis }) => {
         ui.showCoachFeedback(analysis);
+        ui.setCoachProfileStatus('OPENAI');
         narrate(analysis, 'a').catch(() => {});
       })
-      .catch(() => {});
+      .catch(() => ui.setCoachProfileStatus('LOCAL'));
     const playerId = settings.get('playerName') || 'anonymous';
     recordProfileEvent(
       { type: 'coach_score', scenario: coach.scenario.id, score },
@@ -304,6 +306,22 @@ const ui = new UI({
     // machine stays down for it.
     machine.enabled = settings.get('game') !== 'versus';
     game.reset();
+    const selectedGame = settings.get('game');
+    if (selectedGame === 'tournament') {
+      const rallyIndex = MODES.findIndex((entry) => entry.type === 'rally');
+      if (rallyIndex >= 0) machine.modeIndex = rallyIndex;
+      tournament.reset();
+      ui.updateTournament(tournament.snapshot());
+    }
+    ui.showCoachReady(
+      selectedGame === 'tournament'
+        ? `Tournament · ${tournament.opponent?.name ?? 'Opponent'}`
+        : selectedGame === 'coach'
+          ? `Coach · ${coach.scenario.name}`
+          : selectedGame === 'versus'
+            ? 'Match coaching ready'
+            : 'Live shot coaching ready'
+    );
     // The camera only opens once you are actually playing, not while the
     // setting sits there remembered from last time.
     if (!mode) syncCameraInput();
@@ -369,8 +387,14 @@ const ui = new UI({
     accuracy: game.accuracy,
     lessonBest: game.lessonBest,
     lessonAttempts: game.lessonAttempts,
-    pointsWon: netMode === 'guest' ? match.scoreGuest : match.scoreHost,
-    matchWon: Boolean(netMode) && match.winner === netMode,
+    pointsWon: settings.get('game') === 'tournament'
+      ? tournamentPointsWon()
+      : netMode === 'guest'
+        ? match.scoreGuest
+        : match.scoreHost,
+    matchWon: settings.get('game') === 'tournament'
+      ? tournament.finished && tournament.matches.at(-1)?.winner === 0
+      : Boolean(netMode) && match.winner === netMode,
   }),
   // A link with ?room=CODE means someone invited you: the lobby opens on the
   // join step with the code already filled in.
@@ -380,6 +404,107 @@ const ui = new UI({
 });
 
 xr.detectSupport().then((support) => ui.applyXRSupport(support));
+
+// --- Live per-shot coaching -----------------------------------------------
+// Coach drills already score a traced stroke. This companion score covers
+// ordinary balls as well, using only measurements we can trust at contact:
+// outgoing pace/direction, blade orientation, and generated spin. It gives
+// the player immediate local guidance, then lets the server replace that line
+// with OpenAI's single precise correction when credentials are available.
+let lastLiveCoachAt = -Infinity;
+let liveCoachSequence = 0;
+let liveCoachRequestActive = false;
+
+function percent(value) {
+  return Math.round(THREE.MathUtils.clamp(value, 0, 100));
+}
+
+function assessLiveShot(ball, paddle) {
+  const speed = ball.velocity.length();
+  const towardOpponent = speed > 1e-4 ? Math.max(0, -ball.velocity.z / speed) : 0;
+  const pace = percent((speed / 7) * 100);
+  const depth = percent(towardOpponent * 100);
+  const face = percent(Math.abs(paddle.bladeNormal.z) * 100);
+  const spin = percent((ball.spin.length() / 180) * 100);
+  const total = percent(pace * 0.28 + depth * 0.42 + face * 0.2 + spin * 0.1);
+
+  let note = 'Nice contact — stay balanced and recover for the next ball.';
+  if (depth < 58) note = 'Finish forward through the ball so the return clears the net.';
+  else if (pace < 24) note = 'Accelerate through contact; let the paddle carry the ball deep.';
+  else if (face < 52) note = 'Square the paddle face a little more at contact.';
+  else if (Math.abs(ball.velocity.x) > Math.abs(ball.velocity.z) * 0.72) {
+    note = 'Keep your path straighter through contact before adding width.';
+  }
+
+  return {
+    label: settings.get('game') === 'tournament'
+      ? `Tournament shot · ${tournament.opponent?.name ?? 'Opponent'}`
+      : 'Live stroke',
+    total,
+    pace,
+    depth,
+    face,
+    spin,
+    note,
+    outgoingSpeed: Math.round(speed * 100) / 100,
+    outgoingDirection: {
+      x: Math.round(ball.velocity.x * 100) / 100,
+      y: Math.round(ball.velocity.y * 100) / 100,
+      z: Math.round(ball.velocity.z * 100) / 100,
+    },
+  };
+}
+
+function coachLiveShot(ball, paddle) {
+  // Guided lessons already emit their own richer trace score, and the bot's
+  // paddle is not the player we are coaching.
+  if (machine.isCoachMode || paddle?.isOpponent) return;
+  const now = performance.now();
+  if (now - lastLiveCoachAt < 850) return;
+  lastLiveCoachAt = now;
+
+  const shot = assessLiveShot(ball, paddle);
+  const sequence = ++liveCoachSequence;
+  const playerId = settings.get('playerName') || 'anonymous';
+  ui.showLiveCoachShot(shot);
+
+  const telemetry = {
+    player_id: playerId,
+    event_type: 'live_shot',
+    scenario: settings.get('game'),
+    total: shot.total,
+    path: shot.depth,
+    sync: shot.pace,
+    face: shot.face,
+    timing: shot.spin,
+    payload: shot,
+  };
+  recordTelemetry(telemetry).catch(() => {});
+  recordProfileEvent({ type: 'live_shot', shot }, playerId).catch(() => {});
+
+  // One request at a time keeps rapid rallies usable and avoids reading an
+  // old correction after the player has already hit the next ball.
+  if (liveCoachRequestActive) return;
+  liveCoachRequestActive = true;
+  analyzeShot(shot, {
+    game: settings.get('game'),
+    player: playerId,
+    opponent: settings.get('game') === 'tournament' ? tournament.opponent?.name : undefined,
+  })
+    .then(({ analysis }) => {
+      if (sequence !== liveCoachSequence || !analysis) return;
+      ui.showCoachFeedback(analysis);
+      ui.setCoachProfileStatus('OPENAI');
+      // The same compact correction in the panel is read through ElevenLabs.
+      narrate(analysis, 'a').catch(() => {});
+    })
+    .catch(() => {
+      if (sequence === liveCoachSequence) ui.setCoachProfileStatus('LOCAL');
+    })
+    .finally(() => {
+      liveCoachRequestActive = false;
+    });
+}
 
 // --- Physics ----------------------------------------------------------------
 const physics = new PhysicsWorld();
@@ -398,6 +523,10 @@ physics.onBounce = (ball, event, paddle) => {
   // needs to see what happens to the ball it served.
   coach.onBallEvent(ball, event, paddle);
 
+  if (event === 'paddle' && !paddle?.isOpponent) {
+    coachLiveShot(ball, paddle);
+  }
+
   // The opponent's returns arrive through the same contact path as yours,
   // so they have to be told apart: one is an exchange in the rally, the
   // other is a hit on your scorecard.
@@ -411,6 +540,11 @@ physics.onBounce = (ball, event, paddle) => {
 
   if (event === 'paddle') {
     pulse(ball);
+    return;
+  }
+
+  if (event === 'floor' && settings.get('game') === 'tournament') {
+    handleTournamentFloor(ball);
     return;
   }
 
@@ -1431,6 +1565,7 @@ let phoneAimLockTime = 0;
 let phoneLastPose = null;
 let phoneCamTracker = null;
 const match = new VersusMatch();
+const tournament = new Tournament();
 let versusBall = null; // the rally ball (host authoritative)
 let versusServeTimer = 0; // countdown before the host's next serve
 let netSendAccum = 0; // throttle for outbound state
@@ -1679,6 +1814,73 @@ function broadcastHostState() {
     ball,
     paddle: bladePacket(),
   });
+}
+
+function tournamentPointsWon() {
+  return tournament.matches.reduce((total, match) => {
+    return total + (match.player1?.id === 0 ? match.score1 : match.player2?.id === 0 ? match.score2 : 0);
+  }, 0);
+}
+
+function handleTournamentFloor(ball) {
+  if (ball.tournamentPointCounted || tournament.finished) return;
+  ball.tournamentPointCounted = true;
+
+  // A bounce that falls on the player's near (+Z) end means the bot won the
+  // point; one on the far end means the player beat it. The bracket never
+  // invents a result -- every point comes from this real ball outcome.
+  const scorer = ball.mesh.position.z > 0 ? tournament.opponent?.id : 0;
+  if (scorer == null) return;
+
+  const playerId = settings.get('playerName') || 'anonymous';
+  const current = tournament.currentMatch;
+  game.endRally(scorer === 0 ? 'Point won' : 'Point lost');
+  ball.deactivate();
+  const roundWinner = tournament.scorePoint(scorer);
+  ui.updateTournament(tournament.snapshot());
+  game.revision++;
+
+  recordTelemetry({
+    player_id: playerId,
+    event_type: 'tournament_point',
+    scenario: `round-${current?.round ?? 0}`,
+    payload: {
+      scorer: scorer === 0 ? 'You' : tournament.players[scorer]?.name ?? 'Opponent',
+      match: current?.id,
+      score1: current?.score1,
+      score2: current?.score2,
+    },
+  }).catch(() => {});
+
+  if (roundWinner === null) return;
+  if (!tournament.finished) {
+    ui.toast(`Next match: ${tournament.opponent?.name ?? 'Opponent'}`);
+    ui.showCoachReady(`Tournament · ${tournament.opponent?.name ?? 'Opponent'}`);
+    return;
+  }
+
+  machine.enabled = false;
+  const champion = roundWinner === 0;
+  const matchResult = {
+    type: 'tournament',
+    champion: champion ? 'You' : tournament.players[roundWinner]?.name ?? 'Opponent',
+    pointsWon: tournamentPointsWon(),
+    matches: tournament.snapshot().matches,
+  };
+  ui.toast(champion ? 'Tournament champion!' : 'Tournament over');
+  summarizeMatch(matchResult)
+    .then(({ summary }) => {
+      ui.showMatchSummary(summary);
+      ui.setCoachProfileStatus('POST-MATCH');
+      narrate(summary, 'b').catch(() => {});
+    })
+    .catch(() => {});
+  recordProfileEvent({ type: 'tournament_result', ...matchResult }, playerId).catch(() => {});
+  recordTelemetry({
+    player_id: playerId,
+    event_type: 'tournament_result',
+    payload: matchResult,
+  }).catch(() => {});
 }
 
 function handleVersusHostBounce(ball, event) {
@@ -2036,6 +2238,7 @@ function applyScenario() {
 // down for it rather than it being one more drill in the rotation.
 function applyGame() {
   const coaching = settings.get('game') === 'coach';
+  const tournamentMode = settings.get('game') === 'tournament';
   machine.coachActive = coaching;
   // Clear on every switch, not just into Coach. A held ball never falls and
   // never recycles, so leaving one behind parked it in mid-air over the
@@ -2043,6 +2246,14 @@ function applyGame() {
   clearBalls();
   game.reset();
   coach.reset();
+  if (tournamentMode) {
+    const rallyIndex = MODES.findIndex((entry) => entry.type === 'rally');
+    if (rallyIndex >= 0) machine.modeIndex = rallyIndex;
+    tournament.reset();
+    if (ui.menu.hidden) ui.updateTournament(tournament.snapshot());
+  } else if (ui.tournamentHud) {
+    ui.tournamentHud.hidden = true;
+  }
   game.revision++;
 }
 
