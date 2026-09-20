@@ -69,6 +69,7 @@ export class UI {
     this._buildToast();
     this._buildVersusHud();
     this._buildScores();
+    this._buildCamPreview();
 
     window.addEventListener('keydown', (e) => this._onKey(e));
     this.showMenu();
@@ -634,6 +635,42 @@ export class UI {
 
   _hideVersusWin() {
     if (this.winEl) this.winEl.hidden = true;
+  }
+
+  // --- Webcam preview ---------------------------------------------------
+  //
+  // Colour tracking fails for reasons you can see instantly and cannot guess
+  // at all: it locked onto a red jumper, the rubber is in shadow, your hand is
+  // over the face. A thumbnail of what the camera is matching turns "it
+  // doesn't work" into "move the lamp".
+
+  _buildCamPreview() {
+    const el = document.createElement('div');
+    el.id = 'campreview';
+    el.hidden = true;
+    el.innerHTML = `
+      <canvas class="campreview__view" width="192" height="144"></canvas>
+      <div class="campreview__status" data-cam-status></div>
+    `;
+    document.body.appendChild(el);
+    this.camPreview = el;
+    this.camCanvas = el.querySelector('canvas');
+    this.camStatus = el.querySelector('[data-cam-status]');
+  }
+
+  // `tracker` is a PaddleTracker, or null to put the preview away.
+  showCamPreview(tracker) {
+    if (!tracker) {
+      this.camPreview.hidden = true;
+      return null;
+    }
+    this.camPreview.hidden = false;
+    tracker.attachDebugCanvas(this.camCanvas);
+    return this.camCanvas;
+  }
+
+  setCamStatus(text) {
+    if (this.camStatus) this.camStatus.textContent = text;
   }
 
   // --- Scores -----------------------------------------------------------

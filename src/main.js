@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 import { createTable } from './table.js';
@@ -540,12 +539,21 @@ function startWebcamBat() {
   if (camTracker) return;
   camTracker = new PaddleTracker();
   camTracker.onState = (state, error) => {
-    if (state === TRACKER_STATE.ERROR) ui.toast(error ?? 'Camera unavailable');
-    else if (state === TRACKER_STATE.CALIBRATING) {
+    // The preview carries the running commentary; toasts are for the moments
+    // that change what the player should do.
+    if (state === TRACKER_STATE.ERROR) {
+      ui.setCamStatus(error ?? 'Camera unavailable');
+      ui.toast(error ?? 'Camera unavailable');
+    } else if (state === TRACKER_STATE.CALIBRATING) {
+      ui.setCamStatus('Hold the bat in the box · click');
       ui.toast('Hold your bat up, face on — then click to calibrate');
-    } else if (state === TRACKER_STATE.TRACKING) ui.toast('Webcam bat live');
-    else if (state === TRACKER_STATE.LOST) ui.toast('Lost the bat — hold it up again');
+    } else if (state === TRACKER_STATE.TRACKING) {
+      ui.setCamStatus('Tracking · V to recalibrate');
+    } else if (state === TRACKER_STATE.LOST) {
+      ui.setCamStatus('Lost it — hold the bat up');
+    }
   };
+  ui.showCamPreview(camTracker);
   camTracker.start().catch((err) => {
     ui.toast(err?.message ?? 'Camera failed');
     stopWebcamBat();
@@ -555,6 +563,7 @@ function startWebcamBat() {
 function stopWebcamBat() {
   camTracker?.stop();
   camTracker = null;
+  ui.showCamPreview(null);
 }
 
 // Pose the rig from the tracker. Camera space is +X right, +Y up, −Z away
@@ -612,8 +621,25 @@ window.addEventListener(
 // keydown listener for commands; these are movement, so they live here.
 const DESKTOP_KEYS = { ArrowLeft: 0, ArrowRight: 0, ArrowUp: 0, ArrowDown: 0, KeyF: 0 };
 window.addEventListener('keydown', (e) => {
-  if (!(e.code in DESKTOP_KEYS)) return;
   if (!ui.menu.hidden) return;
+
+  // Re-learn the bat's colour without leaving the game. Lighting changes as
+  // you move around a room, and a key beats going back to the menu for it.
+  if (e.code === 'KeyV' && camTracker) {
+    if (camTracker.calibrateColour()) ui.toast('Bat colour re-learned');
+    else ui.toast('Hold the bat in the middle of the frame');
+    return;
+  }
+  // Which way an ambiguous tilt is read, for the rare case it latches on to
+  // the wrong sign — a paddle leaning away looks identical to one leaning
+  // toward the camera, so this cannot be resolved from the image alone.
+  if (e.code === 'KeyB' && camTracker) {
+    camTracker.flipTilt();
+    ui.toast('Bat tilt flipped');
+    return;
+  }
+
+  if (!(e.code in DESKTOP_KEYS)) return;
   DESKTOP_KEYS[e.code] = 1;
   if (e.code === 'KeyF') swingDesktopBat();
 });
@@ -1173,12 +1199,47 @@ function pulse(ball) {
   actuator?.pulse?.(0.7, 40);
 }
 
-// --- Desktop fallback: orbit controls for dev without a headset -------------
-const orbit = new OrbitControls(camera, renderer.domElement);
-orbit.target.set(0, TABLE.HEIGHT, 0);
-orbit.update();
-renderer.xr.addEventListener('sessionstart', () => (orbit.enabled = false));
-renderer.xr.addEventListener('sessionend', () => (orbit.enabled = true));
+// --- Desktop camera ---------------------------------------------------------
+// The camera rides with the bat instead of being flown around independently.
+//
+// A free orbit camera is fine for looking at a scene and hopeless for playing
+// in one: judging where a ball is in depth depends on knowing where you are,
+// and if the viewpoint drifts you are re-learning that every rally. Anchoring
+// it to the bat means the bat is always in the same part of the frame, the
+// ball grows straight toward you, and the only thing you have to read is the
+// ball's flight.
+//
+// It follows at a fraction of the bat's travel, not one to one. Matching the
+// bat exactly makes the world swing about whenever you move, which is both
+// unreadable and slightly sickening; trailing it keeps the horizon steady
+// while still turning the view toward the side you are playing from.
+const CAM_FOLLOW_X = 0.35; // how much of the bat's sideways travel to take
+const CAM_FOLLOW_Y = 0.25;
+const CAM_BEHIND = 0.85; // metres behind the blade
+const CAM_HEIGHT = 1.5; // eye height above the floor, near enough standing
+const CAM_EASE = 6; // per second; enough to feel attached, not glued
+
+const _camAim = new THREE.Vector3();
+const _camLook = new THREE.Vector3();
+
+function updateDesktopCamera(dt) {
+  if (renderer.xr.isPresenting) return; // the headset owns the camera
+
+  // Everything here is in rig space, so the guest's flipped rig turns the
+  // view around with it and nothing else has to know.
+  _camAim.set(
+    desktopAim.x * CAM_FOLLOW_X,
+    CAM_HEIGHT + (desktopAim.y - 0.95) * CAM_FOLLOW_Y,
+    desktopAim.z + CAM_BEHIND
+  );
+  camera.position.lerp(_camAim, Math.min(1, dt * CAM_EASE));
+
+  // Look down the table, biased toward the side the bat is on, so moving wide
+  // opens up the angle you are actually playing into.
+  _camLook.set(desktopAim.x * 0.45, TABLE.HEIGHT + 0.12, -TABLE.LENGTH * 0.42);
+  playerRig.localToWorld(_camLook);
+  camera.lookAt(_camLook);
+}
 
 // --- Main loop --------------------------------------------------------------
 const clock = new THREE.Clock();
@@ -1209,6 +1270,7 @@ function tick(dt) {
   // Pose the desktop bat before the paddles sample themselves, so the swing
   // velocity is measured against the pose it actually has this frame.
   updateDesktopBat(dt);
+  updateDesktopCamera(dt);
 
   for (const paddle of paddles) paddle.update(dt);
 

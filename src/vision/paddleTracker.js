@@ -33,6 +33,16 @@ import * as THREE from 'three';
 const PROC_W = 160; // detection runs downscaled; full res buys nothing here
 const PROC_H = 120;
 
+// The mask size a paddle held at a sensible distance produces, in pixels of
+// the downscaled frame. The colour gate is nudged to keep the blob in this
+// band — see _adaptTolerance.
+const TARGET_AREA_MIN = 140;
+const TARGET_AREA_MAX = 900;
+
+// How much of the usual smoothing rate depth gets. Below 1 it lags the other
+// axes, which is the point: see the note where it is applied.
+const DEPTH_DAMPING = 0.35;
+
 export const TRACKER_STATE = {
   IDLE: 'idle',
   REQUESTING: 'requesting',
@@ -78,6 +88,7 @@ export class PaddleTracker {
     this._mask = new Uint8Array(PROC_W * PROC_H);
     this._lastTiltSign = 1;
     this._smoothed = null;
+    this._missed = 0; // consecutive frames with no blob
     this._lastFrameTime = 0;
     this._focalPx = PROC_W; // ~53° horizontal FOV; refined at calibration
   }
@@ -180,16 +191,43 @@ export class PaddleTracker {
     if (this.state === TRACKER_STATE.TRACKING || this.state === TRACKER_STATE.LOST) {
       const blob = this._detect(frame);
       if (blob) {
+        this._adaptTolerance(blob.count);
         this._poseFromBlob(blob);
+        this._missed = 0;
         if (this.state === TRACKER_STATE.LOST) this._setState(TRACKER_STATE.TRACKING);
       } else {
-        this.confidence = 0;
-        if (this.state === TRACKER_STATE.TRACKING) this._setState(TRACKER_STATE.LOST);
+        // Don't call it lost on one bad frame. A hand crossing the rubber, a
+        // fast swing blurring it out, someone walking past the lamp — all
+        // drop a frame or three, and flicking the bat away and back each time
+        // is far worse than holding the last pose for a fifth of a second.
+        this._missed += 1;
+        this.confidence = Math.max(0, this.confidence - 0.2);
+        this._adaptTolerance(0);
+        if (this._missed > 12 && this.state === TRACKER_STATE.TRACKING) {
+          this._setState(TRACKER_STATE.LOST);
+        }
       }
       this._drawDebug(frame, blob);
     } else {
       this._drawDebug(frame, null);
     }
+  }
+
+  // Keep the mask roughly the size a paddle should be.
+  //
+  // One fixed threshold cannot survive a room: move under a lamp and the
+  // rubber washes out until nothing matches; turn toward a window and half
+  // the wall matches instead. Rather than ask the player to recalibrate every
+  // time they move, widen the gate when the blob is starving and tighten it
+  // when it is eating the background. Bounded at both ends, so it can neither
+  // collapse to nothing nor open up to the whole frame.
+  _adaptTolerance(count) {
+    const tol = this.tolerance;
+    const step = count < TARGET_AREA_MIN ? 1.06 : count > TARGET_AREA_MAX ? 0.96 : 1;
+    if (step === 1) return;
+    tol.h = THREE.MathUtils.clamp(tol.h * step, 0.03, 0.12);
+    tol.s = THREE.MathUtils.clamp(tol.s * step, 0.2, 0.55);
+    tol.v = THREE.MathUtils.clamp(tol.v * step, 0.22, 0.6);
   }
 
   // Threshold against the learned colour, then take image moments. Moments
@@ -297,7 +335,17 @@ export class PaddleTracker {
 
     if (this._smoothed) {
       const k = 1 - this.smoothing;
+      const previousZ = this._smoothed.position.z;
       this._smoothed.position.lerp(pos, k);
+
+      // Depth gets its own, heavier smoothing. It is inferred from apparent
+      // size, so a few pixels of wobble on the blob's edge move it by
+      // centimetres — and since the bat's swing velocity is the difference
+      // between frames, that wobble reads as a swing the player never made
+      // and fires the ball off the table. Sideways and vertical position come
+      // from the centroid and are far steadier, so they stay responsive.
+      this._smoothed.position.z = previousZ + (pos.z - previousZ) * k * DEPTH_DAMPING;
+
       this._smoothed.quaternion.slerp(quat, k);
     } else {
       this._smoothed = { position: pos.clone(), quaternion: quat.clone() };

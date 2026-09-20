@@ -40,7 +40,7 @@ Open `https://localhost:5173`, accept the cert warning. You get an orbit-camera 
 | Serve one ball | — | <kbd>S</kbd> |
 | Reset the score | — | <kbd>R</kbd> |
 | Back to main menu | Menu → Quit | <kbd>Esc</kbd> |
-| Look around | Head tracking | Drag to orbit |
+| Look around | Head tracking | The view follows your bat |
 
 ### The paddle
 
@@ -126,7 +126,15 @@ There is no seeded demo data: an empty board means nobody has played yet.
 
 It finds the rubber by colour, so it needs to be shown the colour once: hold the bat up face-on and click. From there, the blob's ellipse gives pose — apparent size is depth, the centroid is x/y, and the minor/major axis ratio is tilt. If it loses the bat, or you never calibrate, the pointer stays in charge, so you are never left with nothing to play with.
 
-Good light and a bat whose rubber isn't the same colour as your shirt both help a lot.
+Good light and a bat whose rubber isn't the same colour as your shirt both help a lot. A thumbnail in the corner shows exactly what the camera is matching, which turns most problems into something you can see rather than guess at. <kbd>V</kbd> re-learns the colour without leaving the game — worth pressing after you move to different light. <kbd>B</kbd> flips the tilt if the bat reads back to front: a paddle leaning away projects identically to one leaning toward the camera, and that ambiguity cannot be resolved from the picture alone.
+
+The colour gate adapts as you play, widening when nothing matches and tightening when too much does, so walking under a lamp no longer means recalibrating. A dropped frame or two — a hand across the rubber, a fast swing blurring it — holds the last pose rather than yanking the bat away.
+
+## The view on a computer
+
+The camera rides with your bat rather than flying around on its own. A free camera is fine for looking at a scene and hopeless for playing in one: judging where the ball is in depth depends on knowing where *you* are, and a viewpoint that drifts means re-learning that every rally. Anchored to the bat, the ball grows straight toward you and the only thing to read is its flight.
+
+It follows at a fraction of the bat's travel rather than one to one — matching exactly swings the whole world about whenever you move, which is unreadable and faintly sickening.
 
 ### Limits worth knowing
 
