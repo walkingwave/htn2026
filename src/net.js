@@ -237,9 +237,12 @@ class WebSocketTransport {
       this.socket.addEventListener('error', () =>
         fail(new Error('LAN relay connection failed.'))
       );
-      this.socket.addEventListener('close', () => {
+      this.socket.addEventListener('close', (event) => {
         this.onOpponent?.(false);
-        fail(new Error('LAN relay closed before joining the room.'));
+        // The relay says why it hung up — "Room is full" above all — and that
+        // is the one thing the player needs to know. Swallowing it leaves
+        // them staring at a lobby that simply never connects.
+        fail(new Error(event.reason || 'LAN relay closed before joining the room.'));
       });
     });
   }
