@@ -1,4 +1,5 @@
 import './ui.css';
+import { MODES } from './ballMachine.js';
 import { buildPauseMenu } from './menuModel.js';
 import { getLeaderboard, submitScore, isWorthRecording } from './leaderboard.js';
 
@@ -77,7 +78,7 @@ export class UI {
     // Arriving on a ?room=CODE link is an invitation, so the menu opens on
     // Versus with the code already filled in — one button from playing.
     if (invitedRoom) {
-      this.chooseGame('versus');
+      this.chooseGame('friend');
       this.lobbyCode.value = invitedRoom;
       this._setLobbyStatus(`Invited to room ${invitedRoom} — join to play.`);
     }
@@ -96,22 +97,32 @@ export class UI {
       </div>
 
       <div class="screen" data-screen="game">
-        <div class="step__head"><span class="step__num">1</span>Pick a game</div>
+        <div class="step__head"><span class="step__num">1</span>What do you want to play?</div>
         <div class="game-pick">
-          <button class="game" data-game="arcade">
+          <button class="game" data-game="tournament">
             <span class="game__key">1</span>
-            <span class="game__name">Arcade</span>
-            <span class="game__blurb">Drills and rallies against the machine</span>
+            <span class="game__name">Create a tournament</span>
+            <span class="game__blurb">Bracket play · beta</span>
           </button>
-          <button class="game" data-game="coach">
+          <button class="game" data-game="friend">
             <span class="game__key">2</span>
-            <span class="game__name">Coach</span>
-            <span class="game__blurb">Learn one stroke at a time, scored</span>
+            <span class="game__name">Play a friend</span>
+            <span class="game__blurb">Online match · beta</span>
           </button>
-          <button class="game" data-game="versus">
+          <button class="game" data-game="bot">
             <span class="game__key">3</span>
-            <span class="game__name">Versus</span>
-            <span class="game__blurb">Play a friend on another device</span>
+            <span class="game__name">Play a standard bot</span>
+            <span class="game__blurb">A physical AI opponent</span>
+          </button>
+          <button class="game" data-game="fly">
+            <span class="game__key">4</span>
+            <span class="game__name">Play a fly</span>
+            <span class="game__blurb">Connectome-driven opponent</span>
+          </button>
+          <button class="game" data-game="drills">
+            <span class="game__key">5</span>
+            <span class="game__name">Drills</span>
+            <span class="game__blurb">Practice shots against the machine</span>
           </button>
         </div>
         <div class="prompt blink">↑ ↓ SELECT · ENTER CONTINUE</div>
@@ -119,7 +130,7 @@ export class UI {
 
       <div class="screen" data-screen="play" hidden>
         <button class="crumb" data-back>‹ <b data-crumb-game>ARCADE</b> — change game</button>
-        <div class="step__head"><span class="step__num">2</span>Pick how to play</div>
+        <div class="step__head"><span class="step__num">2</span>What do you have?</div>
         <div class="menu-list" data-list></div>
         <div class="lobby" data-lobby hidden>
           <div class="step__head"><span class="step__num">✦</span>Set up the match</div>
@@ -160,6 +171,8 @@ export class UI {
     };
     this._crumbGame = el.querySelector('[data-crumb-game]');
     this._screen = 'game';
+    this._productChoices = ['tournament', 'friend', 'bot', 'fly', 'drills'];
+    this._gameIndex = 2;
     el.querySelector('[data-back]').onclick = () => this.setScreen('game');
 
     for (const btn of el.querySelectorAll('[data-game]')) {
@@ -190,8 +203,14 @@ export class UI {
       { id: 'desktop', label: 'On this screen', note: 'mouse or webcam paddle', disabled: false },
       { id: 'camera-hand', label: 'Hand tracking', note: 'webcam · bare hand', disabled: false },
     ];
+    this._entries = [
+      { id: 'vr', label: 'A VR headset', note: 'headset', disabled: true },
+      { id: 'camera', label: 'A ping pong paddle', note: 'webcam', disabled: false },
+      { id: 'phone', label: 'A phone', note: 'beta', disabled: true },
+      { id: 'desktop', label: 'Nothing — just the mouse', note: '', disabled: false },
+    ];
     this._renderMenu();
-    this._syncGamePick();
+    this._setProductCursor(this._gameIndex, false);
   }
 
   // The menu is two screens shown one after the other — pick a game, then
@@ -202,7 +221,7 @@ export class UI {
     this._screens.game.hidden = name !== 'game';
     this._screens.play.hidden = name !== 'play';
     if (name === 'play') {
-      this._crumbGame.textContent = (this.settings.get('game') || 'arcade').toUpperCase();
+      this._crumbGame.textContent = this._productLabel(this._productMode);
       // Land the cursor on something you can actually press Enter on —
       // carrying over a selection parked on a greyed-out headset row made
       // Enter silently do nothing.
@@ -216,8 +235,43 @@ export class UI {
 
   // Choosing a game answers screen one, so it also turns the page.
   chooseGame(value) {
-    this.setGame(value);
+    this._setProductCursor(this._productChoices.indexOf(value), false);
+    this._productMode = value;
+    if (value === 'tournament') {
+      this.toast('Tournament mode is coming soon');
+      this.sfx.ui(false);
+      return;
+    }
+
+    if (value === 'friend') {
+      this.setGame('versus');
+    } else {
+      this.setGame('arcade');
+      this.settings.set('difficulty', value === 'fly' ? 'fly' : 'normal');
+      const modeType = value === 'drills' ? 'drill' : 'rally';
+      const modeIndex = MODES.findIndex((mode) => mode.type === modeType);
+      if (modeIndex >= 0) this.machine.modeIndex = modeIndex;
+    }
     this.setScreen('play');
+  }
+
+  _productLabel(value) {
+    return {
+      friend: 'PLAY A FRIEND',
+      bot: 'PLAY A STANDARD BOT',
+      fly: 'PLAY A FLY',
+      drills: 'DRILLS',
+      tournament: 'CREATE A TOURNAMENT',
+    }[value] ?? 'PLAY A STANDARD BOT';
+  }
+
+  _setProductCursor(index, sound = true) {
+    if (index < 0) return;
+    this._gameIndex = index;
+    for (const btn of this.menu.querySelectorAll('[data-game]')) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.game === this._productChoices[index]));
+    }
+    if (sound) this.sfx.ui();
   }
 
   // Arcade is the drills and rally; Coach teaches one stroke at a time. It
@@ -230,12 +284,7 @@ export class UI {
   }
 
   _syncGamePick() {
-    const current = this.settings.get('game');
-    for (const btn of this.menu.querySelectorAll('[data-game]')) {
-      btn.setAttribute('aria-pressed', String(btn.dataset.game === current));
-    }
-
-    const versus = current === 'versus';
+    const versus = this.settings.get('game') === 'versus';
     this.lobby.hidden = !versus;
     if (versus && !this._versus) {
       this._setLobbyStatus(
@@ -397,8 +446,8 @@ export class UI {
   _activateMenu(index) {
     const entry = this._entries[index];
     if (!entry || entry.disabled) return;
-    if (entry.id === 'camera-hand') {
-      this.settings.set('paddleSource', 'camera-hand');
+    if (entry.id === 'camera') {
+      this.settings.set('paddleSource', 'camera');
       this._launch(null);
     } else if (entry.id === 'desktop') {
       // On desktop, the controller source falls back to the mouse. Do not
@@ -406,10 +455,22 @@ export class UI {
       this.settings.set('paddleSource', 'controller');
       this._launch(null);
     }
-    else this._launch(entry.id === 'ar' ? 'immersive-ar' : 'immersive-vr');
+    else this._launch('immersive-vr');
   }
 
   applyXRSupport(support) {
+    const vr = this._entries.find((entry) => entry.id === 'vr');
+    vr.disabled = !support['immersive-vr'];
+    vr.note = support['immersive-vr'] ? 'headset · full VR' : 'needs a headset';
+    const menuNote = this.menu.querySelector('[data-menu-note]');
+    menuNote.textContent = support['immersive-vr']
+      ? 'Headset ready'
+      : 'Open this page in the Meta Quest Browser to play in a headset';
+    this._selected = this._entries.findIndex((entry) => !entry.disabled);
+    if (this._selected < 0) this._selected = 0;
+    this._renderMenu();
+    return;
+
     this._entries[0].disabled = !support['immersive-ar'];
     this._entries[1].disabled = !support['immersive-vr'];
     this._entries[0].note = support['immersive-ar']
@@ -632,23 +693,23 @@ export class UI {
         return;
       }
 
-      if (e.code === 'Digit1') this.chooseGame('arcade');
-      else if (e.code === 'Digit2') this.chooseGame('coach');
-      else if (e.code === 'Digit3') this.chooseGame('versus');
+      if (e.code === 'Digit1') this.chooseGame('tournament');
+      else if (e.code === 'Digit2') this.chooseGame('friend');
+      else if (e.code === 'Digit3') this.chooseGame('bot');
+      else if (e.code === 'Digit4') this.chooseGame('fly');
+      else if (e.code === 'Digit5') this.chooseGame('drills');
       else if (e.code === 'KeyL') this.toggleScores();
       else if (e.code === 'Escape' || e.code === 'Backspace') {
         if (this._screen === 'play') this.setScreen('game');
       } else if (this._screen === 'game') {
-        // Arrows walk the cursor down the games; Enter turns the page. The
-        // cursor position IS the game setting, so there is no separate
-        // highlight state to fall out of sync.
-        const games = ['arcade', 'coach', 'versus'];
-        const at = Math.max(0, games.indexOf(this.settings.get('game')));
-        if (e.code === 'ArrowUp') this.setGame(games[(at + games.length - 1) % games.length]);
-        else if (e.code === 'ArrowDown') this.setGame(games[(at + 1) % games.length]);
+        // Product choices map onto game settings, so their cursor must be
+        // separate from the underlying Arcade/Versus setting.
+        const games = this._productChoices;
+        if (e.code === 'ArrowUp') this._setProductCursor((this._gameIndex + games.length - 1) % games.length);
+        else if (e.code === 'ArrowDown') this._setProductCursor((this._gameIndex + 1) % games.length);
         else if (e.code === 'Enter' || e.code === 'Space') {
           e.preventDefault();
-          this.chooseGame(games[at]);
+          this.chooseGame(games[this._gameIndex]);
         }
       } else if (e.code === 'ArrowUp') this._moveMenu(-1);
       else if (e.code === 'ArrowDown') this._moveMenu(1);

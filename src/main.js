@@ -22,6 +22,7 @@ import { startHandTracking } from './handTracking.js';
 import { HandPaddlePose } from './vision/handPose.js';
 import { Opponent } from './opponent.js';
 import { FlyBrain } from './flybrain.js';
+import { FlyBrainViz } from './flybrain/flyBrainViz.js';
 import { Coach, SCENARIOS } from './coach.js';
 import {
   createRoom,
@@ -205,6 +206,9 @@ flyBrain.load().then((ok) => {
   if (ok) console.info('[FlyBrain] connectome model loaded');
 });
 opponent.brain = flyBrain;
+const flyBrainViz = new FlyBrainViz(flyBrain);
+flyBrainViz.mount();
+flyBrainViz.hide();
 
 // Coach mode: a lesson is a path the bat should travel, shown as a ribbon
 // and scored on how closely you trace it.
@@ -271,6 +275,7 @@ const ui = new UI({
     // The camera only opens once you are actually playing, not while the
     // setting sits there remembered from last time.
     if (!mode) syncCameraInput();
+    if (settings.get('difficulty') === 'fly') flyBrainViz.show();
   },
   onExit: () => {
     machine.enabled = false;
@@ -278,6 +283,7 @@ const ui = new UI({
     clearBalls();
     stopWebcamBat();
     stopHandPaddle();
+    flyBrainViz.hide();
   },
   isInputBlocked: () => vrMenu.open,
   onRecenter: () => {
@@ -1757,7 +1763,11 @@ settings.onChange((key) => {
     syncCameraInput();
   }
   if (key === 'hand') applyHandedness();
-  if (key === 'difficulty') opponent.setSkill(settings.get('difficulty'));
+  if (key === 'difficulty') {
+    opponent.setSkill(settings.get('difficulty'));
+    if (ui.menu.hidden && settings.get('difficulty') === 'fly') flyBrainViz.show();
+    else flyBrainViz.hide();
+  }
   if (key === 'scenario') applyScenario();
   if (key === 'game') applyGame();
 });
@@ -1922,6 +1932,7 @@ function tick(dt) {
   // step so the bat's derived velocity matches the motion this frame.
   opponent.setActive(machine.isRallyMode && !vrMenu.open);
   opponent.update(dt, balls);
+  if (opponent.active && settings.get('difficulty') === 'fly') flyBrainViz.render();
 
   coach.setActive(machine.isCoachMode && !vrMenu.open);
   const guide = coach.update(

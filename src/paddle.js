@@ -67,6 +67,9 @@ export class Paddle {
 
   // A palm describes the striking face itself, rather than a controller grip.
   setPalmTrackingMode(active) {
+    // Camera/hand input needs the same larger on-screen target as mouse play;
+    // controller grips remain life-size unless this mode is explicitly active.
+    this.setScale(active ? DESKTOP_PADDLE_SCALE : 1);
     if (active) {
       this.mesh.quaternion.identity();
       this._blade.position.set(0, 0, 0);
