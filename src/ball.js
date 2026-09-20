@@ -58,6 +58,8 @@ export class Ball {
     this.isServeHold = false;
     this.serveOwner = null;
     this.serveBounceSpeed = null;
+    this.serveState = 'none'; // 'none' | 'waiting' | 'served'
+    this.serveAnchor = new THREE.Vector3();
   }
 
   serve(position, velocity, spin) {
@@ -80,6 +82,7 @@ export class Ball {
     this.isServeHold = false;
     this.serveOwner = null;
     this.serveBounceSpeed = null;
+    this.serveState = 'none';
   }
 
   deactivate() {

@@ -13,8 +13,17 @@ const _arm = new THREE.Vector3();
 // hard the ball comes off, and the speed of the surface across the ball — a
 // product of the swing's rotation — is what puts spin on it.
 export class Paddle {
-  constructor({ vertical = false } = {}) {
+  constructor({ vertical = false, scale = 1 } = {}) {
     this.mesh = buildPaddleMesh();
+    this.mesh.scale.setScalar(scale);
+    // Keep collision geometry in lockstep with the visible paddle. Desktop
+    // paddles can be enlarged without changing the regulation-sized VR bat.
+    this.headRadius = PADDLE.HEAD_RADIUS * scale;
+    this.headThickness = PADDLE.HEAD_THICKNESS * scale;
+    // The physical envelope includes the blade, neck, and handle. The visual
+    // paddle is one continuous object, so an edge/handle touch should not let
+    // a rally ball phase through it.
+    this.contactRadius = (PADDLE.HEAD_RADIUS + PADDLE.HANDLE_LENGTH) * scale;
 
     // Desktop/remote paddles aren't held by a controller, so turn the bat to
     // stand upright with its face toward the far end of the table (−Z). The
@@ -24,6 +33,10 @@ export class Paddle {
     this.velocity = new THREE.Vector3(); // linear, m/s
     this.angularVelocity = new THREE.Vector3(); // rad/s
     this.bladeCenter = new THREE.Vector3();
+    // Public previous pose for the physics world's relative-motion sweep.
+    // A ball can travel several centimetres while a bot/human paddle moves,
+    // so testing only the paddle's final location drops legitimate hits.
+    this.previousBladeCenter = new THREE.Vector3();
     this.bladeNormal = new THREE.Vector3();
 
     // False until two frames have been sampled — velocity is meaningless
@@ -48,6 +61,8 @@ export class Paddle {
     this._blade.getWorldPosition(_worldPos);
     this._blade.getWorldQuaternion(_worldQuat);
 
+    if (this._samples > 0) this.previousBladeCenter.copy(this.bladeCenter);
+    else this.previousBladeCenter.copy(_worldPos);
     this.bladeCenter.copy(_worldPos);
     this.bladeNormal.set(0, 0, 1).applyQuaternion(_worldQuat);
 

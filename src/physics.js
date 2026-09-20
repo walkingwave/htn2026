@@ -30,6 +30,8 @@ const _hit = new THREE.Vector3();
 const _surfaceVel = new THREE.Vector3();
 const _accel = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
+const _paddlePrev = new THREE.Vector3();
+const _paddleHit = new THREE.Vector3();
 
 // Restitution curves per surface. See BALL in constants.js for why COR has to
 // vary with impact speed rather than being a single number.
@@ -72,13 +74,27 @@ export class PhysicsWorld {
     const p = ball.mesh.position;
     const v = ball.velocity;
 
+    // A waiting serve is anchored over the server's half. It can only move
+    // vertically until a deliberate paddle swing releases it, so a stray
+    // contact or tiny numerical drift can never turn it into a floor ball.
+    if (ball.serveState === 'waiting') {
+      p.x = ball.serveAnchor.x;
+      p.z = ball.serveAnchor.z;
+      v.x = 0;
+      v.z = 0;
+      ball.spin.set(0, 0, 0);
+    }
+
     _prev.copy(p);
 
     // --- Aerodynamics -----------------------------------------------------
     const speed = v.length();
     _accel.set(0, PHYSICS.GRAVITY, 0);
 
-    if (speed > 1e-4) {
+    // A held serve is a kinematic practice bounce: gravity gives it a clean
+    // up/down motion, while drag and Magnus stay off so its peak never sags
+    // before the server elects to hit it.
+    if (!ball.isServeHold && speed > 1e-4) {
       // Quadratic drag: a = -k|v|v. A ping pong ball is extremely light for
       // its frontal area, so drag is not a rounding error — it takes several
       // m/s off a hard hit across the length of the table.
@@ -96,7 +112,7 @@ export class PhysicsWorld {
     p.addScaledVector(v, h);
 
     // Spin bleeds off slowly in flight
-    if (ball.spin.lengthSq() > 1e-6) {
+    if (!ball.isServeHold && ball.spin.lengthSq() > 1e-6) {
       ball.spin.multiplyScalar(Math.pow(BALL.SPIN_DECAY, h));
     }
 
@@ -123,7 +139,7 @@ export class PhysicsWorld {
     // A pending serve is a deliberately held, vertical bounce. Re-arm its
     // launch speed on every table contact so drag/restitution never makes it
     // decay while the server lines up a shot.
-    if (ball.isServeHold) {
+    if (ball.serveState === 'waiting') {
       v.set(0, ball.serveBounceSpeed ?? 2.15, 0);
       ball.spin.set(0, 0, 0);
       this.onBounce?.(ball, 'table');
@@ -263,9 +279,13 @@ export class PhysicsWorld {
     const p = ball.mesh.position;
     _n.copy(paddle.bladeNormal);
 
-    const halfThick = PADDLE.HEAD_THICKNESS / 2 + BALL.RADIUS;
+    const halfThick = (paddle.headThickness ?? PADDLE.HEAD_THICKNESS) / 2 + BALL.RADIUS;
 
-    _rel.copy(prev).sub(paddle.bladeCenter);
+    // Sweep the ball *relative to the moving paddle*. The old test used the
+    // paddle's end-of-frame pose for both endpoints, which misses exactly the
+    // kind of forward stroke an AI paddle needs to make a believable return.
+    _paddlePrev.copy(paddle.previousBladeCenter ?? paddle.bladeCenter);
+    _rel.copy(prev).sub(_paddlePrev);
     const d0 = _rel.dot(_n);
     _rel.copy(p).sub(paddle.bladeCenter);
     const d1 = _rel.dot(_n);
@@ -280,11 +300,12 @@ export class PhysicsWorld {
     const denom = d0 - d1;
     const t = Math.abs(denom) < 1e-9 ? 0 : d0 / denom;
     _hit.copy(prev).lerp(p, THREE.MathUtils.clamp(t, 0, 1));
+    _paddleHit.copy(_paddlePrev).lerp(paddle.bladeCenter, THREE.MathUtils.clamp(t, 0, 1));
 
     // Radial distance from the blade axis at that point
-    _rel.copy(_hit).sub(paddle.bladeCenter);
+    _rel.copy(_hit).sub(_paddleHit);
     _tmp.copy(_rel).addScaledVector(_n, -_rel.dot(_n));
-    if (_tmp.length() > PADDLE.HEAD_RADIUS) return;
+    if (_tmp.length() > (paddle.contactRadius ?? paddle.headRadius ?? PADDLE.HEAD_RADIUS)) return;
 
     // Face the normal toward the side the ball came from
     if (d0 < 0) _n.negate();
@@ -293,8 +314,17 @@ export class PhysicsWorld {
     // brushing across the ball is what actually generates spin.
     paddle.velocityAt(_hit, _surfaceVel);
 
+    // A stationary paddle must not disturb a serve that is still waiting.
+    if (ball.serveState === 'waiting' && _surfaceVel.length() < 0.45) return;
+
     _tmp.copy(ball.velocity).sub(_surfaceVel);
-    if (_tmp.dot(_n) >= 0) return; // moving away; already handled
+    if (_tmp.dot(_n) >= 0) {
+      // A ball embedded in the broad paddle/handle envelope may arrive at
+      // the rear face. Treat it as a legitimate contact by resolving against
+      // that face instead of leaving it stuck in the paddle.
+      if (!inside) return;
+      _n.negate();
+    }
 
     // Place the ball on the struck face before resolving
     p.copy(_hit).addScaledVector(_n, halfThick * 1.02);
@@ -312,6 +342,7 @@ export class PhysicsWorld {
     // The moment the server strikes the held ball it becomes an ordinary
     // rally ball, with normal spin and energy loss from that point onward.
     ball.isServeHold = false;
+    if (ball.serveState === 'waiting') ball.serveState = 'served';
     ball.retireIn = null;
     this.onBounce?.(ball, 'paddle');
   }

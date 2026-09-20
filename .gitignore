@@ -3,6 +3,7 @@ dist/
 .DS_Store
 *.local
 .vite/
+.certs/
 
 # Fly connectome raw data (166k ~210MB of typed arrays) - never commit.
 # Download with scripts/flybrain/build_flybrain.py; only the small exported

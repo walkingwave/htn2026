@@ -35,6 +35,7 @@ import { FlyBrainViz } from './flybrain/flyBrainViz.js';
 
 const BALL_POOL_SIZE = 10;
 const DEAD_BALL_LINGER = 1.5; // seconds a dead ball stays visible before recycling
+const DESKTOP_PADDLE_SCALE = 1.4;
 
 // --- Renderer / scene -------------------------------------------------------
 // alpha:true so the framebuffer is transparent in AR — the Quest compositor
@@ -163,6 +164,7 @@ function applyBackground(name) {
 
 // 3-2-1 gate: the machine stays idle until the countdown finishes.
 let launchCountdown = 0;
+let activeInput = 'mouse';
 function startLaunchCountdown() {
   launchCountdown = 3;
   ui.showCountdown(3);
@@ -192,6 +194,7 @@ const ui = new UI({
   // `choice` = { mode, input, background, xrMode } from the setup wizard.
   onStart: (choice = {}) => {
     const { mode = 'bot', input = 'mouse', background = 'arena', botSettings } = choice;
+    activeInput = input;
     applyBackground(background);
     // Beta endpoints still fall back to a local experience, with a clear note.
     if (mode === 'friend') ui.toast('Online play is in beta — playing the bot');
@@ -432,7 +435,7 @@ for (const i of [0, 1]) {
 // velocity/spin from the rig's motion between frames, exactly like a grip.
 const mousePaddleRig = new THREE.Group();
 playerRig.add(mousePaddleRig);
-const mousePaddle = new Paddle({ vertical: true });
+const mousePaddle = new Paddle({ vertical: true, scale: DESKTOP_PADDLE_SCALE });
 mousePaddle.attachTo(mousePaddleRig);
 
 // Webcam paddle (ported from main): an HSV colour tracker follows a real
@@ -487,7 +490,7 @@ const _versusFwd = new THREE.Vector3(0, 0, 1);
 // input update path (see the tick paddle loop) and is flagged `networked`.
 const remoteAnchor = new THREE.Group();
 scene.add(remoteAnchor);
-const remotePaddle = new Paddle({ vertical: true });
+const remotePaddle = new Paddle({ vertical: true, scale: DESKTOP_PADDLE_SCALE });
 remotePaddle.attachTo(remoteAnchor);
 remotePaddle.enabled = false;
 remotePaddle.networked = true;
@@ -508,6 +511,7 @@ function applyRemotePaddle(pkt) {
   // here — otherwise the swept paddle test in physics skips it and the
   // opponent could never return a ball.
   remotePaddle.tracking = true;
+  remotePaddle.previousBladeCenter.copy(remotePaddle.bladeCenter);
   remotePaddle.bladeCenter.set(pkt.c[0], pkt.c[1], pkt.c[2]);
   remotePaddle.bladeNormal.set(pkt.n[0], pkt.n[1], pkt.n[2]).normalize();
   remotePaddle.velocity.set(pkt.v[0], pkt.v[1], pkt.v[2]);
@@ -525,12 +529,30 @@ function startVersusServe() {
 function serveVersusBall() {
   const ball = balls.find((b) => !b.active);
   if (!ball) return;
+  const server = match.server;
+
+  // Mouse play is deliberately frictionless: there is no reliable analogue
+  // of a serve toss, so start each local Bot/Fly point with a returnable ball
+  // travelling to the opponent. Other inputs retain the held serve.
+  if (vsBot && server === 'host' && activeInput === 'mouse') {
+    ball.serve(
+      new THREE.Vector3((Math.random() * 2 - 1) * 0.3, TABLE.HEIGHT + 0.35, 0.8),
+      new THREE.Vector3((Math.random() * 2 - 1) * 0.6, 1.4, -3.4)
+    );
+    ball.floorCounted = false;
+    ball.serveState = 'served';
+    versusBall = ball;
+    broadcastHostState();
+    return;
+  }
+
   // A serve is held on the server's side as a gentle vertical bounce, rather
   // than being fired automatically across the table.  That makes serving a
   // deliberate stroke: the player can line up and hit it whenever ready.
   // The ball stays within the normal desktop paddle window at either end.
-  const server = match.server;
-  const z = server === 'host' ? 1.03 : BOT_HOME_Z;
+  // The bot's held ball sits just in front of its blade, giving it room to
+  // step through the ball and serve via a real paddle collision.
+  const z = server === 'host' ? 1.03 : BOT_HOME_Z + BOT_STROKE_REACH;
   ball.serve(
     new THREE.Vector3((Math.random() * 2 - 1) * 0.12, TABLE.HEIGHT + BALL.RADIUS, z),
     new THREE.Vector3(0, 2.15, 0)
@@ -539,6 +561,8 @@ function serveVersusBall() {
   ball.isServeHold = true;
   ball.serveOwner = server;
   ball.serveBounceSpeed = 2.15;
+  ball.serveState = 'waiting';
+  ball.serveAnchor.set(ball.mesh.position.x, 0, ball.mesh.position.z);
   versusBall = ball;
   broadcastHostState();
 }
@@ -713,6 +737,12 @@ function wireTourneyRoom(roomHandle) {
 
 // Reaction plane for the AI paddle — a little in front of the far baseline.
 const BOT_HOME_Z = -(TABLE.LENGTH / 2 - 0.35);
+const BOT_MAX_PADDLE_SPEED = 4.2;
+const FLY_MAX_PADDLE_SPEED = 5.0;
+const BOT_STROKE_REACH = 0.14;
+const BOT_STROKE_TRIGGER_Z = BOT_HOME_Z + 0.3;
+const _botTarget = new THREE.Vector3();
+const _botDelta = new THREE.Vector3();
 
 // Connectome-reservoir controller + its visualization for "Play a Fly". The
 // model is fetched once at startup; until it resolves (or if it's missing)
@@ -770,7 +800,7 @@ function startBotGame({ fly = false } = {}) {
 // incoming ball crosses the fly's paddle plane. This is what the standard bot
 // lacked: a naive linear guess ignores the bounce, so the paddle sat at the
 // wrong height and whiffed.
-function predictIntercept(ball) {
+function predictIntercept(ball, planeZ = BOT_HOME_Z) {
   const p = ball.mesh.position.clone();
   const v = ball.velocity.clone();
   const spin = ball.spin.clone();
@@ -793,7 +823,7 @@ function predictIntercept(ball) {
       p.y = surfaceY;
       v.y = -v.y * 0.82;
     }
-    if (p.z <= BOT_HOME_Z) break;
+    if (p.z <= planeZ) break;
   }
   return { x: p.x, y: p.y };
 }
@@ -810,7 +840,18 @@ function updateBotPaddle(dt) {
   const maxY = TABLE.HEIGHT + 0.45;
 
   const incoming = ball && ball.active && ball.velocity.z < -0.05;
-  const intercept = incoming ? predictIntercept(ball) : null;
+
+  // The bot steps into an incoming ball instead of teleporting or changing
+  // the ball velocity directly. That visible, finite-speed paddle motion is
+  // what creates every return through PhysicsWorld's paddle collision.
+  const isBotServeStroke = botServing && ball.velocity.y < 0 &&
+    ball.mesh.position.y <= TABLE.HEIGHT + 0.2;
+  const stroke = isBotServeStroke || (incoming && ball.mesh.position.z < BOT_STROKE_TRIGGER_Z)
+    ? BOT_STROKE_REACH
+    : 0;
+  // Predict the point where the blade will actually meet the ball, including
+  // its short forward stroke, rather than the paddle's idle/home plane.
+  const intercept = incoming ? predictIntercept(ball, BOT_HOME_Z + stroke) : null;
 
   // On the bot's turn, it receives the same held, bouncing ball as a human
   // server. Track that ball while it bounces so its release still reads as a
@@ -839,55 +880,40 @@ function updateBotPaddle(dt) {
     targetX = botServing ? targetX : (intercept?.x ?? out.targetX);
     targetY = botServing ? targetY : (intercept?.y ?? out.targetY);
 
-    // Near-unbeatable: track the predicted intercept almost exactly.
-    const k = Math.min(1, dt * 18);
     targetX = THREE.MathUtils.clamp(targetX, minX, maxX);
     targetY = THREE.MathUtils.clamp(targetY, minY, maxY);
-    remoteAnchor.position.x += (targetX - remoteAnchor.position.x) * k;
-    remoteAnchor.position.y += (targetY - remoteAnchor.position.y) * k;
-    remoteAnchor.position.z = BOT_HOME_Z;
-    remoteAnchor.rotation.y = Math.PI;
-    remotePaddle.update(dt);
-    remotePaddle.bladeNormal.y += 0.28;
-    remotePaddle.bladeNormal.normalize();
-    releaseBotServe(ball);
+    moveBotPaddle(targetX, targetY, stroke, dt, FLY_MAX_PADDLE_SPEED, 0.28);
     return;
   }
 
-  // Standard bot: predict the post-bounce intercept and track it briskly
-  // enough to actually get there (the old gain of ~0.12/frame was too slow to
-  // reach anything but a ball hit straight at it).
-  const k = Math.min(1, dt * 12);
+  // Standard bot: track the predicted post-bounce intercept at a bounded,
+  // human-readable paddle speed.
   if (intercept) {
     targetX = intercept.x;
     targetY = intercept.y;
   }
   targetX = THREE.MathUtils.clamp(targetX, minX, maxX);
   targetY = THREE.MathUtils.clamp(targetY, minY, maxY);
-  remoteAnchor.position.x += (targetX - remoteAnchor.position.x) * k;
-  remoteAnchor.position.y += (targetY - remoteAnchor.position.y) * k;
-  remoteAnchor.position.z = BOT_HOME_Z;
-  remoteAnchor.rotation.y = Math.PI;
-  remotePaddle.update(dt);
-
-  // Return bias: tilt the blade normal up so the reflected ball arcs over the
-  // net instead of driving flat into it.
-  remotePaddle.bladeNormal.y += 0.32;
-  remotePaddle.bladeNormal.normalize();
-  releaseBotServe(ball);
+  moveBotPaddle(targetX, targetY, stroke, dt, BOT_MAX_PADDLE_SPEED, 0.32);
 }
 
-function releaseBotServe(ball) {
-  if (!vsBot || !ball?.isServeHold || ball.serveOwner !== 'guest') return;
-  // Let the ball visibly rise and fall once, then send it over the net from
-  // the bottom of its descent.  A direct velocity here avoids relying on a
-  // zero-depth, purely vertical contact that the swept paddle solver rightly
-  // treats as non-impacting.
-  if (ball.velocity.y < 0 && ball.mesh.position.y <= TABLE.HEIGHT + 0.14) {
-    ball.velocity.set((Math.random() - 0.5) * 0.45, 1.75, 3.8);
-    ball.spin.set((Math.random() - 0.5) * 35, 0, 0);
-    ball.isServeHold = false;
-  }
+function moveBotPaddle(targetX, targetY, stroke, dt, maxSpeed, faceLift) {
+  _botTarget.set(targetX, targetY, BOT_HOME_Z + stroke);
+  _botDelta.subVectors(_botTarget, remoteAnchor.position);
+  const distance = _botDelta.length();
+  const step = maxSpeed * dt;
+  if (distance <= step || distance < 1e-5) remoteAnchor.position.copy(_botTarget);
+  else remoteAnchor.position.addScaledVector(_botDelta, step / distance);
+
+  remoteAnchor.rotation.y = Math.PI;
+  remotePaddle.enabled = true;
+  remotePaddle.mesh.visible = true;
+  remotePaddle.update(dt);
+
+  // Tilt the real blade upward so a physical contact sends the ball in an
+  // arc over the net rather than a flat drive into it.
+  remotePaddle.bladeNormal.y += faceLift;
+  remotePaddle.bladeNormal.normalize();
 }
 
 function endBotMatch(winner) {
