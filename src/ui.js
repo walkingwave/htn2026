@@ -1,6 +1,7 @@
 import './ui.css';
 import { MODES } from './ballMachine.js';
 import { buildPauseMenu } from './menuModel.js';
+import { getNarrationSettings, setNarrationEnabled, setNarratorMode, sendInvite } from './backendApi.js';
 import { getLeaderboard, submitScore, isWorthRecording } from './leaderboard.js';
 
 // The flat-screen shell: a retro start menu, a one-line status bar, and a
@@ -68,6 +69,7 @@ export class UI {
     this._buildBar();
     this._buildSettings();
     this._buildToast();
+    this._buildCoachPanel();
     this._buildVersusHud();
     this._buildScores();
     this._buildCamPreview();
@@ -152,6 +154,11 @@ export class UI {
             <span class="lobby__link" data-lobby-link></span>
             <button class="key" data-lobby-copy><b>⧉</b>Copy link</button>
             <button class="key" data-lobby-leave><b>×</b>Leave</button>
+            <div class="lobby__invite">
+              <span class="lobby__invite-label">Text an invite</span>
+              <input class="lobby__phone" data-lobby-phone placeholder="+1 416…" inputmode="tel" autocomplete="tel" />
+              <button class="key" data-lobby-invite><b>▸</b>Send iMessage</button>
+            </div>
           </div>
         </div>
         <div class="prompt blink">↑ ↓ SELECT · ENTER START</div>
@@ -188,6 +195,12 @@ export class UI {
     el.querySelector('[data-lobby-join]').onclick = () => this._joinMatch();
     el.querySelector('[data-lobby-copy]').onclick = () => this._copyRoomLink();
     el.querySelector('[data-lobby-leave]').onclick = () => this._leaveMatch();
+    this.lobbyPhone = el.querySelector('[data-lobby-phone]');
+    el.querySelector('[data-lobby-invite]').onclick = () => this._sendLinqInvite();
+    this.lobbyPhone.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.code === 'Enter') this._sendLinqInvite();
+    };
     // Typing a code and pressing enter joins, which is what everyone tries.
     this.lobbyCode.onkeydown = (e) => {
       e.stopPropagation(); // the menu's arrow/enter handling isn't wanted here
@@ -370,6 +383,26 @@ export class UI {
     }
   }
 
+  async _sendLinqInvite() {
+    const phoneNumber = this.lobbyPhone.value.trim().replace(/[()\s-]/g, '');
+    if (!/^\+[1-9]\d{7,14}$/.test(phoneNumber)) {
+      this._setLobbyStatus('Use an international number, for example +14165551234.', 'bad');
+      return;
+    }
+    const roomLink = this.lobbyLink.textContent;
+    if (!roomLink) return;
+    this.sfx.ui();
+    this._setLobbyStatus('Sending the iMessage invite…');
+    try {
+      await sendInvite(phoneNumber, roomLink);
+      this._setLobbyStatus('Invite sent — they can tap the link to join.', 'good');
+      this.toast('Invite sent');
+    } catch (err) {
+      console.error('Failed to send Linq invite', err);
+      this._setLobbyStatus(err.message ?? 'Could not send the invite.', 'bad');
+    }
+  }
+
   async _copyRoomLink() {
     const link = this.lobbyLink.textContent;
     if (!link) return;
@@ -391,6 +424,7 @@ export class UI {
   _leaveMatch() {
     this.onVersusLeave?.();
     this._versus = null;
+    this.hideCoachPanel();
     this.lobbyShare.hidden = true;
     this.versusHud.hidden = true;
     this.hideCountdown();
@@ -522,6 +556,106 @@ export class UI {
     if (this._screens) this.setScreen('game');
     if (this.bar) this.bar.hidden = true;
     if (this.settingsEl) this.settingsEl.hidden = true;
+  }
+
+  // --- Coaching panel --------------------------------------------------
+
+  _buildCoachPanel() {
+    const el = document.createElement('aside');
+    el.id = 'coach-panel';
+    el.hidden = true;
+    el.innerHTML = `
+      <div class="coach-panel__head">
+        <span>COACH</span>
+        <span data-coach-status>LOCAL</span>
+        <span class="coach-panel__controls">
+          <button data-coach-audio aria-label="Toggle coaching narration"></button>
+          <button data-coach-voice aria-label="Change narrator"></button>
+        </span>
+      </div>
+      <div class="coach-panel__scenario" data-coach-scenario>Ready</div>
+      <div class="coach-panel__score" data-coach-score>--%</div>
+      <div class="coach-panel__metrics" data-coach-metrics></div>
+      <div class="coach-panel__feedback" data-coach-feedback>Complete a stroke to get feedback.</div>
+      <div class="coach-panel__summary" data-coach-summary hidden></div>
+    `;
+    document.body.appendChild(el);
+    this.coachPanel = el;
+    this.coachScenario = el.querySelector('[data-coach-scenario]');
+    this.coachScore = el.querySelector('[data-coach-score]');
+    this.coachMetrics = el.querySelector('[data-coach-metrics]');
+    this.coachFeedback = el.querySelector('[data-coach-feedback]');
+    this.coachSummary = el.querySelector('[data-coach-summary]');
+    this.coachStatus = el.querySelector('[data-coach-status]');
+    this.coachAudio = el.querySelector('[data-coach-audio]');
+    this.coachVoice = el.querySelector('[data-coach-voice]');
+    this.coachAudio.onclick = () => {
+      const settings = getNarrationSettings();
+      setNarrationEnabled(!settings.enabled);
+      this._updateNarrationControls();
+    };
+    this.coachVoice.onclick = () => {
+      const mode = getNarrationSettings().mode;
+      const next = mode === 'auto' ? 'a' : mode === 'a' ? 'b' : 'auto';
+      setNarratorMode(next);
+      this._updateNarrationControls();
+    };
+    this._updateNarrationControls();
+  }
+
+  _updateNarrationControls() {
+    const { enabled, mode } = getNarrationSettings();
+    if (this.coachAudio) {
+      this.coachAudio.textContent = enabled ? '🔊' : '🔇';
+      this.coachAudio.title = enabled ? 'Mute coaching narration' : 'Enable coaching narration';
+      this.coachAudio.setAttribute('aria-pressed', String(enabled));
+    }
+    if (this.coachVoice) {
+      this.coachVoice.textContent = mode === 'auto' ? 'AUTO' : `VOICE ${mode.toUpperCase()}`;
+      this.coachVoice.title = 'Cycle narrator: auto, narrator A, narrator B';
+    }
+  }
+
+  showCoachScore(score, scenario = '') {
+    if (!this.coachPanel) return;
+    this.coachPanel.hidden = false;
+    this.coachScenario.textContent = scenario ? scenario.replaceAll('-', ' ') : 'Coached stroke';
+    this.coachScore.textContent = `${score?.total ?? 0}%`;
+    this.coachMetrics.textContent = score
+      ? `PATH ${score.path ?? 0} · SYNC ${score.sync ?? 0} · FACE ${score.face ?? 0} · TIME ${score.timing ?? 0}`
+      : '';
+    this.coachFeedback.textContent = score?.note || 'Feedback pending…';
+    this.coachSummary.hidden = true;
+  }
+
+  showCoachFeedback(text) {
+    if (!this.coachPanel || !text) return;
+    this.coachPanel.hidden = false;
+    this.coachFeedback.textContent = text;
+  }
+
+  showMatchSummary(text) {
+    if (!this.coachPanel || !text) return;
+    this.coachPanel.hidden = false;
+    this.coachScenario.textContent = 'Post-match summary';
+    this.coachSummary.hidden = false;
+    this.coachSummary.textContent = text;
+  }
+
+  showProfileSummary(text) {
+    if (!this.coachPanel || !text) return;
+    this.coachPanel.hidden = false;
+    this.coachScenario.textContent = 'Your recurring trends';
+    this.coachSummary.hidden = false;
+    this.coachSummary.textContent = text;
+  }
+
+  setCoachProfileStatus(status) {
+    if (this.coachStatus) this.coachStatus.textContent = status;
+  }
+
+  hideCoachPanel() {
+    if (this.coachPanel) this.coachPanel.hidden = true;
   }
 
   // --- Bottom status line ----------------------------------------------
@@ -660,6 +794,7 @@ export class UI {
   }
 
   quitToMenu() {
+    this.hideCoachPanel();
     // Record before tearing anything down — onExit resets the match state
     // this reads from.
     this.recordRun?.(this.onRunSummary?.() ?? {});

@@ -33,6 +33,7 @@ import {
   isRealtimeAvailable,
 } from './net.js';
 import { VersusMatch } from './versus.js';
+import { summarizeMatch, analyzeShot, narrate, recordProfileEvent, getProfileSummary } from './backendApi.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
 const BALL_POOL_SIZE = 10;
@@ -216,7 +217,22 @@ const coach = new Coach({
   sfx,
   onScore: (score) => {
     game.onLessonScore(score);
-    ui.toast(`${score.total}% · ${coach.advice}`);
+    ui.showCoachScore(score, coach.scenario.id);
+    // Backend coaching is optional. The local lesson remains fully usable when
+    // no provider keys are configured, while deployed builds can add a second
+    // opinion and persist a compact profile event.
+    analyzeShot(score, { scenario: coach.scenario.id, advice: coach.advice })
+      .then(({ analysis }) => {
+        ui.showCoachFeedback(analysis);
+        narrate(analysis, 'a').catch(() => {});
+      })
+      .catch(() => {});
+    recordProfileEvent(
+      { type: 'coach_score', scenario: coach.scenario.id, score },
+      settings.get('playerName') || 'anonymous'
+    )
+      .then(() => ui.setCoachProfileStatus('PROFILE SYNCED'))
+      .catch(() => {});
   },
 });
 scene.add(coach.group);
@@ -279,6 +295,12 @@ const ui = new UI({
     // setting sits there remembered from last time.
     if (!mode) syncCameraInput();
     syncDesktopCursor();
+    getProfileSummary(settings.get('playerName') || 'anonymous')
+      .then(({ summary }) => {
+        ui.showProfileSummary(summary);
+        narrate(summary, 'b').catch(() => {});
+      })
+      .catch(() => {});
     if (settings.get('difficulty') === 'fly') flyBrainViz.show();
   },
   onExit: () => {
@@ -1469,8 +1491,26 @@ function handleVersusHostBounce(ball, event) {
   ui.updateVersusScore(match.snapshot(), 'host');
   game.revision++; // repaint the in-world board
   broadcastHostState();
-  if (winner) ui.showVersusWin(winner === 'host', match.snapshot());
-  else startVersusServe();
+  if (winner) {
+    ui.showVersusWin(winner === 'host', match.snapshot());
+    summarizeMatch({
+      scoreHost: match.scoreHost,
+      scoreGuest: match.scoreGuest,
+      winner,
+      server: match.server,
+    })
+      .then(({ summary }) => {
+        ui.showMatchSummary(summary);
+        narrate(summary, 'b').catch(() => {});
+      })
+      .catch(() => {});
+    recordProfileEvent({
+      type: 'versus_result',
+      scoreHost: match.scoreHost,
+      scoreGuest: match.scoreGuest,
+      winner,
+    }, settings.get('playerName') || 'anonymous').catch(() => {});
+  } else startVersusServe();
 }
 
 function runVersusHost(dt) {
