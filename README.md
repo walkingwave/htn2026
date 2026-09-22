@@ -155,9 +155,15 @@ Choose **On this screen**, then select **Settings → Paddle input → Webcam pa
 
 The tracker estimates position and angle from the marker corners. It uses marker spacing for a steadier depth estimate and red/black colour segmentation as an additional paddle-region hint. Multiple marker poses are combined, inconsistent measurements are rejected, and brief marker dropouts are bridged with optical flow.
 
-The expensive detection and pose work runs in a Web Worker instead of the rendering loop. An alpha–beta predictor offsets some camera latency, while position and quaternion filtering reduce jitter. The preview shows the marker corners the tracker is using. Press <kbd>V</kbd> to re-zero the neutral pose and <kbd>T</kbd> to open the webcam tuning panel.
+The expensive detection and pose work runs in a Web Worker instead of the rendering loop. A bounded predictive filter offsets camera latency, while confidence-aware position and quaternion filtering reduce jitter without allowing teleporting. The preview shows the marker corners the tracker is using. Press <kbd>V</kbd> to re-zero the neutral pose and <kbd>T</kbd> to open the webcam tuning panel.
 
 Even lighting, matte marker sheets, a white quiet border around each marker, and keeping at least two markers visible all improve tracking. After the first successful lock, losing the markers briefly holds the last usable paddle position rather than returning control to the mouse.
+
+## Phone paddle companion
+
+A phone can act as a low-latency camera for a marked paddle during a local match. Host a room with `npm run dev`, copy **Phone paddle** from the room controls, and open that `?pose=CODE` link on a phone connected to the same Wi-Fi. The phone keeps camera frames local, runs the marker tracker, and sends only predicted pose packets over the Vite WebSocket relay. The game host applies those packets to the remote paddle, so no per-frame request goes through a Vercel Function.
+
+This companion is intentionally local-only right now: a deployed Vercel URL does not provide a long-lived WebSocket relay. For players on different networks, use the deployed room link and Supabase Realtime for the match; a future phone companion can use a WebRTC data channel or a dedicated realtime transport.
 
 ## The view on a computer
 
@@ -213,6 +219,8 @@ src/
   settings.js     Player settings, persisted to localStorage
   audio.js        Procedural WebAudio sound effects
   net.js          WebSocket, Supabase Realtime and local-tab transports
+  phonePose.js    Local phone camera companion and pose sender
+  tournament.js   Four-player online/local bracket state and transport
   versus.js       First-to-11, win-by-two match state
   xr.js           WebXR session management
 ```

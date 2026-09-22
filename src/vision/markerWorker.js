@@ -15,7 +15,12 @@ import { AR } from 'js-aruco2';
 import * as CVModule from 'js-aruco2/src/cv.js';
 import { POS } from 'js-aruco2/src/posit1.js';
 
-const { CV } = CVModule.default;
+// js-aruco2 ships its legacy CV file as a side-effect module rather than an
+// ES export. Vite exposes the global when it wraps that module; do not read a
+// nonexistent `.default` export, which both produced a build warning and could
+// leave the worker without image-processing functions at runtime.
+const CV = CVModule.CV || globalThis.CV;
+if (!CV) throw new Error('js-aruco2 CV runtime did not load.');
 
 AR.DICTIONARIES.MATLAB_DICT_4X4_250 = {
   nBits: 16,

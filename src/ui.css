@@ -186,6 +186,15 @@ canvas {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* Two questions, asked one at a time.
    The old menu put "which game" and "which device" side by side with nothing
    to say which was which, so it read as one list of six unrelated things.
@@ -813,8 +822,15 @@ canvas {
   padding: 3px 0;
   white-space: nowrap;
 }
-.key:hover {
+.key:hover,
+.key:focus-visible,
+.arrow:focus-visible,
+.game:focus-visible,
+.item:focus-visible,
+.crumb:focus-visible {
   color: var(--paper);
+  outline: 1px solid var(--red);
+  outline-offset: 4px;
 }
 .key b {
   color: var(--paper);
@@ -999,4 +1015,211 @@ canvas {
 #menu > :not(.crt) {
   position: relative;
   z-index: 2;
+}
+
+/* Tournament lobby ------------------------------------------------------ */
+.tournament {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: min(100%, 640px);
+  max-width: 760px;
+  text-align: left;
+}
+.tournament[hidden] {
+  display: none;
+}
+.tournament__intro {
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tournament__setup,
+.tournament__join,
+.tournament__share {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tournament__join {
+  padding-top: 10px;
+  border-top: 1px solid rgba(242, 239, 230, 0.14);
+}
+.tournament__name {
+  min-width: 18ch;
+}
+.tournament__share {
+  padding: 10px 0;
+  border-top: 1px solid rgba(242, 239, 230, 0.14);
+}
+.tournament__link {
+  flex: 1 1 280px;
+  overflow: hidden;
+  color: var(--paper);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+.bracket {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(242, 239, 230, 0.14);
+}
+.bracket[hidden] {
+  display: none;
+}
+.bracket__head,
+.bracket__players {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.bracket__head b {
+  color: var(--red);
+}
+.bracket__players {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bracket__players span {
+  padding: 4px 7px;
+  border: 1px solid rgba(242, 239, 230, 0.18);
+}
+.bracket__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  gap: 10px;
+  align-items: center;
+}
+.bracket__match {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 108px;
+  padding: 10px;
+  border-left: 3px solid rgba(242, 239, 230, 0.18);
+  background: rgba(242, 239, 230, 0.035);
+}
+.bracket__round {
+  color: var(--red);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+.bracket__player {
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(242, 239, 230, 0.16);
+  color: var(--paper);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bracket__winner {
+  color: #3ddc84;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.bracket__room {
+  color: var(--paper);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-transform: uppercase;
+}
+.bracket__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+.bracket__advance {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+@media (max-width: 640px) {
+  .tournament {
+    min-width: 0;
+    width: 100%;
+  }
+  .bracket__grid {
+    grid-template-columns: 1fr;
+  }
+  .bracket__match {
+    min-height: 0;
+  }
+}
+
+/* Phone pose companion -------------------------------------------------- */
+.phone-pose {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  overflow-y: auto;
+  padding: max(28px, env(safe-area-inset-top)) 18px max(36px, env(safe-area-inset-bottom));
+  background: var(--ink);
+  color: var(--paper);
+  text-align: center;
+}
+.phone-pose h1 {
+  margin: 0;
+  color: var(--red);
+  font-family: var(--logo);
+  font-size: clamp(24px, 8vw, 42px);
+  font-weight: 400;
+  text-transform: uppercase;
+}
+.phone-pose p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.phone-pose__eyebrow,
+.phone-pose__confidence {
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.phone-pose__eyebrow {
+  color: var(--red);
+}
+.phone-pose__confidence {
+  color: #3ddc84;
+}
+.phone-pose canvas {
+  width: min(100%, 640px);
+  height: auto;
+  border: 1px solid rgba(242, 239, 230, 0.25);
+  background: #18181a;
+}
+.phone-pose__status {
+  min-height: 1.5em;
+  color: var(--paper);
+  font-size: 12px;
+}
+.phone-pose__help {
+  font-size: 11px;
 }

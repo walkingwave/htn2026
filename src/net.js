@@ -20,6 +20,10 @@ import { encodeMessage, isValidRoomCode, MULTIPLAYER_PROTOCOL } from './multipla
 const CHANNEL_PREFIX = 'flyball-room-';
 const WS_PATH = '/__flyball_ws';
 
+function clientId() {
+  try { return crypto.randomUUID(); } catch { return `${Date.now()}-${Math.random()}`; }
+}
+
 export function makeRoomCode() {
   // Ambiguity-free alphabet (no O/0/I/1) for codes that are easy to read aloud.
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -115,18 +119,26 @@ export function createPoseSender(code) {
   let closed = false;
   let resolveJoin;
   let rejectJoin;
+  let joinTimer;
   const joined = new Promise((resolve, reject) => {
-    resolveJoin = resolve;
-    rejectJoin = reject;
+    resolveJoin = (value) => { clearTimeout(joinTimer); resolve(value); };
+    rejectJoin = (error) => { clearTimeout(joinTimer); reject(error); };
   });
 
   return {
     async connect() {
+      if (!import.meta.env.DEV) {
+        throw new Error('Phone paddle mode is available on the local Vite host for now. Use the deployed room link for network play.');
+      }
       if (typeof WebSocket === 'undefined') throw new Error('WebSockets are unavailable in this browser.');
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       socket = new WebSocket(`${protocol}//${window.location.host}${WS_PATH}`);
       socket.addEventListener('open', () => {
         socket.send(encodeMessage('__join', { code, role: 'pose', kind: 'pose' }));
+        joinTimer = setTimeout(
+          () => rejectJoin(new Error('The game did not accept the phone paddle connection.')),
+          8000
+        );
       });
       socket.addEventListener('message', (event) => {
         try {
@@ -138,7 +150,10 @@ export function createPoseSender(code) {
         }
       });
       socket.addEventListener('error', () => rejectJoin(new Error('Pose relay connection failed.')));
-      socket.addEventListener('close', () => { closed = true; });
+      socket.addEventListener('close', () => {
+        closed = true;
+        rejectJoin(new Error('The phone paddle connection closed.'));
+      });
       await joined;
     },
     send(position, quaternion, confidence = 1, timestamp = performance.now()) {
@@ -168,6 +183,8 @@ class SupabaseTransport {
   constructor(code, role) {
     this.code = code;
     this.role = role;
+    this.clientId = clientId();
+    this.joinedAt = Date.now() + Math.random();
     this.handlers = {};
     this.onOpponent = null;
     this.channel = null;
@@ -175,20 +192,31 @@ class SupabaseTransport {
 
   async connect() {
     this.channel = supabase.channel(`${CHANNEL_PREFIX}${this.code}`, {
-      config: { broadcast: { self: false }, presence: { key: this.role } },
+      config: { broadcast: { self: false }, presence: { key: this.clientId } },
     });
     this.channel.on('broadcast', { event: 'msg' }, ({ payload }) => {
       const handler = this.handlers[payload.type];
       if (handler) handler(payload.data);
     });
     this.channel.on('presence', { event: 'sync' }, () => {
-      const present = Object.keys(this.channel.presenceState()).length >= 2;
-      this.onOpponent?.(present);
+      const state = this.channel.presenceState();
+      const members = Object.entries(state)
+        .flatMap(([key, values]) => (values || []).map((value) => ({ ...value, key })))
+        .sort((a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0));
+      const first = members[0];
+      // Supabase does not assign roles. Elect the earliest connected client so
+      // two people who both press Join still get one authoritative host.
+      if (first) this.role = first.key === this.clientId ? 'host' : 'guest';
+      this.onOpponent?.(members.length >= 2);
     });
     await new Promise((resolve, reject) => {
-      this.channel.subscribe((status) => {
+      this.channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          this.channel.track({ role: this.role, at: Date.now() });
+          await this.channel.track({
+            id: this.clientId,
+            role: this.role,
+            joinedAt: this.joinedAt,
+          });
           resolve();
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           reject(

@@ -75,6 +75,10 @@ const DEFAULTS = {
   sound: true,
   aimMarker: true,
   playerName: 'Player', // shown on the leaderboard
+  // Stable anonymous browser identity for profile history. This is deliberately
+  // separate from the editable display name, so renaming yourself does not
+  // split your coaching trends into multiple players.
+  playerId: '',
 };
 
 const STORAGE_KEY = 'paddlelab-xr.settings';
@@ -85,6 +89,10 @@ const LEGACY_STORAGE_KEY = 'pingpong-trainer-settings';
 export class Settings {
   constructor() {
     this.values = { ...DEFAULTS, ...load() };
+    if (!this.values.playerId) {
+      this.values.playerId = makePlayerId();
+      save(this.values);
+    }
     this._listeners = new Set();
   }
 
@@ -107,11 +115,33 @@ export class Settings {
 
 function load() {
   try {
-    return JSON.parse(
+    const raw = JSON.parse(
       localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
-    ) ?? {};
+    );
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+
+    // Settings are user-controlled browser data. Keep corrupt or stale values
+    // from poisoning physics/UI on the next boot, while preserving only keys
+    // that the current build actually understands.
+    const safe = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (!(key in DEFAULTS)) continue;
+      if (typeof value !== typeof DEFAULTS[key]) continue;
+      if (typeof value === 'string' && value.length > 64) continue;
+      if (typeof value === 'number' && !Number.isFinite(value)) continue;
+      safe[key] = value;
+    }
+    return safe;
   } catch {
     return {}; // private browsing, corrupt entry — defaults are fine
+  }
+}
+
+function makePlayerId() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `player-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 }
 

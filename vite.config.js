@@ -91,6 +91,7 @@ function multiplayerRelay() {
         client.kind = null;
         client.player = null;
         client.isPose = false;
+        client.isTournament = false;
         client.isAlive = true;
         client.on('pong', () => {
           client.isAlive = true;
@@ -139,6 +140,7 @@ function multiplayerRelay() {
             }
             const peers = rooms.get(code) ?? new Set();
             const poseClient = message.data?.kind === 'pose';
+            const tournamentClient = message.data?.kind === 'tournament';
 
             // Pose clients are camera companions, not additional players. A
             // phone can therefore stream paddle poses into an existing
@@ -146,17 +148,22 @@ function multiplayerRelay() {
             for (const peer of [...peers]) {
               if (peer.readyState !== 1 /* OPEN */) peers.delete(peer);
             }
-            const players = [...peers].filter((peer) => !peer.isPose);
-            if (!poseClient && players.length >= 2) {
+            const players = [...peers].filter((peer) => !peer.isPose && !peer.isTournament);
+            if (!poseClient && !tournamentClient && players.length >= 2) {
               return client.close(1008, 'Room is full');
             }
 
             // Game roles are decided by arrival. Pose clients get a dedicated
             // role and never participate in game presence.
-            const role = poseClient ? 'pose' : players.length === 0 ? 'host' : 'guest';
+            const role = tournamentClient
+              ? 'tournament'
+              : poseClient
+                ? 'pose'
+                : players.length === 0 ? 'host' : 'guest';
             client.room = code;
             client.role = role;
             client.isPose = poseClient;
+            client.isTournament = tournamentClient;
             peers.add(client);
             rooms.set(code, peers);
             client.send(
@@ -166,9 +173,9 @@ function multiplayerRelay() {
                 lanUrls: lanUrlsFor(request),
               })
             );
-            if (!poseClient && players.length >= 2) {
+            if (!poseClient && !tournamentClient && players.length >= 2) {
               for (const peer of peers) {
-                if (!peer.isPose) peer.send(encodeMessage('__presence', { present: true }));
+                if (!peer.isPose && !peer.isTournament) peer.send(encodeMessage('__presence', { present: true }));
               }
             }
             return;
@@ -189,8 +196,10 @@ function multiplayerRelay() {
             // Pose packets go from a phone to game clients only. Match packets
             // go between game clients and are not echoed to the phone.
             const sameChannel = message.type === 'pose'
-              ? !peer.isPose
-              : !client.isPose && !peer.isPose;
+              ? !peer.isPose && !peer.isTournament
+              : message.type === 'tournament'
+                ? peer.isTournament
+                : !client.isPose && !client.isTournament && !peer.isPose && !peer.isTournament;
             if (sameChannel) peer.send(encodeMessage(message.type, message.data));
           }
         });

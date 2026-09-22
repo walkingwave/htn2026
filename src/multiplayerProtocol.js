@@ -38,6 +38,7 @@ export function decodeMessage(raw) {
 // The relay forwards only these. Anything else is dropped rather than
 // broadcast, so a malformed or hostile client can't use the room as a
 // general-purpose message bus.
+<<<<<<< HEAD
 const RELAYED = new Set([
   '__join',
   '__leave',
@@ -54,6 +55,9 @@ const RELAYED = new Set([
   // has joined a valid tournament room.
   'tournament',
 ]);
+=======
+const RELAYED = new Set(['__join', '__leave', 'paddle', 'state', 'pose', 'tournament']);
+>>>>>>> aef7adf (Add tournament beta, fix serving, and harden client lifecycle)
 
 export function isClientMessage(message) {
   return Boolean(message && RELAYED.has(message.type));
