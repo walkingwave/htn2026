@@ -41,6 +41,8 @@ export class Ball {
     // question of timing a moving feed to a swing entirely.
     this.frozen = false;
     this.serveToss = null;
+    this.awaitingServeStrike = false;
+    this.floorCounted = false;
 
     // Scoring bookkeeping, owned here so that serving a ball is the single
     // point where a ball's life resets. Hanging these off the retire path
@@ -67,6 +69,8 @@ export class Ball {
     this.isFeed = false;
     this.frozen = false;
     this.serveToss = null;
+    this.awaitingServeStrike = false;
+    this.floorCounted = false;
     this.scoredTarget = false;
     this.awaitingOutcome = false; // struck, but not yet landed anywhere
     this.countedHit = false;
@@ -79,6 +83,8 @@ export class Ball {
     this.active = false;
     this.mesh.visible = false;
     this.serveToss = null;
+    this.awaitingServeStrike = false;
+    this.floorCounted = false;
   }
 
   // A serve waits for a real stroke rather than falling away under gravity.

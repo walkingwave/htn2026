@@ -1,21 +1,23 @@
 import * as THREE from 'three';
 
-// A serve toss starts just beyond the paddle toward the net and drifts back
-// through the face. This makes the contact window readable without auto-hitting
-// for the player: the paddle still supplies the return speed, angle, and spin.
-export const SERVE_TOSS_UP = 1.65;
-export const SERVE_TOSS_FORWARD = 0.7;
-export const SERVE_TOSS_OFFSET = 0.075;
+// Shared physical serve toss for every input source. The ball starts just
+// behind the server's paddle and travels toward the net, crossing the paddle
+// plane after a short, predictable rise. That gives mouse, webcam, phone,
+// hand, and XR players the same contact window without auto-hitting.
+export const SERVE_TOSS_UP = 1.35;
+export const SERVE_TOSS_FORWARD = 0.55;
+export const SERVE_TOSS_BEHIND = 0.13;
+export const SERVE_TOSS_HEIGHT = 0.025;
 
-export function createServeToss({ center, toNet, tracked = true }) {
+export function createServeToss({ center, toNet }) {
   const direction = new THREE.Vector3(0, 0, toNet < 0 ? -1 : 1);
   const position = new THREE.Vector3().copy(center);
+  // "Behind" is opposite the direction of play, so the ball crosses the
+  // actual blade plane instead of beginning on the net side of it.
+  position.addScaledVector(direction, -SERVE_TOSS_BEHIND);
+  position.y += SERVE_TOSS_HEIGHT;
+
   const velocity = new THREE.Vector3(0, SERVE_TOSS_UP, 0);
-
-  if (tracked) {
-    position.addScaledVector(direction, SERVE_TOSS_OFFSET);
-    velocity.addScaledVector(direction, SERVE_TOSS_FORWARD);
-  }
-
+  velocity.addScaledVector(direction, SERVE_TOSS_FORWARD);
   return { position, velocity };
 }

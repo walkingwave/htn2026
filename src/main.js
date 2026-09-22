@@ -40,6 +40,7 @@ import {
 } from './net.js';
 import { VersusMatch } from './versus.js';
 import { Tournament } from './tournament.js';
+import { createServeToss } from './serve.js';
 import { summarizeMatch, analyzeShot, narrate, recordProfileEvent, recordTelemetry, getProfileSummary } from './backendApi.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
 
@@ -1808,54 +1809,33 @@ function startVersusServe() {
 }
 
 // Put the ball up in front of whoever is serving, for them to hit — rather
-// than firing it across the table on their behalf. A real serve starts with a
-// toss, and the point should begin with a stroke the player actually made.
-//
-// The host runs this for both sides. When the guest is serving, the toss is
-// placed against the bat pose their client is streaming, so the ball appears
-// in front of *their* bat, wherever they are holding it.
-const SERVE_TOSS_UP = 2.1; // m/s — about a 22 cm toss, roughly the real thing
-const SERVE_TOSS_AHEAD = 0.11; // metres in front of the blade, within reach
-const SERVE_TOSS_RISE = 0.1; // and above it, so it falls back past the face
-
+// than firing it across the table on their behalf. Every input source uses the
+// same physical toss; only the paddle pose and swing come from a different
+// device. The host still owns the simulation, including a guest's serve.
 function serveVersusBall() {
   const ball = balls.find((b) => !b.active);
   if (!ball) return;
 
-  // Which way is "across the table" for the server: the host plays from +Z.
+  // The host plays from +Z and the guest from -Z. Prefer the latest tracked
+  // blade pose, but use the same calibrated stance fallback until the first
+  // network/CV/controller sample arrives. This prevents a first serve from
+  // being placed at the table centre or at an unreachable machine position.
   const toNet = match.server === 'host' ? -1 : 1;
-  if (typeof ball.holdForServe === 'function') {
-    const spawn = new THREE.Vector3(
-      0,
-      TABLE.HEIGHT + 0.42,
-      -toNet * (TABLE.LENGTH / 2 + 0.2)
-    );
-    ball.holdForServe(spawn);
-    ball.floorCounted = false;
-    ball.awaitingServeStrike = true;
-    versusBall = ball;
-    broadcastHostState();
-    return;
-  }
   const serverIsLocal = match.server === netMode;
   const bat = serverIsLocal ? getLocalVersusPaddle() : remotePaddle;
+  const side = match.server === 'host' ? 1 : -1;
+  const center = new THREE.Vector3(
+    0,
+    TABLE.HEIGHT + 0.19,
+    side * (PLAY_AREA.PLAYER_Z - 0.72)
+  );
+  if (bat?.tracking && bat.bladeCenter.lengthSq() > 0.01) center.copy(bat.bladeCenter);
+  center.y = THREE.MathUtils.clamp(center.y, TABLE.HEIGHT + 0.08, TABLE.HEIGHT + 0.62);
 
-  const spawn = new THREE.Vector3();
-  if (bat?.tracking) {
-    spawn.copy(bat.bladeCenter);
-    spawn.z += toNet * SERVE_TOSS_AHEAD;
-    spawn.y += SERVE_TOSS_RISE;
-  } else {
-    // No bat pose yet — a guest who hasn't moved, or a player with no tracked
-    // input. Toss it over their end of the table so the point can still start.
-    spawn.set(0, TABLE.HEIGHT + 0.3, -toNet * (TABLE.LENGTH / 2 - 0.35));
-  }
-  // Never below the surface, whatever the bat was doing.
-  spawn.y = Math.max(spawn.y, TABLE.HEIGHT + 0.12);
-
-  ball.serve(spawn, new THREE.Vector3(0, SERVE_TOSS_UP, 0));
-  ball.floorCounted = false; // our own flag; Ball.serve() doesn't know about it
-  ball.awaitingServeStrike = true; // a toss nobody hits is not a lost point
+  const toss = createServeToss({ center, toNet });
+  ball.serve(toss.position, toss.velocity);
+  ball.floorCounted = false;
+  ball.awaitingServeStrike = true; // a toss nobody hits is a re-serve, not a point
   versusBall = ball;
   broadcastHostState();
 }
