@@ -43,6 +43,7 @@ const RELAYED = new Set([
   '__leave',
   'paddle',
   'state',
+  'pose',
   'phone-hello',
   'phone-pose',
   'phone-calibrate',

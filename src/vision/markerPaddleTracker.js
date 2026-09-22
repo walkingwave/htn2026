@@ -30,38 +30,117 @@ export const TRACKER_STATE = {
 
 const FRONT_IDS = new Set([1, 2, 3, 4]);
 
-// Alpha–beta filter with a prediction lead (ported from the webcam demo).
-// A webcam pose is 60–120 ms old by the time it renders: one camera frame
-// of exposure, one of transfer, the worker round-trip, then the display.
-// Tracking velocity and reporting the position a beat AHEAD hides most of
-// that — the paddle arrives where your hand is, not where it was.
-class PredictivePositionFilter {
-  constructor({ alpha = 0.52, beta = 0.11 } = {}) {
+// Constant-acceleration predictor with a short, confidence-aware lead.
+// Camera poses are already stale when they reach the renderer: exposure,
+// transfer, worker detection and the next display frame all happen after the
+// paddle moved. A plain smoother hides noise but makes every swing late. This
+// filter keeps position, velocity and acceleration so it can lead a genuine
+// stroke without treating a bad solve as a real movement.
+export class PredictivePositionFilter {
+  constructor({ alpha = 0.62, beta = 0.18, gamma = 0.035, maxSpeed = 8, maxAcceleration = 45 } = {}) {
     this.alpha = alpha;
     this.beta = beta;
+    this.gamma = gamma;
+    this.maxSpeed = maxSpeed;
+    this.maxAcceleration = maxAcceleration;
     this.reset();
   }
 
   reset() {
     this.position = null;
     this.velocity = new THREE.Vector3();
+    this.acceleration = new THREE.Vector3();
     this.lastTime = null;
   }
 
-  filter(measurement, time, lead) {
+  filter(measurement, time, lead, confidence = 1) {
     if (!this.position) {
       this.position = measurement.clone();
       this.lastTime = time;
       return this.position.clone();
     }
+
     const dt = THREE.MathUtils.clamp((time - this.lastTime) / 1000, 1 / 240, 0.1);
-    const prediction = this.position.clone().addScaledVector(this.velocity, dt);
-    const residual = measurement.clone().sub(prediction);
-    this.position.copy(prediction).addScaledVector(residual, this.alpha);
-    this.velocity.addScaledVector(residual, this.beta / dt);
+    const predicted = this.position
+      .clone()
+      .addScaledVector(this.velocity, dt)
+      .addScaledVector(this.acceleration, 0.5 * dt * dt);
+    const residual = measurement.clone().sub(predicted);
+
+    // A low-confidence pose is still useful for correcting drift, but should
+    // not inject a large acceleration spike into the next prediction.
+    const correction = THREE.MathUtils.clamp(confidence, 0.25, 1);
+    this.position.copy(predicted).addScaledVector(residual, this.alpha * correction);
+    this.velocity
+      .addScaledVector(residual, (this.beta * correction) / dt)
+      .clampLength(0, this.maxSpeed);
+    this.acceleration
+      .addScaledVector(residual, (this.gamma * correction * 2) / (dt * dt))
+      .clampLength(0, this.maxAcceleration);
     this.lastTime = time;
-    return this.position.clone().addScaledVector(this.velocity, lead);
+
+    const safeLead = THREE.MathUtils.clamp(lead, 0, 0.12) * (0.35 + 0.65 * correction);
+    return this.position
+      .clone()
+      .addScaledVector(this.velocity, safeLead)
+      .addScaledVector(this.acceleration, 0.5 * safeLead * safeLead);
   }
+}
+
+// Quaternion equivalent of the position predictor. Tracking the paddle face
+// matters as much as tracking its centre: a late wrist rotation changes the
+// shot's spin even when the paddle arrives at the correct point.
+export class PredictiveRotationFilter {
+  constructor({ response = 0.42, maxAngularSpeed = 18 } = {}) {
+    this.response = response;
+    this.maxAngularSpeed = maxAngularSpeed;
+    this.reset();
+  }
+
+  reset() {
+    this.rotation = null;
+    this.angularVelocity = new THREE.Vector3();
+    this.lastTime = null;
+  }
+
+  filter(measurement, time, lead, confidence = 1) {
+    if (!this.rotation) {
+      this.rotation = measurement.clone();
+      this.lastTime = time;
+      return this.rotation.clone();
+    }
+
+    const dt = THREE.MathUtils.clamp((time - this.lastTime) / 1000, 1 / 240, 0.1);
+    const predicted = this.rotation.clone();
+    applyAngularVelocity(predicted, this.angularVelocity, dt);
+
+    const delta = predicted.clone().invert().multiply(measurement).normalize();
+    const angle = 2 * Math.acos(THREE.MathUtils.clamp(delta.w, -1, 1));
+    const sinHalf = Math.sqrt(Math.max(1 - delta.w * delta.w, 0));
+    const correction = THREE.MathUtils.clamp(confidence, 0.25, 1);
+    if (sinHalf > 1e-5 && angle > 1e-5) {
+      const axis = new THREE.Vector3(delta.x, delta.y, delta.z)
+        .multiplyScalar(1 / sinHalf);
+      this.angularVelocity
+        .addScaledVector(axis, (angle / dt) * this.response * correction)
+        .clampLength(0, this.maxAngularSpeed);
+    } else {
+      this.angularVelocity.multiplyScalar(0.92);
+    }
+
+    this.rotation.slerp(measurement, this.response * correction);
+    this.lastTime = time;
+    const result = this.rotation.clone();
+    applyAngularVelocity(result, this.angularVelocity, THREE.MathUtils.clamp(lead, 0, 0.12));
+    return result;
+  }
+}
+
+function applyAngularVelocity(quaternion, angularVelocity, seconds) {
+  const angle = angularVelocity.length() * seconds;
+  if (angle < 1e-6) return quaternion;
+  const axis = angularVelocity.clone().normalize();
+  return quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(axis, angle)).normalize();
 }
 
 export class MarkerPaddleTracker {
@@ -120,6 +199,7 @@ export class MarkerPaddleTracker {
     this._lastMarkers = [];
 
     this._predictor = new PredictivePositionFilter();
+    this._rotationPredictor = new PredictiveRotationFilter();
     this._smoothedQuat = null;
   }
 
@@ -202,6 +282,7 @@ export class MarkerPaddleTracker {
     this._neutralPosition = this._latestRawPose.position.clone();
     this._smoothedQuat = null;
     this._predictor.reset();
+    this._rotationPredictor.reset();
     this.position.set(0, 0, 0);
     if (this.state === TRACKER_STATE.CALIBRATING) this._setState(TRACKER_STATE.TRACKING);
     return true;
@@ -327,10 +408,19 @@ export class MarkerPaddleTracker {
       return;
     }
 
-    this.position.copy(this._predictor.filter(displacement, now, this.predictionLead));
+    const confidence = THREE.MathUtils.clamp(this.confidence, 0.25, 1);
+    this.position.copy(
+      this._predictor.filter(displacement, now, this.predictionLead, confidence)
+    );
     const relative = quaternion.clone().premultiply(this._neutral);
-    if (!this._smoothedQuat) this._smoothedQuat = relative.clone();
-    else this._smoothedQuat.slerp(relative, 0.35);
+    const predictedRotation = this._rotationPredictor.filter(
+      relative,
+      now,
+      this.predictionLead,
+      confidence
+    );
+    if (!this._smoothedQuat) this._smoothedQuat = predictedRotation.clone();
+    else this._smoothedQuat.slerp(predictedRotation, 0.45);
     this.quaternion.copy(this._smoothedQuat);
   }
 

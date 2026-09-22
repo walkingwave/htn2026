@@ -107,6 +107,63 @@ export function isRealtimeAvailable() {
   return Boolean(supabase);
 }
 
+// A phone companion uses the same LAN relay as the game, but joins as a pose
+// client so it does not consume one of the room's two player slots. The phone
+// only sends compact pose packets; camera frames never leave the device.
+export function createPoseSender(code) {
+  let socket = null;
+  let closed = false;
+  let resolveJoin;
+  let rejectJoin;
+  const joined = new Promise((resolve, reject) => {
+    resolveJoin = resolve;
+    rejectJoin = reject;
+  });
+
+  return {
+    async connect() {
+      if (typeof WebSocket === 'undefined') throw new Error('WebSockets are unavailable in this browser.');
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${window.location.host}${WS_PATH}`);
+      socket.addEventListener('open', () => {
+        socket.send(encodeMessage('__join', { code, role: 'pose', kind: 'pose' }));
+      });
+      socket.addEventListener('message', (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.protocol !== MULTIPLAYER_PROTOCOL) return;
+          if (message.type === '__joined') resolveJoin(message.data);
+        } catch {
+          // Ignore malformed relay messages; the relay validates them too.
+        }
+      });
+      socket.addEventListener('error', () => rejectJoin(new Error('Pose relay connection failed.')));
+      socket.addEventListener('close', () => { closed = true; });
+      await joined;
+    },
+    send(position, quaternion, confidence = 1, timestamp = performance.now()) {
+      if (closed || socket?.readyState !== WebSocket.OPEN) return;
+      const p = Array.isArray(position) ? position : [position.x, position.y, position.z];
+      const q = Array.isArray(quaternion)
+        ? quaternion
+        : [quaternion.x, quaternion.y, quaternion.z, quaternion.w];
+      if (p.length !== 3 || q.length !== 4 || !p.every(Number.isFinite) || !q.every(Number.isFinite)) return;
+      socket.send(encodeMessage('pose', {
+        position: p,
+        quaternion: q,
+        confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
+        timestamp: Number.isFinite(timestamp) ? timestamp : 0,
+      }));
+    },
+    close() {
+      closed = true;
+      if (socket?.readyState === WebSocket.OPEN) socket.send(encodeMessage('__leave'));
+      socket?.close();
+      socket = null;
+    },
+  };
+}
+
 class SupabaseTransport {
   constructor(code, role) {
     this.code = code;

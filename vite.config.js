@@ -90,6 +90,7 @@ function multiplayerRelay() {
         client.role = null;
         client.kind = null;
         client.player = null;
+        client.isPose = false;
         client.isAlive = true;
         client.on('pong', () => {
           client.isAlive = true;
@@ -137,38 +138,37 @@ function multiplayerRelay() {
               return client.close(1008, 'Invalid room join');
             }
             const peers = rooms.get(code) ?? new Set();
+            const poseClient = message.data?.kind === 'pose';
 
-            // Drop anyone whose socket has died before counting the room as
-            // full. A headset that sleeps, a laptop that closes its lid or a
-            // dropped Wi-Fi link leaves a socket that is gone but not closed,
-            // and without this the room stays "full" of a player who left —
-            // so the next person to join is refused and their opponent never
-            // sees them arrive.
+            // Pose clients are camera companions, not additional players. A
+            // phone can therefore stream paddle poses into an existing
+            // two-player room without making the room appear full.
             for (const peer of [...peers]) {
               if (peer.readyState !== 1 /* OPEN */) peers.delete(peer);
             }
-            if (peers.size >= 2) return client.close(1008, 'Room is full');
+            const players = [...peers].filter((peer) => !peer.isPose);
+            if (!poseClient && players.length >= 2) {
+              return client.close(1008, 'Room is full');
+            }
 
-            // Roles are decided here, by arrival, not by which button each
-            // player pressed. Two people can both press Join — with the same
-            // code, off the same link — and the room still works: whoever
-            // arrives first simulates. Before this, two guests would sit
-            // there connected to each other with nobody serving.
-            const role = peers.size === 0 ? 'host' : 'guest';
+            // Game roles are decided by arrival. Pose clients get a dedicated
+            // role and never participate in game presence.
+            const role = poseClient ? 'pose' : players.length === 0 ? 'host' : 'guest';
             client.room = code;
             client.role = role;
+            client.isPose = poseClient;
             peers.add(client);
             rooms.set(code, peers);
             client.send(
               encodeMessage('__joined', {
                 role,
-                present: peers.size >= 2,
+                present: players.length >= 2,
                 lanUrls: lanUrlsFor(request),
               })
             );
-            if (peers.size >= 2) {
+            if (!poseClient && players.length >= 2) {
               for (const peer of peers) {
-                peer.send(encodeMessage('__presence', { present: true }));
+                if (!peer.isPose) peer.send(encodeMessage('__presence', { present: true }));
               }
             }
             return;
@@ -185,9 +185,13 @@ function multiplayerRelay() {
           const peers = rooms.get(client.room);
           if (!peers) return;
           for (const peer of peers) {
-            if (peer !== client && peer.readyState === 1) {
-              peer.send(encodeMessage(message.type, message.data));
-            }
+            if (peer === client || peer.readyState !== 1) continue;
+            // Pose packets go from a phone to game clients only. Match packets
+            // go between game clients and are not echoed to the phone.
+            const sameChannel = message.type === 'pose'
+              ? !peer.isPose
+              : !client.isPose && !peer.isPose;
+            if (sameChannel) peer.send(encodeMessage(message.type, message.data));
           }
         });
         client.on('close', () => removeClient(client));
