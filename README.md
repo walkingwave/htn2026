@@ -27,7 +27,7 @@ The dev server runs on **HTTPS** (self-signed cert via `@vitejs/plugin-basic-ssl
 
 ### Phone paddle (mobile branch)
 
-On the desktop start screen choose **A phone**. PaddleLab opens a short-lived room and renders a QR code. The desktop camera also starts in pairing mode. Scan the code with the phone on the same Wi-Fi, tap **Enable motion controls**, tap **Calibrate neutral pose**, hold the marker board on the phone screen in front of the desktop camera, and finally tap **Confirm phone and start**.
+On the desktop start screen choose **A phone**. PaddleLab opens a short-lived room and shows a phone link you can copy. Open that link on the phone over the same Wi-Fi, tap **Enable motion controls**, tap **Calibrate neutral pose**, hold the marker board on the phone screen in front of the desktop camera, and finally tap **Confirm phone and start**.
 
 The phone is a hybrid controller:
 
@@ -161,9 +161,9 @@ Even lighting, matte marker sheets, a white quiet border around each marker, and
 
 ## Phone paddle companion
 
-A phone can act as a low-latency camera for a marked paddle during a local match. Host a room with `npm run dev`, copy **Phone paddle** from the room controls, and open that `?pose=CODE` link on a phone connected to the same Wi-Fi. The phone keeps camera frames local, runs the marker tracker, and sends only predicted pose packets over the Vite WebSocket relay. The game host applies those packets to the remote paddle, so no per-frame request goes through a Vercel Function.
+An advanced camera companion is also available during local development: open `?pose=CODE` on a phone connected to the same Wi-Fi as the host. It keeps camera frames local, runs the marker tracker, and sends only predicted pose packets over the Vite WebSocket relay. The supported, guided phone flow remains **A phone** in the input picker; that flow combines phone motion with the desktop camera lock.
 
-This companion is intentionally local-only right now: a deployed Vercel URL does not provide a long-lived WebSocket relay. For players on different networks, use the deployed room link and Supabase Realtime for the match; a future phone companion can use a WebRTC data channel or a dedicated realtime transport.
+The motion-controller companion is intentionally local-only right now: a deployed Vercel URL does not provide a long-lived WebSocket relay. For players on different networks, use the deployed room link and Supabase Realtime for the match. The experimental `?pose=CODE` camera companion is not exposed by the main menu and should not be treated as the supported phone flow.
 
 ## The view on a computer
 
@@ -219,7 +219,7 @@ src/
   settings.js     Player settings, persisted to localStorage
   audio.js        Procedural WebAudio sound effects
   net.js          WebSocket, Supabase Realtime and local-tab transports
-  phonePose.js    Local phone camera companion and pose sender
+  phonePose.js    Advanced local camera companion and pose sender
   tournament.js   Four-player online/local bracket state and transport
   versus.js       First-to-11, win-by-two match state
   xr.js           WebXR session management

@@ -43,6 +43,7 @@ export class UI {
     onTournamentStart,
     onTournamentLeave,
     onTournamentLaunch,
+    onPhonePair,
     onRunSummary,
     invitedRoom = null,
     invitedTournament = null,
@@ -65,6 +66,7 @@ export class UI {
       onTournamentStart,
       onTournamentLeave,
       onTournamentLaunch,
+      onPhonePair,
       onRunSummary,
       realtimeAvailable,
     });
@@ -78,6 +80,7 @@ export class UI {
     this._tournament = null; // { code, link, players, isHost } once in a bracket lobby
     this._tournamentStarted = false;
     this._tournamentMatch = null;
+    this._phoneReadyStarted = false;
 
     this._buildMenu();
     this._buildBar();
@@ -187,6 +190,15 @@ export class UI {
             </div>
           </div>
         </div>
+        <div class="phone-pair" data-phone-pair hidden>
+          <div class="phone-pair__title">Phone paddle</div>
+          <div class="phone-pair__qr" data-phone-qr aria-hidden="true">PHONE LINK</div>
+          <div class="phone-pair__link" data-phone-link></div>
+          <div class="lobby__status" data-phone-status>Opening a local phone room…</div>
+          <button class="key" data-phone-copy><b>⧉</b>Copy phone link</button>
+          <div class="phone-pair__cv" data-phone-cv>Keep the marker board visible to this computer camera.</div>
+          <button class="key" data-phone-cancel><b>×</b>Cancel phone pairing</button>
+        </div>
         <div class="prompt blink">↑ ↓ SELECT · ENTER START</div>
       </div>
 
@@ -225,6 +237,13 @@ export class UI {
     el.querySelector('[data-lobby-copy]').onclick = () => this._copyRoomLink();
     el.querySelector('[data-lobby-leave]').onclick = () => this._leaveMatch();
     this.lobbyPhone = el.querySelector('[data-lobby-phone]');
+    this.phonePair = el.querySelector('[data-phone-pair]');
+    this.phoneQr = el.querySelector('[data-phone-qr]');
+    this.phoneLink = el.querySelector('[data-phone-link]');
+    this.phoneStatus = el.querySelector('[data-phone-status]');
+    this.phoneCvStatus = el.querySelector('[data-phone-cv]');
+    this.phonePair.querySelector('[data-phone-copy]').onclick = () => this._copyPhoneLink();
+    this.phonePair.querySelector('[data-phone-cancel]').onclick = () => this._cancelPhonePair();
     el.querySelector('[data-lobby-invite]').onclick = () => this._sendLinqInvite();
     this.lobbyPhone.onkeydown = (e) => {
       e.stopPropagation();
@@ -236,17 +255,11 @@ export class UI {
       if (e.code === 'Enter') this._joinMatch();
     };
 
-    // Named for where you end up, with the trade-off spelled out, rather than
-    // for the WebXR session mode being requested. "Enter passthrough" means
-    // nothing to someone who has not read the spec.
+    // The input picker is also the XR session picker. Keep AR and VR as
+    // separate entries so passthrough is not silently replaced by full VR.
     this._entries = [
       { id: 'ar', label: 'In my room', note: 'headset · passthrough', disabled: true },
       { id: 'vr', label: 'In the arena', note: 'headset · full VR', disabled: true },
-      { id: 'desktop', label: 'On this screen', note: 'mouse or webcam paddle', disabled: false },
-      { id: 'camera-hand', label: 'Hand tracking', note: 'webcam · bare hand', disabled: false },
-    ];
-    this._entries = [
-      { id: 'vr', label: 'A VR headset', note: 'headset', disabled: true },
       { id: 'camera', label: 'A ping pong paddle', note: 'webcam', disabled: false },
       { id: 'camera-hand', label: 'A hand', note: 'webcam · hand tracking', disabled: false },
       { id: 'phone', label: 'A phone', note: 'motion + haptics', disabled: false },
@@ -661,6 +674,8 @@ export class UI {
     this._tournament = null;
     this._tournamentStarted = false;
     this._tournamentMatch = null;
+    this._phoneReadyStarted = false;
+    this.phonePair.hidden = true;
     this.lobbyShare.hidden = true;
     this.lobbyRoster.hidden = true;
     this.lobbyStart.hidden = true;
@@ -721,7 +736,6 @@ export class UI {
     if (!entry || entry.disabled) return;
     if (entry.id === 'phone') {
       this.settings.set('paddleSource', 'phone');
-      this.phonePair.hidden = false;
       this._startPhonePair();
     } else if (entry.id === 'camera') {
       this.settings.set('paddleSource', 'camera');
@@ -734,40 +748,91 @@ export class UI {
       // reuse a saved webcam/hand selection when Computer was requested.
       this.settings.set('paddleSource', 'controller');
       this._launch(null);
+    } else if (entry.id === 'ar') {
+      this._launch('immersive-ar');
+    } else if (entry.id === 'vr') {
+      this._launch('immersive-vr');
     }
-    else this._launch('immersive-vr');
   }
 
   applyXRSupport(support) {
+    const ar = this._entries.find((entry) => entry.id === 'ar');
     const vr = this._entries.find((entry) => entry.id === 'vr');
+    ar.disabled = !support['immersive-ar'];
     vr.disabled = !support['immersive-vr'];
-    vr.note = support['immersive-vr'] ? 'headset · full VR' : 'needs a headset';
+    ar.note = support['immersive-ar'] ? 'headset · passthrough' : 'needs an AR headset';
+    vr.note = support['immersive-vr'] ? 'headset · full VR' : 'needs a VR headset';
     const menuNote = this.menu.querySelector('[data-menu-note]');
-    menuNote.textContent = support['immersive-vr']
+    menuNote.textContent = support['immersive-ar'] || support['immersive-vr']
       ? 'Headset ready'
       : 'Open this page in the Meta Quest Browser to play in a headset';
     this._selected = this._entries.findIndex((entry) => !entry.disabled);
     if (this._selected < 0) this._selected = 0;
     this._renderMenu();
-    return;
+  }
 
-    this._entries[0].disabled = !support['immersive-ar'];
-    this._entries[1].disabled = !support['immersive-vr'];
-    this._entries[0].note = support['immersive-ar']
-      ? 'headset · passthrough'
-      : 'needs a headset';
-    this._entries[1].note = support['immersive-vr']
-      ? 'headset · full VR'
-      : 'needs a headset';
+  async _startPhonePair() {
+    if (this.phonePair.hidden === false) return;
+    this._phoneReadyStarted = false;
+    this.phonePair.hidden = false;
+    this.phoneStatus.textContent = 'Opening a local phone room…';
+    this.phoneCvStatus.textContent = 'Waiting for the desktop camera and phone connection.';
+    this.phoneLink.textContent = '';
+    this.phoneQr.textContent = 'PHONE LINK';
+    try {
+      const result = await this.onPhonePair?.();
+      if (!result?.link) throw new Error('Could not create the phone pairing link.');
+      this.phoneLink.textContent = result.link;
+      this.phoneQr.textContent = 'COPY LINK BELOW';
+      this.phoneStatus.textContent = `Room ${result.code} · open the link on the phone.`;
+    } catch (error) {
+      this.phoneStatus.textContent = error?.message || 'Phone pairing could not start.';
+      this.phoneStatus.dataset.tone = 'bad';
+    }
+  }
 
-    const note = this.menu.querySelector('[data-menu-note]');
-    note.textContent = support['immersive-ar'] || support['immersive-vr']
-      ? 'Headset ready'
-      : 'Open this page in the Meta Quest Browser to play in a headset';
+  async _copyPhoneLink() {
+    const link = this.phoneLink.textContent;
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      this.phoneStatus.textContent = 'Phone link copied.';
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(this.phoneLink);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      this.phoneStatus.textContent = 'Select the highlighted link to copy it.';
+    }
+  }
 
-    this._selected = this._entries.findIndex((e) => !e.disabled);
-    if (this._selected < 0) this._selected = 0;
-    this._renderMenu();
+  _cancelPhonePair() {
+    this.phonePair.hidden = true;
+    this.onExit?.();
+    this.settings.set('paddleSource', 'controller');
+  }
+
+  phoneCvReady() {
+    this.phoneCvStatus.textContent = 'Camera locked on the phone marker board.';
+    this.phoneCvStatus.dataset.tone = 'good';
+  }
+
+  phoneCvWaiting() {
+    this.phoneCvStatus.textContent = 'Keep the phone marker board visible to this computer camera.';
+  }
+
+  phoneDisconnected() {
+    this.phoneStatus.textContent = 'Phone disconnected · reconnect the phone link.';
+    this.phoneStatus.dataset.tone = 'bad';
+  }
+
+  phoneReady() {
+    if (this._phoneReadyStarted) return;
+    this._phoneReadyStarted = true;
+    this.phoneStatus.textContent = 'Phone confirmed · entering the arena…';
+    this.phonePair.hidden = true;
+    this._launch(null);
   }
 
   async _launch(mode) {
@@ -1108,6 +1173,8 @@ export class UI {
     this._tournament = null;
     this._tournamentStarted = false;
     this._tournamentMatch = null;
+    this._phoneReadyStarted = false;
+    this.phonePair.hidden = true;
     this.lobbyShare.hidden = true;
     this.lobbyRoster.hidden = true;
     this.lobbyStart.hidden = true;

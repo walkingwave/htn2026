@@ -1,11 +1,12 @@
-import { handleError, readJson, requiredString } from './_lib/http.js';
+import { finiteNumber, handleError, rateLimit, readJson, requiredString } from './_lib/http.js';
 import { tigerQuery } from './_lib/tiger.js';
 
-function numberOrNull(value) {
-  return value == null || value === '' ? null : Number(value);
+function numberOrNull(value, name) {
+  return value == null || value === '' ? null : finiteNumber(value, name, { min: -1000000, max: 1000000 });
 }
 
 export default async function handler(req, res) {
+  if (!rateLimit(req, res, 'telemetry', 120)) return;
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     res.status(405).json({ error: 'Method not allowed' });
@@ -32,11 +33,11 @@ export default async function handler(req, res) {
           playerId,
           eventType,
           scenario,
-          numberOrNull(event.total),
-          numberOrNull(event.path),
-          numberOrNull(event.sync),
-          numberOrNull(event.face),
-          numberOrNull(event.timing),
+          numberOrNull(event.total, 'total'),
+          numberOrNull(event.path, 'path'),
+          numberOrNull(event.sync, 'sync'),
+          numberOrNull(event.face, 'face'),
+          numberOrNull(event.timing, 'timing'),
           JSON.stringify(event.payload || event),
         ]
       );

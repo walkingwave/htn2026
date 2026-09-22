@@ -1613,6 +1613,7 @@ let room = null; // active room handle
 // separate so a phone can drive a solo drill without turning the drill into a
 // networked match.
 let phoneRoom = null;
+let phonePairLink = '';
 let phoneConnected = false;
 let phoneConfirmed = false;
 let phoneCvLocked = false;
@@ -1703,9 +1704,11 @@ function applyRemotePaddle(pkt) {
 }
 
 async function openPhonePair() {
-  if (phoneRoom) return phoneRoom;
+  if (phoneRoom && phonePairLink) return { code: phoneRoom.code, link: phonePairLink };
   const code = makeRoomCode();
-  phoneRoom = createRoom({ code, role: 'host', transport: 'websocket' });
+  const candidate = createRoom({ code, role: 'host', transport: 'websocket' });
+  phoneRoom = candidate;
+  phonePairLink = '';
   phoneRoom.on('phone-hello', (payload) => {
     // Joining or enabling sensors is not enough; only the explicit phone
     // confirmation plus a camera lock may release the desktop into gameplay.
@@ -1741,13 +1744,22 @@ async function openPhonePair() {
     phoneConnected = false;
     phoneLastPose = null;
   });
-  await phoneRoom.connect();
-  startPhoneCv();
-  const origin = phoneRoom.lanUrls?.[0] || window.location.origin;
-  const linkUrl = new URL(origin);
-  linkUrl.search = '';
-  linkUrl.searchParams.set('phone', code);
-  return { code, link: linkUrl.toString() };
+  try {
+    await phoneRoom.connect();
+    startPhoneCv();
+    const origin = phoneRoom.lanUrls?.[0] || window.location.origin;
+    const linkUrl = new URL(origin);
+    linkUrl.search = '';
+    linkUrl.searchParams.set('phone', code);
+    phonePairLink = linkUrl.toString();
+    return { code, link: phonePairLink };
+  } catch (error) {
+    phoneRoom.close();
+    phoneRoom = null;
+    phonePairLink = '';
+    stopPhoneCv();
+    throw error;
+  }
 }
 
 function maybeStartPhone() {
@@ -1797,6 +1809,7 @@ function closePhonePair() {
   stopPhoneCv();
   phoneRoom?.close();
   phoneRoom = null;
+  phonePairLink = '';
   phoneConnected = false;
   phoneConfirmed = false;
   phoneCvLocked = false;

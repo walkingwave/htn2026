@@ -1,3 +1,4 @@
+import './ui.css';
 import { createPoseSender } from './net.js';
 import { MarkerPaddleTracker, TRACKER_STATE } from './vision/markerPaddleTracker.js';
 

@@ -91,17 +91,29 @@ function multiplayerRelay() {
         client.kind = null;
         client.player = null;
         client.isPose = false;
+        client.isPhone = false;
         client.isTournament = false;
         client.isAlive = true;
+        client.messageWindowStarted = Date.now();
+        client.messageCount = 0;
         client.on('pong', () => {
           client.isAlive = true;
         });
 
         client.on('message', (raw) => {
+          const now = Date.now();
+          if (now - client.messageWindowStarted >= 1000) {
+            client.messageWindowStarted = now;
+            client.messageCount = 0;
+          }
+          client.messageCount += 1;
+          if (client.messageCount > 240) return client.close(1008, 'Message rate exceeded');
+
           const message = decodeMessage(raw.toString());
           if (!message) return client.close(1003, 'Invalid multiplayer message');
 
           if (message.type === '__tournament-join') {
+            if (client.room) return client.close(1008, 'Already joined a room');
             const code = message.data?.code;
             const rawPlayer = message.data?.player;
             const id = typeof rawPlayer?.id === 'string' ? rawPlayer.id.trim() : '';
@@ -134,12 +146,15 @@ function multiplayerRelay() {
           }
 
           if (message.type === '__join') {
+            if (client.room) return client.close(1008, 'Already joined a room');
             const code = message.data?.code;
             if (!isValidRoomCode(code)) {
               return client.close(1008, 'Invalid room join');
             }
             const peers = rooms.get(code) ?? new Set();
             const poseClient = message.data?.kind === 'pose';
+            const phoneClient = message.data?.kind === 'phone';
+            const companionClient = poseClient || phoneClient;
             const tournamentClient = message.data?.kind === 'tournament';
 
             // Pose clients are camera companions, not additional players. A
@@ -148,8 +163,8 @@ function multiplayerRelay() {
             for (const peer of [...peers]) {
               if (peer.readyState !== 1 /* OPEN */) peers.delete(peer);
             }
-            const players = [...peers].filter((peer) => !peer.isPose && !peer.isTournament);
-            if (!poseClient && !tournamentClient && players.length >= 2) {
+            const players = [...peers].filter((peer) => !peer.isPose && !peer.isPhone && !peer.isTournament);
+            if (!companionClient && !tournamentClient && players.length >= 2) {
               return client.close(1008, 'Room is full');
             }
 
@@ -157,12 +172,13 @@ function multiplayerRelay() {
             // role and never participate in game presence.
             const role = tournamentClient
               ? 'tournament'
-              : poseClient
-                ? 'pose'
+              : companionClient
+                ? message.data?.kind
                 : players.length === 0 ? 'host' : 'guest';
             client.room = code;
             client.role = role;
             client.isPose = poseClient;
+            client.isPhone = phoneClient;
             client.isTournament = tournamentClient;
             peers.add(client);
             rooms.set(code, peers);
@@ -173,9 +189,9 @@ function multiplayerRelay() {
                 lanUrls: lanUrlsFor(request),
               })
             );
-            if (!poseClient && !tournamentClient && players.length >= 2) {
+            if (!companionClient && !tournamentClient && players.length >= 2) {
               for (const peer of peers) {
-                if (!peer.isPose && !peer.isTournament) peer.send(encodeMessage('__presence', { present: true }));
+                if (!peer.isPose && !peer.isPhone && !peer.isTournament) peer.send(encodeMessage('__presence', { present: true }));
               }
             }
             return;
@@ -193,13 +209,24 @@ function multiplayerRelay() {
           if (!peers) return;
           for (const peer of peers) {
             if (peer === client || peer.readyState !== 1) continue;
-            // Pose packets go from a phone to game clients only. Match packets
-            // go between game clients and are not echoed to the phone.
-            const sameChannel = message.type === 'pose'
-              ? !peer.isPose && !peer.isTournament
-              : message.type === 'tournament'
-                ? peer.isTournament
-                : !client.isPose && !client.isTournament && !peer.isPose && !peer.isTournament;
+            // Companion packets go between a phone/pose client and game
+            // clients. Match packets stay between the two game clients, and
+            // tournament packets stay inside the tournament room.
+            const clientCompanion = client.isPose || client.isPhone;
+            const peerCompanion = peer.isPose || peer.isPhone;
+            const companionMessage = new Set([
+              'pose',
+              'phone-pose',
+              'phone-hello',
+              'phone-calibrate',
+              'phone-cv-status',
+              'phone-haptic',
+            ]).has(message.type);
+            const sameChannel = message.type === 'tournament'
+              ? peer.isTournament
+              : companionMessage
+                ? clientCompanion !== peerCompanion
+                : !clientCompanion && !client.isTournament && !peerCompanion && !peer.isTournament;
             if (sameChannel) peer.send(encodeMessage(message.type, message.data));
           }
         });

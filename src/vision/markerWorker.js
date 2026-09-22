@@ -15,12 +15,10 @@ import { AR } from 'js-aruco2';
 import * as CVModule from 'js-aruco2/src/cv.js';
 import { POS } from 'js-aruco2/src/posit1.js';
 
-// js-aruco2 ships its legacy CV file as a side-effect module rather than an
-// ES export. Vite exposes the global when it wraps that module; do not read a
-// nonexistent `.default` export, which both produced a build warning and could
-// leave the worker without image-processing functions at runtime.
-const CV = CVModule.CV || globalThis.CV;
-if (!CV) throw new Error('js-aruco2 CV runtime did not load.');
+// js-aruco2 ships this legacy CV file as a side-effect module. Depending on
+// the bundler it may appear on the module namespace or global object.
+const CVRuntime = CVModule.CV || globalThis.CV;
+if (!CVRuntime) throw new Error('js-aruco2 CV runtime did not load.');
 
 AR.DICTIONARIES.MATLAB_DICT_4X4_250 = {
   nBits: 16,
@@ -52,7 +50,7 @@ const state = {
 
 function detect(imageData) {
     const detector = state.detector;
-    CV.grayscale(imageData, detector.grey);
+    CVRuntime.grayscale(imageData, detector.grey);
     detector.contours = [];
 
     const first = thresholdCandidates(imageData, 2);
@@ -70,8 +68,8 @@ function detect(imageData) {
 
 function thresholdCandidates(imageData, blurRadius) {
     const detector = state.detector;
-    CV.adaptiveThreshold(detector.grey, detector.thres, blurRadius, 7);
-    const contours = CV.findContours(detector.thres, detector.binary);
+    CVRuntime.adaptiveThreshold(detector.grey, detector.thres, blurRadius, 7);
+    const contours = CVRuntime.findContours(detector.thres, detector.binary);
     detector.contours.push(...contours);
     return detector.findCandidates(contours, imageData.width * 0.01, 0.05, 10);
   }

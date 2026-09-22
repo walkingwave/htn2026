@@ -56,7 +56,7 @@ let socket;
 function connect() {
   if (!code) return setStatus('This phone link is missing its room code.', 'bad');
   try { socket = new WebSocket(socketUrl()); } catch { return setStatus('Could not open the relay.', 'bad'); }
-  socket.addEventListener('open', () => socket.send(encodeMessage('__join', { code, role: 'phone' })));
+  socket.addEventListener('open', () => socket.send(encodeMessage('__join', { code, role: 'phone', kind: 'phone' })));
   socket.addEventListener('message', (event) => {
     const message = decodeMessage(String(event.data)); if (!message) return;
     if (message.type === '__joined') {

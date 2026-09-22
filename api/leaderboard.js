@@ -1,6 +1,7 @@
 import {
   handleError,
   providerError,
+  rateLimit,
   readJson,
   requiredString,
 } from './_lib/http.js';
@@ -19,6 +20,7 @@ function category(value) {
 }
 
 export default async function handler(req, res) {
+  if (!rateLimit(req, res, 'leaderboard', req.method === 'GET' ? 120 : 30)) return;
   try {
     if (req.method === 'GET') {
       const selected = category(new URL(req.url, 'http://localhost').searchParams.get('category'));

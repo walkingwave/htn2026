@@ -47,14 +47,16 @@ test('rotation predictor leads a bounded wrist rotation', () => {
   assert.ok(predicted.angleTo(identity) > current.angleTo(identity));
 });
 
-test('pose packets are accepted by the shared multiplayer protocol', () => {
-  const encoded = encodeMessage('pose', {
+test('pose and phone packets are accepted by the shared multiplayer protocol', () => {
+  const pose = decodeMessage(encodeMessage('pose', {
     position: [0.1, 0.9, -0.7],
     quaternion: [0, 0, 0, 1],
     confidence: 0.9,
-  });
-  const decoded = decodeMessage(encoded);
+  }));
+  const phone = decodeMessage(encodeMessage('phone-pose', { x: 0.2, y: -0.1, flick: true }));
 
-  assert.equal(decoded.type, 'pose');
-  assert.equal(isClientMessage(decoded), true);
+  assert.equal(pose.type, 'pose');
+  assert.equal(isClientMessage(pose), true);
+  assert.equal(phone.type, 'phone-pose');
+  assert.equal(isClientMessage(phone), true);
 });
