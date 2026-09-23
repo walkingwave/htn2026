@@ -51,7 +51,9 @@ const SWING_FOLLOW_THROUGH = 0.16; // seconds
 // distance — a hard shot crosses a fixed distance far quicker than a soft
 // one, so a distance trigger starts the swing too late exactly when it
 // matters most.
-const SWING_LEAD = 0.14; // seconds
+const SWING_LEAD = 0.20; // seconds of forward travel before contact
+const SWING_STAGE_LEAD = 0.24; // stage the blade this far behind contact
+const SWING_CONTACT_WINDOW = 0.12; // keep the face live around the crossing
 
 // The flight estimate is refreshed this often while tracking. The one made
 // before the bounce carries real error.
@@ -67,14 +69,130 @@ const READY = new THREE.Vector3(0, TABLE.HEIGHT + 0.2, HIT_PLANE_Z);
 // and 85% gives nearly 6. Measured rates against a spread of realistic
 // shots: easy ~60%, normal ~85%, hard ~86% with far more pace.
 export const OPPONENT_SKILL = {
-  easy: { reach: 1.1, maxSpeed: 2.1, error: 0.20, missChance: 0.34, pace: 3.8 },
-  normal: { reach: 1.7, maxSpeed: 3.2, error: 0.10, missChance: 0.07, pace: 4.4 },
-  hard: { reach: 2.1, maxSpeed: 4.0, error: 0.05, missChance: 0.02, pace: 4.9 },
+  // `missChance` is now a small style adjustment, not the bot's main source of
+  // failure. Legal-shot validation below means an easy bot can still return a
+  // safe ball; reaction time, recovery and risk make it easier to beat.
+  easy: {
+    reach: 1.1, maxSpeed: 2.1, error: 0.20, missChance: 0.18, pace: 3.8,
+    reaction: 0.16, recovery: 0.42, netMargin: 0.10, targetBias: 0.2, risk: 0.15,
+  },
+  normal: {
+    reach: 1.7, maxSpeed: 3.2, error: 0.10, missChance: 0.04, pace: 4.4,
+    reaction: 0.08, recovery: 0.30, netMargin: 0.13, targetBias: 0.38, risk: 0.30,
+  },
+  hard: {
+    reach: 2.1, maxSpeed: 4.0, error: 0.05, missChance: 0.015, pace: 4.9,
+    reaction: 0.035, recovery: 0.22, netMargin: 0.15, targetBias: 0.62, risk: 0.58,
+  },
   // The fly's paddle placement comes from the connectome reservoir (or its
   // analytic fallback) instead of our predictor — see `brain` below. It gets
   // the physique of `hard` with almost nothing let through.
-  fly: { reach: 2.2, maxSpeed: 4.6, error: 0, missChance: 0.01, pace: 4.7, useBrain: true },
+  fly: {
+    reach: 2.2, maxSpeed: 4.6, error: 0, missChance: 0.008, pace: 4.7,
+    reaction: 0.02, recovery: 0.18, netMargin: 0.16, targetBias: 0.7, risk: 0.72,
+    useBrain: true,
+  },
 };
+
+const RETURN_TARGET_MIN_Z = TABLE.LENGTH * 0.08;
+const RETURN_TARGET_MAX_Z = TABLE.LENGTH * 0.43;
+const RETURN_CANDIDATES = 14;
+
+const clamp01 = (value) => THREE.MathUtils.clamp(value, 0, 1);
+
+// Choose a legal return before the paddle swing is planned. This is deliberately
+// exported as a pure function: it gives tests and offline bot evaluation the
+// same candidate selector used in the game, without constructing a Three.js
+// scene or a browser paddle.
+export function chooseReturnPlan({ origin, incoming, spin, skill = OPPONENT_SKILL.normal, random = Math.random, tactic = null }) {
+  const candidates = [];
+  const preferredX = Number.isFinite(tactic?.targetX)
+    ? THREE.MathUtils.clamp(tactic.targetX, -TABLE.WIDTH / 2 + 0.12, TABLE.WIDTH / 2 - 0.12)
+    : 0;
+  const preferredZ = Number.isFinite(tactic?.targetZ)
+    ? THREE.MathUtils.clamp(tactic.targetZ, RETURN_TARGET_MIN_Z, RETURN_TARGET_MAX_Z)
+    : TABLE.LENGTH * 0.28;
+  const pace = Number.isFinite(tactic?.pace) ? tactic.pace : skill.pace;
+  const risk = clamp01(Number.isFinite(tactic?.risk) ? tactic.risk : skill.risk ?? 0.3);
+
+  for (let i = 0; i < RETURN_CANDIDATES; i += 1) {
+    const lane = i === 0
+      ? preferredX
+      : THREE.MathUtils.clamp(
+        (random() * 2 - 1) * (TABLE.WIDTH / 2 - 0.14) +
+          preferredX * skill.targetBias + (random() - 0.5) * (skill.error ?? 0),
+        -TABLE.WIDTH / 2 + 0.12,
+        TABLE.WIDTH / 2 - 0.12
+      );
+    const depth = i === 0
+      ? preferredZ
+      : THREE.MathUtils.lerp(
+        RETURN_TARGET_MIN_Z,
+        RETURN_TARGET_MAX_Z,
+        0.35 + random() * 0.65
+      );
+    const target = new THREE.Vector3(
+      lane,
+      TABLE.HEIGHT + BALL.RADIUS,
+      depth
+    );
+    const speed = pace * THREE.MathUtils.clamp(1 + (random() - 0.5) * (0.18 + risk * 0.24), 0.72, 1.22);
+    const velocity = solveReturn(origin, target, speed, spin);
+    const shot = flyShot(origin, velocity, target.y, spin);
+    const legal = isLegalReturn(shot, skill.netMargin ?? 0.08);
+    const edgeMargin = Math.min(
+      TABLE.WIDTH / 2 - BALL.RADIUS - Math.abs(shot.x),
+      TABLE.LENGTH / 2 - BALL.RADIUS - shot.z
+    );
+    const placementError = Math.hypot(shot.x - target.x, shot.z - target.z);
+    const paceScore = clamp01(velocity.length() / Math.max(skill.pace, 0.1));
+    const riskScore = clamp01(Math.abs(shot.x) / (TABLE.WIDTH / 2) * 0.55 + shot.z / TABLE.LENGTH * 0.45);
+    const score = legal
+      ? 100 + Math.min(1, Math.max(0, shot.netClearance - skill.netMargin)) * 8
+        - placementError * 18
+        + edgeMargin * (2 + risk * 8)
+        + paceScore * risk * 4
+        + riskScore * skill.targetBias * 3
+      : -100 - Math.max(0, -shot.netClearance) * 10 - placementError * 4;
+    candidates.push({ target, velocity, shot, legal, score });
+  }
+
+  const legal = candidates.filter((candidate) => candidate.legal).sort((a, b) => b.score - a.score);
+  if (legal.length) return legal[0];
+
+  // A defensive retry is preferable to swinging at a mathematically invalid
+  // target. Lower pace and aim through the middle with generous net margin.
+  const safeTarget = new THREE.Vector3(0, TABLE.HEIGHT + BALL.RADIUS, TABLE.LENGTH * 0.20);
+  for (const factor of [0.72, 0.58, 0.45]) {
+    const velocity = solveReturn(origin, safeTarget, Math.max(1.8, pace * factor), spin);
+    const shot = flyShot(origin, velocity, safeTarget.y, spin);
+    if (isLegalReturn(shot, Math.max(0.04, skill.netMargin * 0.6))) {
+      return { target: safeTarget, velocity, shot, legal: true, safe: true, score: 1 };
+    }
+  }
+
+  // This is only reachable for an impossible incoming trajectory. Returning
+  // the least-bad candidate keeps the paddle animation coherent and lets the
+  // physics decide the point instead of producing NaN or a teleport.
+  return candidates.sort((a, b) => b.score - a.score)[0] ?? {
+    target: safeTarget,
+    velocity: solveReturn(origin, safeTarget, 2.2, spin),
+    shot: null,
+    legal: false,
+  };
+}
+
+export function isLegalReturn(shot, netMargin = 0.08) {
+  return Boolean(
+    shot?.landed &&
+    shot.netClearance >= netMargin &&
+    Number.isFinite(shot.x) &&
+    Number.isFinite(shot.z) &&
+    Math.abs(shot.x) <= TABLE.WIDTH / 2 - BALL.RADIUS &&
+    shot.z >= BALL.RADIUS &&
+    shot.z <= TABLE.LENGTH / 2 - BALL.RADIUS
+  );
+}
 
 const _p = new THREE.Vector3();
 const _v = new THREE.Vector3();
@@ -93,12 +211,14 @@ const FORWARD = new THREE.Vector3(0, 0, 1); // the blade's own face axis
 const TOWARD_PLAYER = new THREE.Vector3(0, 0, 1);
 
 export class Opponent {
-  constructor(skill = 'normal') {
+  constructor(skill = 'normal', { random = Math.random } = {}) {
     this.paddle = new Paddle();
     this.paddle.isOpponent = true;
     this.paddle.enabled = false; // only live while actually playing a ball
     this.mesh = this.paddle.mesh;
     this.skill = OPPONENT_SKILL[skill] ?? OPPONENT_SKILL.normal;
+    this.random = random;
+    this.skillName = OPPONENT_SKILL[skill] ? skill : 'normal';
 
     this.active = false;
     this.state = 'idle'; // idle | tracking | swinging | recover
@@ -118,6 +238,11 @@ export class Opponent {
     this._interceptSpin = new THREE.Vector3();
     this._swingDir = new THREE.Vector3(0, 0, 1);
     this._swingSpeed = 0;
+    this._rallyLength = 0;
+    this._contactConfidence = 0;
+    this._returnPlan = null;
+    this._swingPrepared = false;
+    this._swingStarted = false;
 
     // The blade sits at an offset inside the paddle mesh, so placing the
     // blade somewhere means placing the mesh at that point less the offset.
@@ -136,6 +261,7 @@ export class Opponent {
 
   setSkill(name) {
     this.skill = OPPONENT_SKILL[name] ?? OPPONENT_SKILL.normal;
+    this.skillName = OPPONENT_SKILL[name] ? name : 'normal';
   }
 
   // Idempotent: this is called every frame from the game loop, so it must
@@ -148,7 +274,13 @@ export class Opponent {
     this.paddle.enabled = false;
     this.state = 'idle';
     this.targetBall = null;
-    if (!active) this._place(READY, TOWARD_PLAYER);
+    if (!active) {
+      this._rallyLength = 0;
+      this._returnPlan = null;
+      this._swingPrepared = false;
+      this._swingStarted = false;
+      this._place(READY, TOWARD_PLAYER);
+    }
   }
 
   // Places the *blade* at a world point with its face along `faceNormal`.
@@ -204,14 +336,34 @@ export class Opponent {
       this.state = 'tracking';
       this.brain?.reset?.();
       this._intercept.copy(plan.point);
-      this._applyBrain(ball);
       this._interceptVel.copy(plan.velocity);
       this._interceptSpin.copy(plan.spin);
+      this._applyBrain(ball);
       this._timeToHit = plan.time;
       this._repredictIn = REPREDICT_INTERVAL;
       // Decide up front whether this one gets away, so the paddle can move
       // convincingly short rather than snapping at the last instant.
-      this._willMiss = Math.random() < this.skill.missChance;
+      const blade = this._blade.getWorldPosition(new THREE.Vector3());
+      const requiredTravel = blade.distanceTo(plan.point);
+      const availableTravel = Math.max(this.skill.maxSpeed * Math.max(plan.time, 0.001), 0.001);
+      this._contactConfidence = THREE.MathUtils.clamp(
+        (availableTravel + this.skill.reach * 0.16 - requiredTravel) / Math.max(availableTravel, 0.12),
+        0,
+        1
+      );
+      const latePenalty = 1 - this._contactConfidence;
+      this._willMiss = this.random() < this.skill.missChance * (0.35 + latePenalty * 0.9);
+      this._swingPrepared = false;
+      this._swingStarted = false;
+      if (!this._willMiss) {
+        // Prepare the contact geometry as soon as the ball is acquired. The
+        // old path waited until the last 60–100 ms, then moved from the
+        // resting pose to a pre-swing pose in one frame. Paddle velocity saw
+        // that jump instead of a stroke, so the physics quite correctly
+        // rejected the contact as a bat moving away from the ball.
+        this._planSwing(ball);
+        this._swingPrepared = true;
+      }
       return;
     }
   }
@@ -230,6 +382,7 @@ export class Opponent {
     const p = ball.mesh.position;
     const v = ball.velocity;
     const out = this.brain.step({ x: p.x, y: p.y, z: p.z, vx: v.x, vy: v.y, vz: v.z });
+    if (!Number.isFinite(out?.targetX) || !Number.isFinite(out?.targetY)) return;
     // The readout was trained on a different court, so it proposes and our
     // physics disposes: the fly's character shows in how the paddle drifts
     // inside this window, and the window keeps it from swinging at air.
@@ -254,6 +407,13 @@ export class Opponent {
 
     const h = 1 / 240;
     for (let i = 0; i < 240 * 3; i++) {
+      // A refreshed prediction can start after the nominal hitting plane when
+      // a frame was dropped. Report the current pose immediately instead of
+      // integrating three seconds into a stale trajectory.
+      if (_p.z <= HIT_PLANE_Z) {
+        if (_p.y < HIT_HEIGHT_MIN || _p.y < BALL.RADIUS) return null;
+        return { point: _p.clone(), time: 0, velocity: _v.clone(), spin: _spin.clone() };
+      }
       const speed = _v.length();
       _acc.set(0, PHYSICS.GRAVITY, 0);
       if (speed > 1e-4) {
@@ -308,9 +468,23 @@ export class Opponent {
         this._intercept.copy(plan.point);
         this._interceptVel.copy(plan.velocity);
         this._interceptSpin.copy(plan.spin);
-        this._timeToHit = plan.time;
+        // `_predict()` reports time from the current ball pose. Keeping the
+        // raw value here reset the countdown on every refresh, so a ball that
+        // took half a second to arrive could remain "half a second away"
+        // forever and never enter the swing window. Arrival is monotonic for
+        // one target ball; prediction may shorten it, never extend it.
+        this._timeToHit = Math.min(this._timeToHit, Math.max(0, plan.time));
+        this._applyBrain(ball);
+        // Re-plan only before the stroke starts. Once the blade is moving,
+        // changing its face every prediction tick makes a valid contact turn
+        // into a glancing one.
+        if (!this._swingStarted && !this._willMiss) {
+          this._planSwing(ball);
+          this._swingPrepared = true;
+        }
+      } else {
+        this._applyBrain(ball);
       }
-      this._applyBrain(ball);
     }
 
     // Aim short of the real intercept when this ball is meant to get away
@@ -330,26 +504,36 @@ export class Opponent {
       return;
     }
 
-    // Start the stroke on time remaining, not on distance. A fast ball
-    // covers the old fixed distance threshold in a fraction of the time a
-    // slow one does, so the bat was starting far too late for hard shots.
-    if (this._timeToHit > SWING_LEAD) {
+    // Start the stroke on time remaining, not on distance. Reaction time
+    // delays easier bots without changing the legal-return solver: they stage
+    // later and have a shorter live window, but the geometry is still valid.
+    const swingLead = Math.max(0.055, SWING_LEAD - this.skill.reaction);
+    if (this._timeToHit > swingLead) {
       this.paddle.enabled = false;
-      this._driftTo(goal, dt);
+      // Stage behind the contact point. This makes the first live frame a
+      // continuation of the approach instead of a teleport backwards from
+      // the intercept to a wind-up pose.
+      const stage = _p.copy(this._intercept)
+        .addScaledVector(this._swingDir, -this._swingSpeed * Math.min(SWING_STAGE_LEAD, swingLead));
+      this._driftTo(stage, dt);
       return;
     }
 
     if (this.state !== 'swinging') {
       this.state = 'swinging';
       this._swingElapsed = 0;
-      this._planSwing(ball);
+      if (!this._swingPrepared) {
+        this._planSwing(ball);
+        this._swingPrepared = true;
+      }
+      this._swingStarted = true;
     }
     this._swingElapsed += dt;
 
     // A swing is a stroke, not a launch: follow through for a fixed window,
     // then give up on the ball and walk back. Without the bound, a missed
     // swing integrated forever and sailed the bat over the player's head.
-    if (this._swingElapsed > SWING_LEAD + SWING_FOLLOW_THROUGH) {
+    if (this._swingElapsed > swingLead + Math.max(SWING_FOLLOW_THROUGH, SWING_CONTACT_WINDOW)) {
       this.paddle.enabled = false;
       this.targetBall = null;
       this.state = 'recover';
@@ -390,15 +574,31 @@ export class Opponent {
   _planSwing(ball) {
     const skill = this.skill;
 
-    const target = new THREE.Vector3(
-      (Math.random() * 2 - 1) * (TABLE.WIDTH / 2 - 0.12) +
-        (Math.random() * 2 - 1) * skill.error,
-      TABLE.HEIGHT + BALL.RADIUS,
-      TABLE.LENGTH * 0.2 + Math.random() * TABLE.LENGTH * 0.18
-    );
-
+    const tactic = this.brain?.chooseTactic?.({
+      ball: {
+        x: this._intercept.x,
+        y: this._intercept.y,
+        z: this._intercept.z,
+        vx: this._interceptVel.x,
+        vy: this._interceptVel.y,
+        vz: this._interceptVel.z,
+      },
+      confidence: this._contactConfidence ?? 0.5,
+      rally: this._rallyLength ?? 0,
+      risk: skill.risk,
+    });
+    const plan = chooseReturnPlan({
+      origin: this._intercept,
+      incoming: this._interceptVel,
+      spin: this._interceptSpin,
+      skill,
+      random: this.random,
+      tactic,
+    });
+    const target = plan.target;
     const from = this._intercept;
-    const outVel = solveReturn(from, target, skill.pace, this._interceptSpin);
+    const outVel = plan.velocity;
+    this._returnPlan = plan;
 
     // Incoming direction and speed as they will be at contact, not as they
     // are now — the bat meets the ball a moment later, by which point
@@ -440,7 +640,6 @@ export class Opponent {
 
     this._swingNormal = _normal.clone();
 
-    this._recover = 0.35;
   }
 
   // Serves to start a rally: the ball appears just in front of the bat and
@@ -448,7 +647,7 @@ export class Opponent {
   // standing rather than shooting out of a machine parked at the corner.
   serve(ball) {
     const from = new THREE.Vector3(
-      (Math.random() * 2 - 1) * 0.25,
+      (this.random() * 2 - 1) * 0.25,
       TABLE.HEIGHT + 0.22,
       HIT_PLANE_Z + 0.06
     );
@@ -462,12 +661,12 @@ export class Opponent {
     this.targetBall = null;
 
     const target = new THREE.Vector3(
-      (Math.random() * 2 - 1) * (TABLE.WIDTH / 2 - 0.2),
+      (this.random() * 2 - 1) * (TABLE.WIDTH / 2 - 0.2),
       TABLE.HEIGHT + BALL.RADIUS,
-      TABLE.LENGTH * 0.24 + Math.random() * TABLE.LENGTH * 0.18
+      TABLE.LENGTH * 0.24 + this.random() * TABLE.LENGTH * 0.18
     );
     const velocity = solveReturn(from, target, this.skill.pace * 0.85);
-    const spin = new THREE.Vector3((Math.random() * 2 - 1) * 90, 0, 0);
+    const spin = new THREE.Vector3((this.random() * 2 - 1) * 90, 0, 0);
 
     ball.serve(from, velocity, spin);
     return true;
@@ -476,9 +675,12 @@ export class Opponent {
   // Called by the game when the opponent's bat actually connects.
   onHit() {
     this.state = 'recover';
-    this._recover = 0.4;
+    this._recover = this.skill.recovery;
+    this._rallyLength = (this._rallyLength ?? 0) + 1;
     this.paddle.enabled = false;
     this.targetBall = null;
+    this._swingPrepared = false;
+    this._swingStarted = false;
   }
 }
 
@@ -498,7 +700,7 @@ function restitution(impact) {
 // direction of travel it is now backspin, which floats the ball long. Left
 // out of the flight model, the solver aimed for a target the ball sailed
 // straight past; that was most of the remaining overshoots.
-function solveReturn(origin, target, speed, spin) {
+export function solveReturn(origin, target, speed, spin) {
   const dx = target.x - origin.x;
   const dz = target.z - origin.z;
   const dy = target.y - origin.y;
@@ -559,7 +761,7 @@ const _fa = new THREE.Vector3();
 const _fs = new THREE.Vector3();
 const _fcross = new THREE.Vector3();
 
-function flyShot(origin, velocity, targetY, spin) {
+export function flyShot(origin, velocity, targetY, spin) {
   _fp.copy(origin);
   _fv.copy(velocity);
   _fs.set(0, 0, 0);

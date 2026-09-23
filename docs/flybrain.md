@@ -73,6 +73,27 @@ near-unbeatable dial. RMSE well under the paddle radius (0.077 m) means the fly
 intercepts almost everything. Tunables (`NODE_BUDGET`, `EDGE_BUDGET`, `N_TRAJ`,
 `SPECTRAL_RHO`, `LEAK`, `GAIN`) are at the top of `build_flybrain.py`.
 
+### Optional tactical policy
+
+The connectome readout controls paddle placement, while the opponent's physics
+controller validates the return. A separate high-level policy can choose target
+lane, depth, pace, and risk without being allowed to teleport the paddle or
+change the ball directly:
+
+```bash
+python scripts/flybrain/train_policy.py \
+  --model public/flybrain/model.json \
+  --out public/flybrain/policy.json \
+  --merge-model
+```
+
+This offline trainer uses cross-entropy policy search over synthetic rallies and
+writes a bounded linear policy into `model.json`. The browser only loads the
+exported weights; `chooseTactic()` remains a safe fallback when no policy is
+present. Evaluate a policy against the actual browser physics before shipping a
+new artifact. This is deliberately a high-level policy layer, not end-to-end
+RL: contact and legality remain deterministic and physics-authoritative.
+
 ## In-game
 
 Start menu → **Play a Fly**. The connectome activation overlay appears in the top
@@ -83,7 +104,9 @@ prediction).
 ## Files
 
 - `scripts/flybrain/build_flybrain.py` — offline extraction + readout training + export.
+- `scripts/flybrain/train_policy.py` — offline bounded tactical policy search.
 - `public/flybrain/model.json` — exported artifact loaded by the browser (generated).
-- `src/flybrain/flyBrain.js` — in-browser reservoir controller + analytic fallback.
+- `src/flybrain.js` — in-browser reservoir controller + tactical policy fallback.
 - `src/flybrain/flyBrainViz.js` — top-right activation visualization.
+- `src/opponent.js` — candidate return validation, safe fallback, and physical swing planning.
 - `src/main.js` — "Play a Fly" wiring + the standard-bot return fix.

@@ -257,7 +257,12 @@ export class PhysicsWorld {
   // would let fast balls pass straight through the bat — which in a trainer
   // reads as "my hit didn't register".
   _collidePaddle(ball, paddle, prev) {
-    if (!paddle.tracking || !paddle.enabled) return;
+    // An AI paddle is authored by the game loop rather than by a controller
+    // or camera. It can be on its first sampled frame and therefore has no
+    // meaningful `tracking` history yet; blocking that frame makes a valid
+    // prepared return disappear at startup. Human inputs still require two
+    // samples so a camera/controller reconnect cannot create a fake swing.
+    if ((!paddle.tracking && !paddle.isOpponent) || !paddle.enabled) return;
 
     const p = ball.mesh.position;
     _n.copy(paddle.bladeNormal);

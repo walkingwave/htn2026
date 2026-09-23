@@ -12,12 +12,14 @@
 
 import * as THREE from 'three';
 import { AR } from 'js-aruco2';
-import * as CVModule from 'js-aruco2/src/cv.js';
+import cvSource from 'js-aruco2/src/cv.js?raw';
 import { POS } from 'js-aruco2/src/posit1.js';
 
-// js-aruco2 ships this legacy CV file as a side-effect module. Depending on
-// the bundler it may appear on the module namespace or global object.
-const CVRuntime = CVModule.CV || globalThis.CV;
+// js-aruco2 ships CV as a legacy script (`var CV = ...; this.CV = CV`), not
+// an ES module. Importing it as a namespace makes Rollup warn about a missing
+// export and is not reliable inside a Worker. Evaluate the pinned dependency
+// source in a local function so its legacy global cannot leak into the app.
+const CVRuntime = Function(`${cvSource}\nreturn CV;`)();
 if (!CVRuntime) throw new Error('js-aruco2 CV runtime did not load.');
 
 AR.DICTIONARIES.MATLAB_DICT_4X4_250 = {
