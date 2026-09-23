@@ -230,9 +230,15 @@ export class MarkerPaddleTracker {
       return;
     }
 
-    await optimizeCameraForTracking(this._stream.getVideoTracks()[0]);
-    this.video.srcObject = this._stream;
-    await this.video.play();
+    try {
+      await optimizeCameraForTracking(this._stream.getVideoTracks()[0]);
+      this.video.srcObject = this._stream;
+      await this.video.play();
+    } catch (err) {
+      this.stop();
+      this._setState(TRACKER_STATE.ERROR, err?.message ?? 'Could not start the camera preview');
+      return;
+    }
     this.frame.width = this.video.videoWidth || 640;
     this.frame.height = this.video.videoHeight || 480;
 
@@ -261,8 +267,22 @@ export class MarkerPaddleTracker {
     this._stream = null;
     this.video.srcObject = null;
     this._predictor.reset();
+    this._rotationPredictor.reset();
     this.markerCount = 0;
+    this.confidence = 0;
+    this.fps = 0;
     this.screenBounds = null;
+    this._lastFrameTime = 0;
+    this._missed = 0;
+    this._neutral = null;
+    this._neutralPosition = null;
+    this._lastAccepted = null;
+    this._jumpFrames = 0;
+    this._latestRawPose = null;
+    this._lastMarkers = [];
+    this._smoothedQuat = null;
+    this.position.set(0, 0, 0);
+    this.quaternion.identity();
     this._setState(TRACKER_STATE.IDLE);
   }
 

@@ -241,7 +241,7 @@ const coach = new Coach({
         // optional OpenAI call is unavailable.
         narrateCoach(score.note || coach.advice, 'a');
       });
-    const playerId = settings.get('playerName') || 'anonymous';
+    const playerId = settings.get('playerId') || 'anonymous';
     recordProfileEvent(
       { type: 'coach_score', scenario: coach.scenario.id, score },
       playerId
@@ -336,7 +336,7 @@ const ui = new UI({
     // setting sits there remembered from last time.
     if (!mode) syncCameraInput();
     syncDesktopCursor();
-    getProfileSummary(settings.get('playerName') || 'anonymous')
+    getProfileSummary(settings.get('playerId') || 'anonymous')
       .then(({ summary }) => {
         ui.showProfileSummary(summary);
         narrateCoach(summary, 'b');
@@ -529,7 +529,7 @@ function coachLiveShot(ball, paddle) {
   lastLiveCoachAt = now;
 
   const shot = assessLiveShot(ball, paddle);
-  const playerId = settings.get('playerName') || 'anonymous';
+  const playerId = settings.get('playerId') || 'anonymous';
   ui.showLiveCoachShot(shot);
 
   const telemetry = {
@@ -1901,12 +1901,13 @@ function handleTournamentFloor(ball) {
   // A bounce that falls on the player's near (+Z) end means the bot won the
   // point; one on the far end means the player beat it. The bracket never
   // invents a result -- every point comes from this real ball outcome.
-  const scorer = ball.mesh.position.z > 0 ? tournament.opponent?.id : 0;
+  const localPlayerId = tournamentLobby?.player?.id;
+  const scorer = ball.mesh.position.z > 0 ? tournament.opponent?.id : localPlayerId;
   if (scorer == null) return;
 
-  const playerId = settings.get('playerName') || 'anonymous';
+  const playerId = settings.get('playerId') || 'anonymous';
   const current = tournament.currentMatch;
-  game.endRally(scorer === 0 ? 'Point won' : 'Point lost');
+  game.endRally(scorer === localPlayerId ? 'Point won' : 'Point lost');
   ball.deactivate();
   const roundWinner = tournament.scorePoint(scorer);
   ui.updateTournament(tournament.snapshot());
@@ -1917,7 +1918,7 @@ function handleTournamentFloor(ball) {
     event_type: 'tournament_point',
     scenario: `round-${current?.round ?? 0}`,
     payload: {
-      scorer: scorer === 0 ? 'You' : tournament.players[scorer]?.name ?? 'Opponent',
+      scorer: scorer === localPlayerId ? 'You' : tournament.playerById(scorer)?.name ?? 'Opponent',
       match: current?.id,
       score1: current?.score1,
       score2: current?.score2,
@@ -1932,10 +1933,10 @@ function handleTournamentFloor(ball) {
   }
 
   machine.enabled = false;
-  const champion = roundWinner === 0;
+  const champion = roundWinner === localPlayerId;
   const matchResult = {
     type: 'tournament',
-    champion: champion ? 'You' : tournament.players[roundWinner]?.name ?? 'Opponent',
+    champion: champion ? 'You' : tournament.playerById(roundWinner)?.name ?? 'Opponent',
     pointsWon: tournamentPointsWon(),
     matches: tournament.snapshot().matches,
   };
@@ -2004,7 +2005,7 @@ function handleVersusHostBounce(ball, event) {
         narrateCoach(summary, 'b');
       })
       .catch(() => {});
-    const playerId = settings.get('playerName') || 'anonymous';
+    const playerId = settings.get('playerId') || 'anonymous';
     recordProfileEvent({
       type: 'versus_result',
       scoreHost: match.scoreHost,
@@ -2064,7 +2065,7 @@ function runVersusHost(dt) {
 
 function applyHostState(state) {
   if (!state) return;
-  match.apply(state.match);
+  if (!match.apply(state.match)) return;
   ui.updateVersusScore(match.snapshot(), 'guest');
   game.revision++;
   applyRemotePaddle(state.paddle);

@@ -1,20 +1,32 @@
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function request(path, body, init = {}) {
-  const response = await fetch(path, {
-    ...init,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
-    body: JSON.stringify(body),
-  });
-  const contentType = response.headers.get('content-type') || '';
-  if (!response.ok) {
-    let message = `${path} failed (${response.status})`;
-    if (contentType.includes('application/json')) {
-      const data = await response.json().catch(() => null);
-      if (data?.error) message = data.error;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(path, {
+      ...init,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+      body: JSON.stringify(body),
+      signal: init.signal ?? controller.signal,
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok) {
+      let message = `${path} failed (${response.status})`;
+      if (contentType.includes('application/json')) {
+        const data = await response.json().catch(() => null);
+        if (data?.error) message = data.error;
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
+    return contentType.includes('application/json') ? response.json() : response;
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error(`${path} timed out.`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return contentType.includes('application/json') ? response.json() : response;
 }
 
 export function analyzeShot(shot, context = {}) {

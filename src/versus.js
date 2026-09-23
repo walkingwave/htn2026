@@ -25,6 +25,7 @@ export class VersusMatch {
   // win by 2 — at 10-10 (deuce) play continues until someone leads by two.
   scorePoint(scorer) {
     if (this.winner) return this.winner;
+    if (scorer !== 'host' && scorer !== 'guest') return null;
     if (scorer === 'host') this.scoreHost += 1;
     else this.scoreGuest += 1;
     this.server = scorer;
@@ -54,11 +55,28 @@ export class VersusMatch {
   }
 
   apply(snap) {
-    if (!snap) return;
-    this.scoreHost = snap.scoreHost ?? this.scoreHost;
-    this.scoreGuest = snap.scoreGuest ?? this.scoreGuest;
-    this.server = snap.server ?? this.server;
-    this.winner = snap.winner ?? null;
-    this.target = snap.target ?? this.target;
+    if (!snap || typeof snap !== 'object') return false;
+    const scoreHost = Number(snap.scoreHost);
+    const scoreGuest = Number(snap.scoreGuest);
+    const target = Number(snap.target ?? this.target);
+    const winner = snap.winner ?? null;
+    if (!Number.isInteger(scoreHost) || scoreHost < 0 ||
+        !Number.isInteger(scoreGuest) || scoreGuest < 0 ||
+        !Number.isInteger(target) || target < 1 ||
+        (snap.server !== 'host' && snap.server !== 'guest') ||
+        (winner !== null && winner !== 'host' && winner !== 'guest')) {
+      return false;
+    }
+    if (winner === 'host' && !(scoreHost >= target && scoreHost - scoreGuest >= VERSUS_WIN_BY)) return false;
+    if (winner === 'guest' && !(scoreGuest >= target && scoreGuest - scoreHost >= VERSUS_WIN_BY)) return false;
+    if (!winner && ((scoreHost >= target && scoreHost - scoreGuest >= VERSUS_WIN_BY) ||
+      (scoreGuest >= target && scoreGuest - scoreHost >= VERSUS_WIN_BY))) return false;
+    this.scoreHost = scoreHost;
+    this.scoreGuest = scoreGuest;
+    this.server = snap.server;
+    this.winner = winner;
+    this.target = target;
+    this.rally = 0;
+    return true;
   }
 }
