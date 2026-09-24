@@ -17,7 +17,7 @@ import { Scoreboard } from './hud.js';
 import { TargetZone } from './target.js';
 import { HandPaddleRig } from './handPaddle.js';
 import { PaddleSourceRouter, PADDLE_SOURCE } from './paddleSource.js';
-import { MarkerPaddleTracker, TRACKER_STATE } from './vision/markerPaddleTracker.js';
+import { TRACKER_STATE } from './vision/trackerState.js';
 import { startHandTracking } from './handTracking.js';
 import { HandPaddlePose } from './vision/handPose.js';
 import { Opponent } from './opponent.js';
@@ -35,9 +35,14 @@ import {
   clearRoomFromUrl,
   clearTournamentFromUrl,
   isRealtimeAvailable,
+  relayConfigured,
   tournamentFromUrl,
   tournamentLinkFor,
 } from './net.js';
+import { encodeBladePacket, applyRemotePaddle, VERSUS_RECONNECT_LIMIT, versusReconnectDelay } from './net/versusPackets.js';
+import { DESKTOP_KEYS, bindDesktopKeys } from './input/desktopKeys.js';
+import { createTuningPanel } from './webcamTuningPanel.js';
+import { createPhonePair } from './net/phonePair.js';
 import { VersusMatch } from './versus.js';
 import { Tournament } from './tournament.js';
 import { createServeToss } from './serve.js';
@@ -350,7 +355,7 @@ const ui = new UI({
     clearBalls();
     stopWebcamBat();
     stopHandPaddle();
-    closePhonePair();
+    phonePair.close();
     renderer.domElement.style.cursor = '';
     flyBrainViz.hide();
   },
@@ -377,11 +382,18 @@ const ui = new UI({
     // arrival, so hosting a code someone else already opened makes you the
     // guest. Telling the player otherwise would be a lie about which end of
     // the table they are on.
-    return { role: room.role, code, link: roomLinkFor(code, origin, relay), kind: room.kind };
+    return {
+      role: room.role,
+      code,
+      link: roomLinkFor(code, origin, relay),
+      // Read through, not snapshotted: a WebRTC room that falls back to the
+      // relayed channel reports that instead of claiming a direct link.
+      get kind() { return room.kind; },
+    };
   },
   onVersusJoin: async (code, transport = 'auto', relay = null) => {
     const room = await enterVersus('guest', code.trim().toUpperCase(), transport, relay);
-    return { role: room.role, code, kind: room.kind };
+    return { role: room.role, code, get kind() { return room.kind; } };
   },
   onVersusLeave: () => leaveVersus(),
   onTournamentCreate: () => createTournamentLobby(),
@@ -389,7 +401,7 @@ const ui = new UI({
   onTournamentStart: () => startTournamentBracket(),
   onTournamentLeave: () => leaveTournament(),
   onTournamentLaunch: (assignment) => enterTournamentMatch(assignment),
-  onPhonePair: () => openPhonePair(),
+  onPhonePair: () => phonePair.open(),
   // What the run was worth, read at the moment you quit. Versus is scored on
   // what you took off a real opponent; the other two on the trainer's stats.
   onRunSummary: () => ({
@@ -417,6 +429,7 @@ const ui = new UI({
   invitedTournament: tournamentFromUrl(),
   invitedRelay: roomRelayFromUrl(),
   realtimeAvailable: isRealtimeAvailable(),
+  relayAvailable: relayConfigured(),
 });
 
 xr.detectSupport().then((support) => ui.applyXRSupport(support));
@@ -863,13 +876,14 @@ function poseDesktopBat() {
   // for you, in proportion to how far through the stroke you are.
   const drive = THREE.MathUtils.clamp(desktopThrust / DESKTOP_THRUST_TIME, 0, 1);
 
+  const phonePose = phonePair.lastPose;
   const phonePitch =
-    settings.get('paddleSource') === PADDLE_SOURCE.PHONE && phoneLastPose
-      ? THREE.MathUtils.clamp((phoneLastPose.pitch ?? 0) / 70, -0.42, 0.42)
+    settings.get('paddleSource') === PADDLE_SOURCE.PHONE && phonePose
+      ? THREE.MathUtils.clamp((phonePose.pitch ?? 0) / 70, -0.42, 0.42)
       : 0;
   const phoneRoll =
-    settings.get('paddleSource') === PADDLE_SOURCE.PHONE && phoneLastPose
-      ? THREE.MathUtils.clamp((phoneLastPose.roll ?? 0) / 70, -0.35, 0.35)
+    settings.get('paddleSource') === PADDLE_SOURCE.PHONE && phonePose
+      ? THREE.MathUtils.clamp((phonePose.roll ?? 0) / 70, -0.35, 0.35)
       : 0;
   desktopRig.rotation.set(
     -drive * DESKTOP_DRIVE_PITCH + phonePitch,
@@ -1081,13 +1095,47 @@ function meetIncomingBall(aim) {
 // comes from changes.
 let camTracker = null;
 let webcamHasLocked = false; // pointer drives until the first marker lock
+let camTrackerLoading = false;
 
 function usingWebcamBat() {
   return settings.get('paddleSource') === PADDLE_SOURCE.CAMERA;
 }
 
-function startWebcamBat() {
-  if (camTracker) return;
+// The marker tracker is a 585 kB chunk plus a worker and an 11 MB WebAssembly
+// build that only appear once a camera pipeline actually starts. Importing it
+// from the entry module made every visitor — including a phone opening the
+// pairing page, which never touches the marker tracker at all — download it
+// before the menu could paint. It is fetched on demand instead, the first time
+// a camera-driven paddle is wanted.
+let markerTrackerModule = null;
+function loadMarkerTracker() {
+  markerTrackerModule ??= import('./vision/markerPaddleTracker.js');
+  return markerTrackerModule;
+}
+
+// The phone pairing session — its room, the desktop camera that locates the
+// phone, and the last pose the phone sent. Created once and reused, so opening
+// and closing the pairing screen does not rebuild the tracker.
+const phonePair = createPhonePair({
+  ui,
+  loadTracker: loadMarkerTracker,
+  onStop: () => assistOffset.set(0, 0),
+});
+
+async function startWebcamBat() {
+  if (camTracker || camTrackerLoading) return;
+  camTrackerLoading = true;
+  let MarkerPaddleTracker;
+  try {
+    ({ MarkerPaddleTracker } = await loadMarkerTracker());
+  } catch {
+    ui.toast('The webcam paddle tracker could not be loaded');
+    return;
+  } finally {
+    camTrackerLoading = false;
+  }
+  // The mode can be switched off while the chunk is in flight.
+  if (camTracker || !usingWebcamBat()) return;
   camTracker = new MarkerPaddleTracker();
   camTracker.onState = (state, error) => {
     // The preview carries the running commentary; toasts are for the moments
@@ -1259,8 +1307,9 @@ const _aimWorld = new THREE.Vector3();
 // now moves the aim at a bounded rate instead of teleporting it, it doubles
 // as the last line against jump glitches.
 function driveAimFromPhone(dt) {
-  if (!phoneCamTracker) return;
-  const displacement = phoneCamTracker.position;
+  const tracker = phonePair.tracker;
+  if (!tracker) return;
+  const displacement = tracker.position;
   const targetX = THREE.MathUtils.clamp(
     WEBCAM_REST.x + displacement.x * webcamTuning.gainX,
     -REACH_X,
@@ -1345,75 +1394,11 @@ function driveAimFromWebcam(dt) {
 // --- Webcam tuning panel ------------------------------------------------
 // Feel is personal and room-dependent, so rather than shipping one guess,
 // T opens sliders over every parameter above. Values persist per browser.
-let tuningPanel = null;
-
-const TUNING_ROWS = [
-  ['gainX', 'Reach · sideways', 1, 4, 0.1],
-  ['gainY', 'Reach · vertical', 0.8, 3, 0.1],
-  ['stiffness', 'Response (snappy ↔ smooth)', 6, 30, 1],
-  ['maxSpeed', 'Max paddle speed', 2, 10, 0.5],
-  ['swingSpeed', 'Swing flick threshold', 0.15, 0.8, 0.05],
-  ['assistRange', 'Assist · catch radius', 0.08, 0.4, 0.02],
-  ['assistPull', 'Assist · strength', 0.08, 0.4, 0.02],
-  ['assistSlew', 'Assist · speed', 0.5, 3, 0.1],
-  ['assistHorizon', 'Assist · look-ahead', 0.08, 0.3, 0.01],
-  ['lead', 'Latency lead', 0, 0.15, 0.01],
-  ['camEase', 'Camera follow', 1, 8, 0.5],
-];
-
-function buildTuningPanel() {
-  const el = document.createElement('div');
-  el.id = 'webcam-tuning';
-  el.style.cssText =
-    'position:fixed;right:12px;top:12px;z-index:40;background:rgba(11,11,12,0.95);' +
-    'border-left:6px solid #e2231a;padding:14px 16px;width:280px;' +
-    'font:12px ui-monospace,monospace;color:#f2efe6;';
-  el.innerHTML =
-    '<div style="color:#e2231a;font-weight:700;margin-bottom:8px">PADDLE TUNING</div>' +
-    '<div data-rows></div>' +
-    '<button data-reset style="margin-top:8px;background:none;border:1px solid #555;' +
-    'color:#f2efe6;font:inherit;padding:3px 10px;cursor:pointer">Reset defaults</button>' +
-    '<div style="color:rgba(242,239,230,0.4);margin-top:6px">T to close · saved automatically</div>';
-  document.body.appendChild(el);
-
-  const rows = el.querySelector('[data-rows]');
-  const renderRows = () => {
-    rows.innerHTML = '';
-    for (const [key, label, min, max, step] of TUNING_ROWS) {
-      const row = document.createElement('label');
-      row.style.cssText = 'display:block;margin:6px 0';
-      const value = document.createElement('span');
-      value.style.cssText = 'float:right;color:#e2231a';
-      value.textContent = webcamTuning[key];
-      const input = document.createElement('input');
-      input.type = 'range';
-      input.min = min;
-      input.max = max;
-      input.step = step;
-      input.value = webcamTuning[key];
-      input.style.cssText = 'width:100%;accent-color:#e2231a';
-      input.oninput = () => {
-        webcamTuning[key] = Number(input.value);
-        value.textContent = input.value;
-        saveWebcamTuning();
-      };
-      row.append(label + ' ', value, input);
-      rows.appendChild(row);
-    }
-  };
-  renderRows();
-  el.querySelector('[data-reset]').onclick = () => {
-    Object.assign(webcamTuning, WEBCAM_DEFAULTS);
-    saveWebcamTuning();
-    renderRows();
-  };
-  return el;
-}
-
-function toggleTuningPanel() {
-  if (!tuningPanel) tuningPanel = buildTuningPanel();
-  else tuningPanel.hidden = !tuningPanel.hidden;
-}
+const tuningPanel = createTuningPanel({
+  tuning: webcamTuning,
+  defaults: WEBCAM_DEFAULTS,
+  save: saveWebcamTuning,
+});
 
 placeDesktopBat(window.innerWidth / 2, window.innerHeight * 0.55);
 
@@ -1444,38 +1429,31 @@ window.addEventListener(
   { passive: true }
 );
 
-// Keyboard alternative, for playing without a mouse. UI owns the single
-// keydown listener for commands; these are movement, so they live here.
-const DESKTOP_KEYS = { ArrowLeft: 0, ArrowRight: 0, ArrowUp: 0, ArrowDown: 0, KeyF: 0 };
-window.addEventListener('keydown', (e) => {
-  if (!ui.menu.hidden) return;
-
-  // Re-learn the bat's colour without leaving the game. Lighting changes as
-  // you move around a room, and a key beats going back to the menu for it.
-  if (e.code === 'KeyT' && usingWebcamBat()) {
-    toggleTuningPanel();
-    return;
-  }
-  if (e.code === 'KeyV' && camTracker) {
-    if (camTracker.calibrateColour()) ui.toast('Neutral pose re-zeroed');
-    else ui.toast('Show the markers to the camera first');
-    return;
-  }
-  // Which way an ambiguous tilt is read, for the rare case it latches on to
-  // the wrong sign — a paddle leaning away looks identical to one leaning
-  // toward the camera, so this cannot be resolved from the image alone.
-  if (e.code === 'KeyB' && camTracker) {
-    camTracker.flipTilt();
-    ui.toast('Paddle tilt flipped');
-    return;
-  }
-
-  if (!(e.code in DESKTOP_KEYS)) return;
-  DESKTOP_KEYS[e.code] = 1;
-  if (e.code === 'KeyF') swingDesktopBat();
-});
-window.addEventListener('keyup', (e) => {
-  if (e.code in DESKTOP_KEYS) DESKTOP_KEYS[e.code] = 0;
+bindDesktopKeys({
+  isBlocked: () => !ui.menu.hidden,
+  onCommand: (event) => {
+    // Re-learn the bat's colour without leaving the game. Lighting changes as
+    // you move around a room, and a key beats going back to the menu for it.
+    if (event.code === 'KeyT' && usingWebcamBat()) {
+      tuningPanel.toggle();
+      return true;
+    }
+    if (event.code === 'KeyV' && camTracker) {
+      if (camTracker.calibrateColour()) ui.toast('Neutral pose re-zeroed');
+      else ui.toast('Show the markers to the camera first');
+      return true;
+    }
+    // Which way an ambiguous tilt is read, for the rare case it latches on to
+    // the wrong sign — a paddle leaning away looks identical to one leaning
+    // toward the camera, so this cannot be resolved from the image alone.
+    if (event.code === 'KeyB' && camTracker) {
+      camTracker.flipTilt();
+      ui.toast('Paddle tilt flipped');
+      return true;
+    }
+    return false;
+  },
+  onSwing: () => swingDesktopBat(),
 });
 
 function updateDesktopBat(dt) {
@@ -1512,35 +1490,33 @@ function updateDesktopBat(dt) {
   const phoneDriving = settings.get('paddleSource') === PADDLE_SOURCE.PHONE;
   if (phoneDriving) {
     pointerActive = false;
-    const identified =
-      phoneCamTracker?.state === TRACKER_STATE.TRACKING &&
-      phoneCamTracker.markerCount >= 2 &&
-      phoneCamTracker.confidence >= 0.65;
-    if (identified) phoneAimLockTime = Math.min(phoneAimLockTime + dt, 1);
-    else phoneAimLockTime = Math.max(0, phoneAimLockTime - dt * 2.5);
-    phoneAimAssistActive = phoneAimLockTime >= 0.25;
+    const tracker = phonePair.tracker;
+    if (phonePair.identified) phonePair.aimLockTime = Math.min(phonePair.aimLockTime + dt, 1);
+    else phonePair.aimLockTime = Math.max(0, phonePair.aimLockTime - dt * 2.5);
+    phonePair.aimAssistActive = phonePair.aimLockTime >= 0.25;
 
-    if (phoneAimAssistActive) {
+    if (phonePair.aimAssistActive) {
       driveAimFromPhone(dt);
-    } else if (phoneCamTracker?.state === TRACKER_STATE.TRACKING) {
+    } else if (tracker?.state === TRACKER_STATE.TRACKING) {
       // Before the object is identified, CV may only park the paddle at the
       // measured centre. Aim assist stays completely off during this phase.
-      desktopAim.x = THREE.MathUtils.clamp(phoneCamTracker.position.x * 2.2, -REACH_X, REACH_X);
-      desktopAim.y = THREE.MathUtils.clamp(0.95 + phoneCamTracker.position.y * 1.65, REACH_Y_BOTTOM, REACH_Y_TOP);
+      desktopAim.x = THREE.MathUtils.clamp(tracker.position.x * 2.2, -REACH_X, REACH_X);
+      desktopAim.y = THREE.MathUtils.clamp(0.95 + tracker.position.y * 1.65, REACH_Y_BOTTOM, REACH_Y_TOP);
       assistOffset.set(0, 0);
     } else {
-      phoneAimAssistActive = false;
+      phonePair.aimAssistActive = false;
       assistOffset.set(0, 0);
     }
     // Phone orientation owns the face direction/tilt, while flick still owns
     // the stroke gesture. CV never tries to infer wrist rotation.
-    if (phoneLastPose) {
+    const phonePose = phonePair.lastPose;
+    if (phonePose) {
       // Phone IMU owns orientation. Keep location entirely in the camera
       // tracker so device-specific sensor drift cannot move the paddle around.
-      desktopYaw = THREE.MathUtils.clamp((phoneLastPose.roll ?? 0) / 70, -0.35, 0.35);
-      if (phoneLastPose.flick) {
+      desktopYaw = THREE.MathUtils.clamp((phonePose.roll ?? 0) / 70, -0.35, 0.35);
+      if (phonePose.flick) {
         swingDesktopBat();
-        phoneLastPose.flick = false;
+        phonePose.flick = false;
       }
     }
   } else if (usingWebcamBat() && camTracker?.state === TRACKER_STATE.TRACKING) {
@@ -1609,18 +1585,6 @@ function updateDesktopBat(dt) {
 // ---------------------------------------------------------------------------
 let netMode = null; // null | 'host' | 'guest'
 let room = null; // active room handle
-// Phone paddle pairing uses the same tiny LAN relay as Versus, but its room is
-// separate so a phone can drive a solo drill without turning the drill into a
-// networked match.
-let phoneRoom = null;
-let phonePairLink = '';
-let phoneConnected = false;
-let phoneConfirmed = false;
-let phoneCvLocked = false;
-let phoneAimAssistActive = false;
-let phoneAimLockTime = 0;
-let phoneLastPose = null;
-let phoneCamTracker = null;
 const match = new VersusMatch();
 const tournament = new Tournament();
 // The shared bracket lobby lives for the whole tournament. `room` remains the
@@ -1632,17 +1596,25 @@ let tournamentMatch = null; // { id, player1, player2, opponent, code, playersBy
 let tournamentTransition = false;
 let tournamentLink = '';
 let tournamentRevision = 0;
+// Same idea as versusConfig: enough to reopen the lobby with the identity it
+// already had if the transport drops mid-bracket.
+let tournamentConfig = null; // { code, transport, relay, player }
+let tournamentReconnectTimer = null;
+let tournamentReconnectAttempts = 0;
 let versusBall = null; // the rally ball (host authoritative)
 let versusServeTimer = 0; // countdown before the host's next serve
 let netSendAccum = 0; // throttle for outbound state
 let guestBallActive = false;
+// Enough to reopen the same room after the transport dies, without resetting a
+// score that is still on the board.
+let versusConfig = null; // { code, role, transport, relay }
+let versusReconnectTimer = null;
+let versusReconnectAttempts = 0;
 
 const NET_TICK = 1 / 30; // 30 Hz, which is plenty for a ball and one bat
 const VERSUS_SERVE_SECONDS = 3;
 
 const guestBallTarget = new THREE.Vector3();
-const _versusQuat = new THREE.Quaternion();
-const _versusFwd = new THREE.Vector3(0, 0, 1);
 
 // The opponent's bat, driven entirely by network packets. It is handed to
 // physics like any other paddle, so their shots come out of the same contact
@@ -1666,154 +1638,6 @@ function getLocalVersusPaddle() {
       (paddle) => paddle !== desktopPaddle && paddle.enabled && paddle.tracking
     ) ?? paddles[0]
   );
-}
-
-function bladePacket(paddle = getLocalVersusPaddle()) {
-  return {
-    c: [paddle.bladeCenter.x, paddle.bladeCenter.y, paddle.bladeCenter.z],
-    n: [paddle.bladeNormal.x, paddle.bladeNormal.y, paddle.bladeNormal.z],
-    v: [paddle.velocity.x, paddle.velocity.y, paddle.velocity.z],
-    // Whether the sender's bat is actually being tracked. Someone watching
-    // from a desktop browser has a paddle object but no pose for it, and
-    // without this flag it would arrive as a phantom bat parked at the origin
-    // — which is on the table, swatting balls its owner can't see.
-    t: paddle.tracking,
-  };
-}
-
-function applyRemotePaddle(pkt) {
-  if (!pkt) return;
-  const tracked = pkt.t !== false;
-  remotePaddle.enabled = tracked;
-  // This paddle never runs Paddle.update(), so mark it tracked here —
-  // otherwise the swept contact test skips it and the opponent could never
-  // return a ball.
-  remotePaddle.tracking = tracked;
-  if (!tracked) {
-    remotePaddle.mesh.visible = false;
-    return;
-  }
-  remotePaddle.bladeCenter.set(pkt.c[0], pkt.c[1], pkt.c[2]);
-  remotePaddle.bladeNormal.set(pkt.n[0], pkt.n[1], pkt.n[2]).normalize();
-  remotePaddle.velocity.set(pkt.v[0], pkt.v[1], pkt.v[2]);
-  remotePaddle.mesh.visible = true;
-  remotePaddle.mesh.position.copy(remotePaddle.bladeCenter);
-  remotePaddle.mesh.quaternion.copy(
-    _versusQuat.setFromUnitVectors(_versusFwd, remotePaddle.bladeNormal)
-  );
-}
-
-async function openPhonePair() {
-  if (phoneRoom && phonePairLink) return { code: phoneRoom.code, link: phonePairLink };
-  const code = makeRoomCode();
-  const candidate = createRoom({ code, role: 'host', transport: 'websocket' });
-  phoneRoom = candidate;
-  phonePairLink = '';
-  phoneRoom.on('phone-hello', (payload) => {
-    // Joining or enabling sensors is not enough; only the explicit phone
-    // confirmation plus a camera lock may release the desktop into gameplay.
-    if (!payload?.ready) return;
-    phoneConfirmed = true;
-    phoneConnected = true;
-    maybeStartPhone();
-  });
-  phoneRoom.on('phone-cv-status', ({ locked } = {}) => {
-    phoneCvLocked = Boolean(locked);
-    if (phoneCvLocked) ui.phoneCvReady();
-    else ui.phoneCvWaiting();
-    maybeStartPhone();
-  });
-  phoneRoom.on('phone-pose', (pose) => {
-    if (!pose || !Number.isFinite(pose.x) || !Number.isFinite(pose.y)) return;
-    phoneConnected = true;
-    phoneLastPose = { ...pose };
-  });
-  phoneRoom.onOpponent((present) => {
-    phoneConnected = present;
-    if (present) {
-      phoneRoom?.send('phone-cv-status', { locked: phoneCvLocked });
-      if (!phoneCvLocked) ui.phoneCvWaiting();
-    } else {
-      phoneLastPose = null;
-      phoneConfirmed = false;
-      phoneCvLocked = false;
-      ui.phoneDisconnected();
-    }
-  });
-  phoneRoom.onClosed(() => {
-    phoneConnected = false;
-    phoneLastPose = null;
-  });
-  try {
-    await phoneRoom.connect();
-    startPhoneCv();
-    const origin = phoneRoom.lanUrls?.[0] || window.location.origin;
-    const linkUrl = new URL(origin);
-    linkUrl.search = '';
-    linkUrl.searchParams.set('phone', code);
-    phonePairLink = linkUrl.toString();
-    return { code, link: phonePairLink };
-  } catch (error) {
-    phoneRoom.close();
-    phoneRoom = null;
-    phonePairLink = '';
-    stopPhoneCv();
-    throw error;
-  }
-}
-
-function maybeStartPhone() {
-  if (phoneConfirmed && phoneCvLocked) ui.phoneReady();
-}
-
-function startPhoneCv() {
-  if (phoneCamTracker) return;
-  try {
-    phoneCamTracker = new MarkerPaddleTracker({ assistOnly: true });
-  } catch (error) {
-    phoneCamTracker = null;
-    phoneCvLocked = false;
-    ui.phoneCvWaiting();
-    ui.toast(error?.message ?? 'Phone CV is unavailable in this browser');
-    return;
-  }
-  phoneCamTracker.onState = (state, error) => {
-    if (state === TRACKER_STATE.TRACKING) {
-      phoneCvLocked = true;
-      phoneRoom?.send('phone-cv-status', { locked: true });
-      ui.phoneCvReady();
-      maybeStartPhone();
-    } else if (state === TRACKER_STATE.LOST || state === TRACKER_STATE.ERROR) {
-      phoneCvLocked = false;
-      phoneRoom?.send('phone-cv-status', { locked: false, error: error ?? null });
-      ui.phoneCvWaiting();
-    }
-  };
-  ui.showCamPreview(phoneCamTracker);
-  phoneCamTracker.start().catch((error) => {
-    phoneCvLocked = false;
-    ui.phoneCvWaiting();
-    ui.toast(error?.message ?? 'Desktop camera is required for phone location');
-  });
-}
-
-function stopPhoneCv() {
-  phoneCamTracker?.stop();
-  phoneCamTracker = null;
-  phoneAimAssistActive = false;
-  phoneAimLockTime = 0;
-  assistOffset.set(0, 0);
-}
-
-function closePhonePair() {
-  stopPhoneCv();
-  phoneRoom?.close();
-  phoneRoom = null;
-  phonePairLink = '';
-  phoneConnected = false;
-  phoneConfirmed = false;
-  phoneCvLocked = false;
-  phoneLastPose = null;
 }
 
 function startVersusServe() {
@@ -1869,7 +1693,7 @@ function broadcastHostState() {
   room.send('state', {
     match: match.snapshot(),
     ball,
-    paddle: bladePacket(),
+    paddle: encodeBladePacket(getLocalVersusPaddle()),
   });
 }
 
@@ -2068,7 +1892,7 @@ function applyHostState(state) {
   if (!match.apply(state.match)) return;
   ui.updateVersusScore(match.snapshot(), 'guest');
   game.revision++;
-  applyRemotePaddle(state.paddle);
+  applyRemotePaddle(remotePaddle, state.paddle);
 
   if (state.ball?.active) {
     guestBallActive = true;
@@ -2096,7 +1920,7 @@ function runVersusGuest(dt) {
   netSendAccum += dt;
   if (netSendAccum >= NET_TICK) {
     netSendAccum = 0;
-    room?.send('paddle', bladePacket());
+    room?.send('paddle', encodeBladePacket(getLocalVersusPaddle()));
   }
   // Smoothed toward the last packet rather than snapped to it, so a late or
   // dropped one reads as the ball carrying on instead of stuttering.
@@ -2144,29 +1968,42 @@ async function enterVersus(role, code, transport = 'auto', relay = null) {
   opponent.mesh.visible = false;
 
   netMode = role; // provisional, so the trainer stands down while we connect
+  versusConfig = { code, role, transport, relay };
+  cancelVersusReconnect();
   room = createRoom({ code, role, transport, relay });
+  bindVersusRoom(room);
 
+  await room.connect();
+  takeVersusSide(room.role); // the side the room actually gave us
+  game.revision++;
+  return room;
+}
+
+// Everything a live match room needs to talk to the game. Kept separate from
+// enterVersus so a reconnect can attach the same handlers to a fresh room
+// without touching the score, the ball, or who is standing where.
+function bindVersusRoom(activeRoom) {
   // Both messages are wired up before the side is known, because over the LAN
   // relay it isn't ours to decide: the server hands out host and guest by who
   // arrives first, so this client can come back as the opposite of what the
   // player pressed. Each handler checks the side it ended up on.
-  room.on('paddle', (pkt) => {
-    if (netMode === 'host') applyRemotePaddle(pkt);
+  activeRoom.on('paddle', (pkt) => {
+    if (netMode === 'host') applyRemotePaddle(remotePaddle, pkt);
   });
-  room.on('state', (state) => {
+  activeRoom.on('state', (state) => {
     if (netMode === 'guest') applyHostState(state);
   });
 
   // A dead room is not the same as an absent opponent, and the player needs
   // to know which they are looking at: one resolves itself when the other
-  // player comes back, the other never does.
-  room.onClosed((reason) => {
-    ui.setVersusOpponent(false);
-    ui.toast(reason ? `Match ended: ${reason.toLowerCase()}` : 'Connection lost');
-    ui.setVersusState('Disconnected — quit and open a new room');
+  // player comes back, the other never does — so try to bring it back before
+  // saying anything final.
+  activeRoom.onClosed((reason) => {
+    if (activeRoom !== room || !versusConfig) return;
+    scheduleVersusReconnect(reason);
   });
 
-  room.onOpponent((present) => {
+  activeRoom.onOpponent((present) => {
     ui.setVersusOpponent(present);
     // The first moment both players are in the room, the host puts a ball up.
     if (
@@ -2179,15 +2016,74 @@ async function enterVersus(role, code, transport = 'auto', relay = null) {
       startVersusServe();
     }
   });
+}
 
-  await room.connect();
-  takeVersusSide(room.role); // the side the room actually gave us
-  game.revision++;
-  return room;
+function cancelVersusReconnect() {
+  if (versusReconnectTimer) clearTimeout(versusReconnectTimer);
+  versusReconnectTimer = null;
+  versusReconnectAttempts = 0;
+}
+
+// Reopen the same room code with backoff. The match state is deliberately left
+// alone: a two-second Wi-Fi hiccup should not cost either player the game they
+// were in the middle of, and the score on the board is the same one the
+// opponent still has.
+function scheduleVersusReconnect(reason) {
+  if (!versusConfig || versusReconnectTimer) return;
+  if (versusReconnectAttempts >= VERSUS_RECONNECT_LIMIT) {
+    ui.setVersusOpponent(false);
+    ui.toast(reason ? `Match ended: ${reason.toLowerCase()}` : 'Connection lost');
+    ui.setVersusState('Disconnected — quit and open a new room');
+    return;
+  }
+
+  versusReconnectAttempts += 1;
+  const attempt = versusReconnectAttempts;
+  const delay = versusReconnectDelay(attempt);
+  ui.setVersusOpponent(false);
+  ui.setVersusState(
+    `Lost the room — reconnecting (${attempt}/${VERSUS_RECONNECT_LIMIT})…`
+  );
+
+  versusReconnectTimer = setTimeout(async () => {
+    versusReconnectTimer = null;
+    const config = versusConfig;
+    if (!config || versusReconnectAttempts === 0) return; // left in the meantime
+    const previous = room;
+    let next = null;
+    try {
+      next = createRoom({
+        code: config.code,
+        role: config.role,
+        transport: config.transport,
+        relay: config.relay,
+      });
+      room = next; // the tick loop and every handler follow the live room
+      bindVersusRoom(next);
+      await next.connect();
+      takeVersusSide(next.role);
+      cancelVersusReconnect();
+      // The old handle is finished with; closing it releases whichever of its
+      // sockets and channels are still open, and its callbacks are ignored
+      // because it is no longer `room`.
+      previous?.close();
+      ui.setVersusState('Reconnected — play on');
+      ui.toast('Reconnected');
+      game.revision++;
+    } catch (error) {
+      next?.close();
+      if (room === next) room = previous;
+      scheduleVersusReconnect(error?.message ?? reason);
+    }
+  }, delay);
 }
 
 function leaveVersus({ preserveTournament = false } = {}) {
   if (!netMode && !room) return;
+  // Cleared before the transport closes: a deliberate exit must never look
+  // like a dropped connection and start trying to reconnect into it.
+  versusConfig = null;
+  cancelVersusReconnect();
   room?.close();
   room = null;
   netMode = null;
@@ -2232,31 +2128,24 @@ function updateTournamentLobbyUi() {
   if (view) ui.updateTournamentLobby(view);
 }
 
-async function connectTournamentLobby(code, transport = 'auto', relay = null) {
+async function connectTournamentLobby(code, transport = 'auto', relay = null, { player = null } = {}) {
   if (tournamentLobby) leaveTournament();
-  const player = {
+  // A reconnect must keep the identity it already had, or the bracket sees a
+  // fifth entrant and the player loses the slot they were waiting on.
+  const identity = player ?? {
     id: makeTournamentPlayerId(),
     name: String(settings.get('playerName') || 'Player').trim().slice(0, 24) || 'Player',
     joinedAt: Date.now(),
   };
-  const lobby = createTournamentRoom({ code, player, transport, relay });
+  const lobby = createTournamentRoom({ code, player: identity, transport, relay });
   tournamentLobby = lobby;
+  tournamentConfig = { code, transport, relay, player: identity };
   tournament.localPlayerId = lobby.player.id;
   tournamentStarted = false;
   tournamentRevision = 0;
   tournamentLink = '';
-
-  lobby.on('state-request', () => {
-    if (lobby.isHost && tournamentStarted) broadcastTournamentState();
-  });
-  lobby.on('state', (payload) => applyTournamentState(payload));
-  lobby.on('result', (report) => acceptTournamentResult(report));
-  lobby.onRoster(() => {
-    updateTournamentLobbyUi();
-    // A host re-announces the canonical bracket after a reconnecting player
-    // joins, so a late tab never sits on a blank ladder.
-    if (lobby.isHost && tournamentStarted) broadcastTournamentState();
-  });
+  cancelTournamentReconnect();
+  bindTournamentLobby(lobby);
 
   try {
     await lobby.connect();
@@ -2272,6 +2161,78 @@ async function connectTournamentLobby(code, transport = 'auto', relay = null) {
     tournamentLink = '';
     throw error;
   }
+}
+
+function bindTournamentLobby(lobby) {
+  lobby.on('state-request', () => {
+    if (lobby.isHost && tournamentStarted) broadcastTournamentState();
+  });
+  lobby.on('state', (payload) => applyTournamentState(payload));
+  lobby.on('result', (report) => acceptTournamentResult(report));
+  lobby.onRoster(() => {
+    updateTournamentLobbyUi();
+    // A host re-announces the canonical bracket after a reconnecting player
+    // joins, so a late tab never sits on a blank ladder.
+    if (lobby.isHost && tournamentStarted) broadcastTournamentState();
+  });
+  lobby.onClosed(() => {
+    if (lobby !== tournamentLobby || !tournamentConfig) return;
+    scheduleTournamentReconnect();
+  });
+}
+
+function cancelTournamentReconnect() {
+  if (tournamentReconnectTimer) clearTimeout(tournamentReconnectTimer);
+  tournamentReconnectTimer = null;
+  tournamentReconnectAttempts = 0;
+}
+
+// Reopen the lobby on the same code with the same player id and backoff, so a
+// dropped connection does not silently end somebody's tournament.
+function scheduleTournamentReconnect() {
+  if (!tournamentConfig || tournamentReconnectTimer) return;
+  if (tournamentReconnectAttempts >= VERSUS_RECONNECT_LIMIT) {
+    ui.showTournamentWaiting('Bracket connection lost — leave and rejoin the room.');
+    return;
+  }
+
+  tournamentReconnectAttempts += 1;
+  const attempt = tournamentReconnectAttempts;
+  const delay = versusReconnectDelay(attempt);
+  ui.showTournamentWaiting(
+    `Bracket connection lost — reconnecting (${attempt}/${VERSUS_RECONNECT_LIMIT})…`
+  );
+
+  tournamentReconnectTimer = setTimeout(async () => {
+    tournamentReconnectTimer = null;
+    const config = tournamentConfig;
+    if (!config || tournamentReconnectAttempts === 0) return;
+    const previous = tournamentLobby;
+    let next = null;
+    try {
+      next = createTournamentRoom({
+        code: config.code,
+        player: config.player,
+        transport: config.transport,
+        relay: config.relay,
+      });
+      // Bound before the previous handle is dropped so a failure leaves the
+      // old one in place for the next attempt.
+      tournamentLobby = next;
+      bindTournamentLobby(next);
+      await next.connect();
+      if (!next.admitted) throw new Error('Tournament room is full.');
+      cancelTournamentReconnect();
+      updateTournamentLobbyUi();
+      ui.toast('Reconnected to the bracket');
+      next.send('state-request', { playerId: next.player.id });
+      previous?.close();
+    } catch (error) {
+      next?.close();
+      if (tournamentLobby === next) tournamentLobby = previous;
+      scheduleTournamentReconnect();
+    }
+  }, delay);
 }
 
 function createTournamentLobby() {
@@ -2444,6 +2405,8 @@ function completeTournamentMatch(winnerRole) {
 
 function leaveTournament() {
   closeTournamentMatchRoom();
+  tournamentConfig = null;
+  cancelTournamentReconnect();
   tournamentLobby?.close();
   tournamentLobby = null;
   tournamentStarted = false;
@@ -2612,7 +2575,7 @@ function hapticGuide(strength) {
 
 // Short haptic tap on contact, on whichever hand actually struck the ball.
 function pulse(ball) {
-  phoneRoom?.send('phone-haptic', { duration: 42 });
+  phonePair.haptic();
   let nearest = -1;
   let best = Infinity;
   paddles.forEach((paddle, i) => {

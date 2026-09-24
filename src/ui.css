@@ -47,12 +47,25 @@ canvas {
 }
 
 /* Phone pairing ---------------------------------------------------------- */
-.phone-pair { margin-top: 18px; padding: 16px; border: 1px solid rgba(242,239,230,.18); background: rgba(242,239,230,.04); text-align: center; }
+.phone-pair { margin-top: 18px; padding: 18px 16px 16px; border: 1px solid rgba(242,239,230,.18); background: rgba(242,239,230,.04); text-align: center; position: relative; }
 .phone-pair[hidden] { display: none; }
-.phone-pair__title { color: var(--paper); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 12px; }
-.phone-pair__qr { width: 176px; height: 64px; margin: 0 auto 12px; padding: 8px; display: grid; place-items: center; background: #fff; color: #111; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
-.phone-pair__link { max-width: 100%; overflow-wrap: anywhere; color: var(--dim); font-size: 10px; line-height: 1.5; margin-bottom: 10px; }
+.phone-pair::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--red);
+  opacity: 0.9;
+}
+.phone-pair__title { color: var(--red); font-size: 11px; letter-spacing: .20em; text-transform: uppercase; font-weight: 700; margin-bottom: 14px; }
+.phone-pair__qr {
+  width: 188px; height: 188px; margin: 0 auto 12px; padding: 10px;
+  display: grid; place-items: center;
+  background: #fff; border: 1px solid rgba(11,11,12,0.12);
+}
+.phone-pair__qr canvas, .phone-pair__qr img { width: 168px; height: 168px; display: block; }
+.phone-pair__qr--text { color: #111; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.phone-pair__link { max-width: 100%; overflow-wrap: anywhere; color: var(--dim); font-size: 10px; line-height: 1.5; margin-bottom: 10px; user-select: all; }
 .phone-pair__cv { margin-top: 10px; color: var(--dim); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.phone-pair__actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
 
 /* Start menu ------------------------------------------------------------- */
 
@@ -426,10 +439,6 @@ canvas {
 }
 
 .lobby__invite {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
   width: 100%;
   padding-top: 8px;
   border-top: 1px solid rgba(242, 239, 230, 0.14);
@@ -439,6 +448,33 @@ canvas {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  cursor: pointer;
+  /* The default disclosure triangle is the one piece of browser chrome that
+     survives a restyle, and it sits outside the terminal's grid. */
+  list-style: none;
+}
+.lobby__invite-label::-webkit-details-marker {
+  display: none;
+}
+.lobby__invite-label::before {
+  content: '▸ ';
+  color: var(--red);
+}
+.lobby__invite[open] .lobby__invite-label {
+  color: var(--paper);
+}
+.lobby__invite[open] .lobby__invite-label::before {
+  content: '▾ ';
+}
+.lobby__invite-label:hover {
+  color: var(--paper);
+}
+.lobby__invite-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 8px;
 }
 .lobby__phone {
   width: 16ch;
@@ -831,6 +867,26 @@ canvas {
   outline: 1px solid var(--red);
   outline-offset: 4px;
 }
+
+/* The lobby fields are Tab-able too, and a text input with `outline: none`
+   and a 1 px underline is not a visible focus ring. */
+input:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
+/* Everything else that can hold focus: the coach's narration buttons, the
+   tuning reset, the win screen's exit. The picker rows have their own rule
+   above, so this is the catch-all — nothing should be reachable but invisible. */
+button:focus-visible,
+select:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
 .key b {
   color: var(--paper);
   font-weight: 700;
@@ -939,6 +995,75 @@ canvas {
     top: 10px;
     right: 10px;
     width: min(280px, calc(100vw - 20px));
+    max-height: calc(100vh - 104px);
+    overflow-y: auto;
+  }
+  /* A four-line bracket on a phone-sized viewport is taller than the window,
+     so it scrolls within a panel instead of drawing over the coach. */
+  #tournament-hud {
+    width: min(280px, calc(100vw - 20px));
+    max-height: 46vh;
+    overflow-y: auto;
+  }
+}
+
+/* Short viewports ---------------------------------------------------------
+   A 13-inch laptop in a browser window is about 700 px tall, and the pairing
+   panel stacks a QR, a link, two status lines and two buttons under a
+   six-row picker. The menu scrolls, so nothing is unreachable, but the thing
+   you are supposed to look at should not start below the fold. */
+@media (max-height: 780px) {
+  #menu {
+    gap: 16px;
+    padding: 16px 20px;
+  }
+  .screen {
+    gap: 16px;
+    padding: 18px 22px 16px;
+  }
+  .phone-pair {
+    margin-top: 12px;
+    padding: 14px 14px 12px;
+  }
+  .phone-pair__qr {
+    width: 152px;
+    height: 152px;
+    padding: 8px;
+    margin-bottom: 8px;
+  }
+  .phone-pair__qr canvas,
+  .phone-pair__qr img {
+    width: 136px;
+    height: 136px;
+  }
+  .campreview__view {
+    width: 160px;
+    height: 120px;
+  }
+  /* The two live information panels are the tallest fixed surfaces on screen.
+     At this height they get their own scroll instead of running under the
+     bottom bar, which is what hid the last coach line behind the mode strip. */
+  #coach-panel,
+  #tournament-hud {
+    top: 10px;
+    padding: 10px 12px 11px;
+    max-height: calc(100vh - 104px);
+    overflow-y: auto;
+  }
+  #coach-panel {
+    right: 10px;
+  }
+  #tournament-hud {
+    left: 10px;
+  }
+  /* Full-screen overlays centre their content; once the list is taller than a
+     short window that pushes its own first row off the top, out of reach.
+     Anchor them at the top and let them scroll instead. */
+  #settings,
+  #scores {
+    justify-content: flex-start;
+    padding: 22px 16px;
+    overflow-y: auto;
   }
 }
 

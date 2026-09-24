@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js';
+import { loadSupabase, supabaseConfigured } from './supabaseClient.js';
 import { encodeMessage, isValidRoomCode, MULTIPLAYER_PROTOCOL } from './multiplayerProtocol.js';
 
 // Networking for online versus. Three interchangeable transports sit behind
@@ -18,7 +18,48 @@ import { encodeMessage, isValidRoomCode, MULTIPLAYER_PROTOCOL } from './multipla
 // prefixed with '__' and handled internally to drive opponent presence.
 
 const CHANNEL_PREFIX = 'flyball-room-';
+const PHONE_CHANNEL_PREFIX = 'flyball-phone-';
 const WS_PATH = '/__flyball_ws';
+
+// ICE servers for the direct WebRTC path. STUN alone gets two browsers on the
+// same Wi-Fi talking, but a symmetric NAT — campus and hotel networks, and
+// essentially every phone on cellular — hands out no usable candidate, so the
+// peer connection never opens. A TURN relay is the fix, and it is read from
+// the environment rather than hard-coded so the credentials stay in Vercel's
+// project settings and out of the bundle:
+//
+//   VITE_TURN_URL         turn:host:3478 (comma-separated list also accepted)
+//   VITE_TURN_USERNAME
+//   VITE_TURN_CREDENTIAL
+//
+// With no TURN configured the match still plays: game packets now also travel
+// over the Supabase Realtime channel as a fallback (see WebRTCTransport), so a
+// failed NAT traversal costs latency rather than the whole match.
+const DEFAULT_STUN_URL = 'stun:stun.l.google.com:19302';
+
+// `import.meta.env` does not exist outside a Vite build, so every read goes
+// through this and the module stays importable from a plain Node test.
+const ENV = import.meta.env ?? {};
+
+function iceServers() {
+  const servers = [{ urls: DEFAULT_STUN_URL }];
+  const urls = String(ENV.VITE_TURN_URL ?? '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+  if (urls.length) {
+    servers.push({
+      urls,
+      username: ENV.VITE_TURN_USERNAME,
+      credential: ENV.VITE_TURN_CREDENTIAL,
+    });
+  }
+  return servers;
+}
+
+export function relayConfigured() {
+  return iceServers().length > 1;
+}
 
 function clientId() {
   try { return crypto.randomUUID(); } catch { return `${Date.now()}-${Math.random()}`; }
@@ -108,7 +149,7 @@ export function makeTournamentPlayerId() {
 }
 
 export function isRealtimeAvailable() {
-  return Boolean(supabase);
+  return supabaseConfigured;
 }
 
 // A phone companion uses the same LAN relay as the game, but joins as a pose
@@ -179,19 +220,221 @@ export function createPoseSender(code) {
   };
 }
 
+// Phone paddle pairing — hybrid transport so the phone can connect over LAN
+// (fast WebSocket relay) or over the internet (Supabase Realtime) without
+// the user choosing. Whichever handshake wins is used; both stay live so a
+// mid-game network switch does not drop the controller.
+//
+// The phone and desktop share the same PHONE_CHANNEL_PREFIX room so either
+// pipe can carry phone-pose / phone-haptic / cv-status messages.
+export function createPhonePairRoom({ code }) {
+  if (!isValidRoomCode(code)) throw new Error('Invalid phone room code.');
+  const handlers = {};
+  const opponentSubscribers = new Set();
+  const closedSubscribers = new Set();
+  let opponentPresent = false;
+  let closed = false;
+  let wsSocket = null;
+  let supaChannel = null;
+  let supaClient = null;
+  let wsLanUrls = [];
+  let wsConnected = false;
+  let supaConnected = false;
+
+  function notifyOpponent(present) {
+    if (present === opponentPresent) return;
+    opponentPresent = present;
+    opponentSubscribers.forEach((cb) => cb(present));
+  }
+  function dispatch(type, data) {
+    const handler = handlers[type];
+    if (handler) handler(data);
+    // Any phone activity implies the phone is present, which speeds up the
+    // "waiting for phone" state without waiting for explicit presence.
+    if (['phone-hello', 'phone-pose', 'phone-calibrate'].includes(type)) {
+      if (!opponentPresent) notifyOpponent(true);
+    }
+  }
+
+  async function connectWebSocket() {
+    if (typeof WebSocket === 'undefined') return;
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+      try {
+        wsSocket = new WebSocket(relaySocketUrl(null));
+      } catch {
+        resolve(null);
+        return;
+      }
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (ok) {
+          wsConnected = true;
+          resolve(true);
+        } else {
+          try { wsSocket?.close(); } catch {}
+          wsSocket = null;
+          resolve(null);
+        }
+      };
+      timer = setTimeout(() => finish(false), 1400);
+      wsSocket.addEventListener('open', () => {
+        wsSocket.send(encodeMessage('__join', { code, role: 'host' }));
+      });
+      wsSocket.addEventListener('message', (event) => {
+        const msg = decodeMessage(String(event.data));
+        if (!msg) return;
+        if (msg.type === '__joined') {
+          wsLanUrls = Array.isArray(msg.data?.lanUrls) ? msg.data.lanUrls : [];
+          finish(true);
+          if (msg.data?.present) notifyOpponent(true);
+          return;
+        }
+        if (msg.type === '__presence') {
+          notifyOpponent(Boolean(msg.data?.present));
+          return;
+        }
+        // Phone companion messages arrive here (relay forwards between host and phone)
+        dispatch(msg.type, msg.data);
+      });
+      wsSocket.addEventListener('error', () => finish(false));
+      wsSocket.addEventListener('close', () => {
+        if (!wsConnected) finish(false);
+        else {
+          wsConnected = false;
+          // Don't mark opponent absent immediately — supabase may still be holding the phone
+          if (!supaConnected) notifyOpponent(false);
+        }
+      });
+    });
+  }
+
+  async function connectSupabase() {
+    supaClient = await loadSupabase();
+    if (!supaClient) return null;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        if (ok) { supaConnected = true; resolve(true); } else resolve(null);
+      };
+      try {
+        supaChannel = supaClient.channel(`${PHONE_CHANNEL_PREFIX}${code}`, {
+          config: { broadcast: { self: false }, presence: { key: `host-${Date.now()}-${Math.random().toString(36).slice(2,6)}` } },
+        });
+        supaChannel.on('broadcast', { event: 'phone' }, ({ payload }) => {
+          if (!payload || typeof payload.type !== 'string') return;
+          dispatch(payload.type, payload.data);
+        });
+        // Back-compat: phone fallback also broadcasts on generic 'msg' event for SupabaseTransport interop
+        supaChannel.on('broadcast', { event: 'msg' }, ({ payload }) => {
+          if (!payload || typeof payload.type !== 'string') return;
+          dispatch(payload.type, payload.data);
+        });
+        supaChannel.on('presence', { event: 'sync' }, () => {
+          const members = Object.values(supaChannel.presenceState()).flat();
+          // Host + at least one phone means someone else is there
+          if (members.length >= 2) notifyOpponent(true);
+        });
+        supaChannel.subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await supaChannel.track({ role: 'host', at: Date.now() });
+            finish(true);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            finish(false);
+          }
+        });
+        setTimeout(() => { if (!settled) finish(false); }, 3000);
+      } catch {
+        finish(false);
+      }
+    });
+  }
+
+  return {
+    code,
+    get kind() {
+      if (wsConnected && supaConnected) return 'hybrid';
+      if (supaConnected) return 'supabase';
+      if (wsConnected) return 'websocket';
+      return supabaseConfigured ? 'supabase' : 'websocket';
+    },
+    get lanUrls() { return wsLanUrls; },
+    async connect() {
+      // Race both transports — first success unlocks the QR instantly.
+      // Supabase wins off-LAN in ~400–800ms; WS wins on LAN in ~50ms.
+      // Don't wait for the slower timeout before showing the pairing link.
+      const wsP = connectWebSocket();
+      const supaP = connectSupabase();
+      await new Promise((resolve, reject) => {
+        let settled = 0;
+        const total = 2;
+        const handle = (ok) => {
+          settled += 1;
+          if (ok) resolve();
+          else if (settled === total) reject(new Error('Phone pairing failed — check Wi-Fi or Supabase connectivity.'));
+        };
+        wsP.then((v) => handle(!!v)).catch(() => handle(false));
+        supaP.then((v) => handle(!!v)).catch(() => handle(false));
+      });
+    },
+    send(type, data) {
+      if (wsSocket?.readyState === WebSocket.OPEN) wsSocket.send(encodeMessage(type, data));
+      if (supaChannel) supaChannel.send({ type: 'broadcast', event: 'phone', payload: { type, data } });
+    },
+    on(type, cb) { handlers[type] = cb; },
+    onOpponent(cb) {
+      opponentSubscribers.add(cb);
+      cb(opponentPresent);
+    },
+    onClosed(cb) {
+      closedSubscribers.add(cb);
+      if (closed) cb();
+    },
+    get opponentPresent() { return opponentPresent; },
+    close() {
+      if (wsSocket) {
+        if (wsSocket.readyState === WebSocket.OPEN) try { wsSocket.send(encodeMessage('__leave')); } catch {}
+        try { wsSocket.close(); } catch {}
+      }
+      wsSocket = null;
+      wsConnected = false;
+      if (supaChannel) supaClient?.removeChannel(supaChannel);
+      supaChannel = null;
+      supaClient = null;
+      supaConnected = false;
+      opponentPresent = false;
+      closed = true;
+      closedSubscribers.forEach((cb) => cb());
+      opponentSubscribers.clear();
+      closedSubscribers.clear();
+    },
+  };
+}
+
 class SupabaseTransport {
   constructor(code, role) {
     this.code = code;
     this.role = role;
     this.clientId = clientId();
-    this.joinedAt = Date.now() + Math.random();
     this.handlers = {};
     this.onOpponent = null;
     this.channel = null;
+    this.client = null;
   }
 
+  get kind() { return 'supabase'; }
+
   async connect() {
-    this.channel = supabase.channel(`${CHANNEL_PREFIX}${this.code}`, {
+    this.client = await loadSupabase();
+    if (!this.client) {
+      throw new Error('Supabase Realtime is not configured for this build.');
+    }
+    this.channel = this.client.channel(`${CHANNEL_PREFIX}${this.code}`, {
       config: { broadcast: { self: false }, presence: { key: this.clientId } },
     });
     this.channel.on('broadcast', { event: 'msg' }, ({ payload }) => {
@@ -202,9 +445,15 @@ class SupabaseTransport {
       const state = this.channel.presenceState();
       const members = Object.entries(state)
         .flatMap(([key, values]) => (values || []).map((value) => ({ ...value, key })))
-        .sort((a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0));
+        // Elected by presence key, not by a device clock. Two phones whose
+        // clocks disagree by a few seconds would otherwise each believe they
+        // arrived first, and both would run the simulation — the exact failure
+        // that makes a match look like the ball is in two places at once.
+        // Sorting a shared string is the one ordering both ends compute the
+        // same way with nothing to synchronise.
+        .sort((a, b) => a.key.localeCompare(b.key));
       const first = members[0];
-      // Supabase does not assign roles. Elect the earliest connected client so
+      // Supabase does not assign roles. Elect the same client on both ends so
       // two people who both press Join still get one authoritative host.
       if (first) this.role = first.key === this.clientId ? 'host' : 'guest';
       this.onOpponent?.(members.length >= 2);
@@ -215,7 +464,7 @@ class SupabaseTransport {
           await this.channel.track({
             id: this.clientId,
             role: this.role,
-            joinedAt: this.joinedAt,
+            at: Date.now(),
           });
           resolve();
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
@@ -236,8 +485,9 @@ class SupabaseTransport {
   }
 
   close() {
-    if (this.channel) supabase.removeChannel(this.channel);
+    if (this.channel) this.client?.removeChannel(this.channel);
     this.channel = null;
+    this.client = null;
   }
 }
 
@@ -258,10 +508,17 @@ class WebRTCTransport {
     this.pendingCandidates = [];
     this.offerStarted = false;
     this.connected = false;
+    this.relayPeerPresent = false;
+    this.opponentPresent = false;
+    this.client = null;
   }
 
   async connect() {
-    this.channel = supabase.channel(`${CHANNEL_PREFIX}${this.code}`, {
+    this.client = await loadSupabase();
+    if (!this.client) {
+      throw new Error('Supabase Realtime is not configured for this build.');
+    }
+    this.channel = this.client.channel(`${CHANNEL_PREFIX}${this.code}`, {
       config: { broadcast: { self: false }, presence: { key: this.role } },
     });
     this.channel.on('broadcast', { event: 'signal' }, ({ payload }) => {
@@ -269,6 +526,17 @@ class WebRTCTransport {
         console.error('WebRTC signalling failed', error);
         this.onClosed?.(error.message);
       });
+    });
+    // Relayed game packets. The same channel that carries signalling carries
+    // the match when the peer connection cannot be established, which is the
+    // only thing standing between a symmetric NAT and two players who simply
+    // never see each other's ball. When the direct channel is open it is
+    // preferred — lower latency, no relay hop — and the copy arriving here is
+    // dropped so a packet is never applied twice.
+    this.channel.on('broadcast', { event: 'msg' }, ({ payload }) => {
+      if (this.data?.readyState === 'open') return;
+      const handler = this.handlers[payload?.type];
+      if (handler) handler(payload.data);
     });
     this.channel.on('presence', { event: 'sync' }, () => this._onPresence());
 
@@ -287,6 +555,12 @@ class WebRTCTransport {
   _onPresence() {
     const peers = Object.values(this.channel.presenceState()).flat();
     const guestPresent = peers.some((peer) => peer.role === 'guest');
+    const hostPresent = peers.some((peer) => peer.role === 'host');
+    // Presence is the fallback's liveness signal: with the relayed path there
+    // is no connection state to read, so "the other player is in the room" is
+    // what lets the host start serving even when WebRTC never opened.
+    this.relayPeerPresent = this.role === 'host' ? guestPresent : hostPresent;
+    this._updatePresent();
     if (this.role === 'host' && guestPresent && !this.offerStarted) {
       this.offerStarted = true;
       this._startOffer().catch((error) => {
@@ -299,9 +573,7 @@ class WebRTCTransport {
 
   _createPeer(host) {
     if (this.pc) return this.pc;
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
+    const pc = new RTCPeerConnection({ iceServers: iceServers() });
     this.pc = pc;
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) this._signal('candidate', candidate.toJSON());
@@ -330,8 +602,18 @@ class WebRTCTransport {
   }
 
   _setConnected(present) {
-    if (present === this.connected) return;
     this.connected = present;
+    this._updatePresent();
+  }
+
+  // A player is present if either pipe reaches them — the direct data channel
+  // or Presence on the signalling channel. Reporting only the direct channel
+  // was why a NAT'd match looked like an empty room: both players were there
+  // and neither was told.
+  _updatePresent() {
+    const present = this.connected || this.relayPeerPresent;
+    if (present === this.opponentPresent) return;
+    this.opponentPresent = present;
     this.onOpponent?.(present);
   }
 
@@ -373,8 +655,23 @@ class WebRTCTransport {
     for (const candidate of candidates) await this.pc.addIceCandidate(candidate);
   }
 
+  // Which pipe is actually carrying the match right now, as opposed to which
+  // one was selected for it. A NAT'd pair starts on 'webrtc' and settles on
+  // 'webrtc-relay' once the fallback takes over, and the player is told.
+  get kind() {
+    if (this.connected) return 'webrtc';
+    return this.relayPeerPresent ? 'webrtc-relay' : 'webrtc';
+  }
+
   send(type, data) {
-    if (this.data?.readyState === 'open') this.data.send(encodeMessage(type, data));
+    if (this.data?.readyState === 'open') {
+      this.data.send(encodeMessage(type, data));
+      return;
+    }
+    // Nothing direct to send on: the relay carries it instead. Small packets
+    // at 30 Hz are well inside a Realtime channel's budget, and a match that
+    // is a little later beats a match that never starts.
+    this.channel?.send({ type: 'broadcast', event: 'msg', payload: { type, data } });
   }
 
   on(type, cb) {
@@ -382,13 +679,15 @@ class WebRTCTransport {
   }
 
   close() {
+    this.relayPeerPresent = false;
     this._setConnected(false);
     this.data?.close();
     this.pc?.close();
-    if (this.channel) supabase.removeChannel(this.channel);
+    if (this.channel) this.client?.removeChannel(this.channel);
     this.data = null;
     this.pc = null;
     this.channel = null;
+    this.client = null;
   }
 }
 
@@ -401,6 +700,8 @@ class BroadcastChannelTransport {
     this.bc = null;
     this.peers = new Set();
   }
+
+  get kind() { return 'local'; }
 
   async connect() {
     if (typeof BroadcastChannel === 'undefined') {
@@ -464,6 +765,8 @@ class WebSocketTransport {
     this.relay = relay;
   }
 
+  get kind() { return 'websocket'; }
+
   async connect() {
     if (typeof WebSocket === 'undefined') {
       throw new Error('WebSockets are unavailable in this browser.');
@@ -478,6 +781,10 @@ class WebSocketTransport {
         this.socket?.close();
         reject(error);
       };
+      // Four seconds. A relay on the same Wi-Fi answers in milliseconds, so
+      // anything longer is a wrong address or a stopped dev server — and with
+      // automatic reconnection on top, waiting eight seconds to be told so is
+      // eight seconds of a match nobody can see happening.
       const timeout = setTimeout(
         () =>
           fail(
@@ -485,7 +792,7 @@ class WebSocketTransport {
               'LAN relay did not respond. Restart the host with npm run dev and try again.'
             )
           ),
-        8000
+        4000
       );
       this.socket.addEventListener('open', () => {
         this.socket.send(encodeMessage('__join', { code: this.code, role: this.role }));
@@ -559,18 +866,22 @@ class WebSocketTransport {
 
 // Create a room handle. role is 'host' (created the game) or 'guest' (joined).
 export function createRoom({ code, role, transport: requested = 'auto', relay = null }) {
-  if ((requested === 'supabase' || requested === 'webrtc') && !supabase) {
+  // Checked here as well as in the relay. A malformed code used to travel to
+  // the server and come back as a closed socket with a reason nobody reads,
+  // which looks exactly like a room that does not exist.
+  if (!isValidRoomCode(code)) throw new Error('Invalid room code.');
+  if ((requested === 'supabase' || requested === 'webrtc') && !supabaseConfigured) {
     throw new Error(
       'Online multiplayer needs VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
     );
   }
   const useWebRTC =
-    requested === 'webrtc' || (requested === 'auto' && Boolean(supabase));
+    requested === 'webrtc' || (requested === 'auto' && supabaseConfigured);
   // Keep the Vite relay as a no-account development fallback. Production
   // matches use Supabase for signalling and direct WebRTC for game packets.
   const useWebSocket =
     requested === 'websocket' ||
-    (requested === 'auto' && !useWebRTC && import.meta.env.DEV);
+    (requested === 'auto' && !useWebRTC && ENV.DEV);
   const useSupabase =
     requested === 'supabase';
   const transport = useWebRTC
@@ -604,7 +915,15 @@ export function createRoom({ code, role, transport: requested = 'auto', relay = 
     get role() {
       return transport.role ?? role;
     },
-    kind: useWebRTC ? 'webrtc' : useWebSocket ? 'websocket' : useSupabase ? 'supabase' : 'local',
+    // Read through for the same reason: a WebRTC match that fell back to the
+    // relayed channel reports that, instead of claiming a direct link it does
+    // not have.
+    get kind() {
+      return transport.kind ?? (useWebRTC ? 'webrtc' : useWebSocket ? 'websocket' : useSupabase ? 'supabase' : 'local');
+    },
+    get relayed() {
+      return transport.kind === 'webrtc-relay';
+    },
     async connect() {
       await transport.connect();
     },
@@ -680,7 +999,15 @@ class TournamentTransportBase {
     this.player = normaliseTournamentPlayer(player);
     this.handlers = {};
     this.rosterSubscribers = new Set();
+    this.onClosed = null;
+    this.closed = false;
     this._players = [this.player];
+  }
+
+  _notifyClosed(reason) {
+    if (this.closed) return;
+    this.closed = true;
+    this.onClosed?.(reason);
   }
 
   get players() {
@@ -716,10 +1043,15 @@ class SupabaseTournamentTransport extends TournamentTransportBase {
   constructor(code, player) {
     super(code, player);
     this.channel = null;
+    this.client = null;
   }
 
   async connect() {
-    this.channel = supabase.channel(`${CHANNEL_PREFIX}tournament-${this.code}`, {
+    this.client = await loadSupabase();
+    if (!this.client) {
+      throw new Error('Supabase Realtime is not configured for this build.');
+    }
+    this.channel = this.client.channel(`${CHANNEL_PREFIX}tournament-${this.code}`, {
       config: { broadcast: { self: false }, presence: { key: this.player.id } },
     });
     this.channel.on('broadcast', { event: 'tournament' }, ({ payload }) => {
@@ -728,11 +1060,20 @@ class SupabaseTournamentTransport extends TournamentTransportBase {
     this.channel.on('presence', { event: 'sync' }, () => {
       this._setPlayers(Object.values(this.channel.presenceState()).flat());
     });
+    let subscribed = false;
     await new Promise((resolve, reject) => {
       this.channel.subscribe((status) => {
-        if (status === 'SUBSCRIBED') resolve();
-        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          reject(new Error('Tournament lobby could not connect to Realtime.'));
+        if (status === 'SUBSCRIBED') {
+          subscribed = true;
+          resolve();
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          // Before SUBSCRIBED this is a failure to connect and the caller
+          // decides what to do. After it, the lobby we were already using has
+          // gone — say so, rather than letting a bracket quietly stop syncing.
+          if (subscribed) this._notifyClosed('Tournament lobby disconnected');
+          else reject(new Error('Tournament lobby could not connect to Realtime.'));
+        } else if (status === 'CLOSED' && subscribed) {
+          this._notifyClosed('Tournament lobby closed');
         }
       });
     });
@@ -749,8 +1090,9 @@ class SupabaseTournamentTransport extends TournamentTransportBase {
   }
 
   close() {
-    if (this.channel) supabase.removeChannel(this.channel);
+    if (this.channel) this.client?.removeChannel(this.channel);
     this.channel = null;
+    this.client = null;
     this.rosterSubscribers.clear();
   }
 }
@@ -843,7 +1185,7 @@ class WebSocketTournamentTransport extends TournamentTransportBase {
       };
       const timeout = setTimeout(
         () => finish(new Error('LAN tournament relay did not respond. Restart npm run dev and try again.')),
-        8000
+        4000
       );
       this.socket.addEventListener('open', () => {
         this.socket.send(
@@ -866,6 +1208,7 @@ class WebSocketTournamentTransport extends TournamentTransportBase {
       this.socket.addEventListener('error', () => finish(new Error('LAN tournament relay connection failed.')));
       this.socket.addEventListener('close', (event) => {
         if (!settled) finish(new Error(event.reason || 'LAN tournament relay closed before joining.'));
+        else this._notifyClosed(event.reason || 'LAN tournament relay closed');
       });
     });
   }
@@ -892,11 +1235,11 @@ class WebSocketTournamentTransport extends TournamentTransportBase {
 export function createTournamentRoom({ code, player, transport: requested = 'auto', relay = null }) {
   if (!isValidRoomCode(code)) throw new Error('Invalid tournament room code.');
   const localPlayer = normaliseTournamentPlayer(player);
-  if ((requested === 'supabase') && !supabase) {
+  if ((requested === 'supabase') && !supabaseConfigured) {
     throw new Error('Online tournaments need VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   }
-  const useSupabase = requested === 'supabase' || (requested === 'auto' && Boolean(supabase));
-  const useWebSocket = requested === 'websocket' || (requested === 'auto' && !useSupabase && import.meta.env.DEV);
+  const useSupabase = requested === 'supabase' || (requested === 'auto' && supabaseConfigured);
+  const useWebSocket = requested === 'websocket' || (requested === 'auto' && !useSupabase && ENV.DEV);
   const transport = useSupabase
     ? new SupabaseTournamentTransport(code, localPlayer)
     : useWebSocket
@@ -947,7 +1290,15 @@ export function createTournamentRoom({ code, player, transport: requested = 'aut
       rosterSubscribers.add(cb);
       notify(transport.players);
     },
+    // The bracket lost its transport — server stopped, network dropped. The
+    // caller can reopen the same room with the same player id and keep the
+    // slot it already has.
+    onClosed(cb) {
+      transport.onClosed = cb;
+      if (transport.closed) cb();
+    },
     close() {
+      transport.closed = true; // deliberate: never reported as a lost lobby
       rosterSubscribers.clear();
       transport.close();
     },

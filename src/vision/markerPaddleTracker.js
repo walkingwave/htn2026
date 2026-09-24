@@ -18,15 +18,12 @@
 // hide camera latency, and the debug overlay.
 
 import * as THREE from 'three';
+import { TRACKER_STATE } from './trackerState.js';
 
-export const TRACKER_STATE = {
-  IDLE: 'idle',
-  REQUESTING: 'requesting',
-  CALIBRATING: 'calibrating',
-  TRACKING: 'tracking',
-  LOST: 'lost',
-  ERROR: 'error',
-};
+// Re-exported for the callers that already import it from here. Keeping one
+// definition in trackerState.js is what lets the render loop read the enum
+// without loading this module.
+export { TRACKER_STATE };
 
 const FRONT_IDS = new Set([1, 2, 3, 4]);
 

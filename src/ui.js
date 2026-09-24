@@ -48,6 +48,7 @@ export class UI {
     invitedRoom = null,
     invitedTournament = null,
     realtimeAvailable = false,
+    relayAvailable = false,
   }) {
     Object.assign(this, {
       xr,
@@ -69,6 +70,7 @@ export class UI {
       onPhonePair,
       onRunSummary,
       realtimeAvailable,
+      relayAvailable,
     });
     this.isInputBlocked = isInputBlocked ?? (() => false);
 
@@ -113,6 +115,12 @@ export class UI {
   _buildMenu() {
     const el = document.createElement('div');
     el.id = 'menu';
+    // A full-screen menu over the arena is a dialog as far as assistive tech is
+    // concerned, and naming it gives the screen a landmark instead of a wall of
+    // anonymous buttons.
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-label', 'PaddleLab start menu');
     el.innerHTML = `
       <div class="crt"></div>
       <div>
@@ -177,27 +185,35 @@ export class UI {
             <button class="key" data-lobby-join><b>▸</b>Join</button>
             <button class="key" data-lobby-start hidden><b>▸</b>Start bracket</button>
           </div>
-          <div class="lobby__status" data-lobby-status></div>
-          <div class="lobby__roster" data-lobby-roster hidden></div>
+          <div class="lobby__status" data-lobby-status role="status" aria-live="polite"></div>
+          <div class="lobby__roster" data-lobby-roster role="status" aria-live="polite" hidden></div>
           <div class="lobby__share" data-lobby-share hidden>
             <span class="lobby__link" data-lobby-link></span>
             <button class="key" data-lobby-copy><b>⧉</b>Copy link</button>
             <button class="key" data-lobby-leave><b>×</b>Leave</button>
-            <div class="lobby__invite">
-              <span class="lobby__invite-label">Text an invite</span>
-              <input class="lobby__phone" data-lobby-phone placeholder="+1 416…" inputmode="tel" autocomplete="tel" />
-              <button class="key" data-lobby-invite><b>▸</b>Send iMessage</button>
-            </div>
+            <!-- Folded away by default: inviting somebody by text is a nice-to-
+                 have, and three more controls sitting open turned the lobby
+                 into a wall of inputs nobody had asked for. -->
+            <details class="lobby__invite">
+              <summary class="lobby__invite-label">Text an invite</summary>
+              <div class="lobby__invite-row">
+                <input class="lobby__phone" data-lobby-phone placeholder="+1 416…" inputmode="tel" autocomplete="tel" />
+                <button class="key" data-lobby-invite><b>▸</b>Send iMessage</button>
+              </div>
+            </details>
           </div>
         </div>
         <div class="phone-pair" data-phone-pair hidden>
-          <div class="phone-pair__title">Phone paddle</div>
-          <div class="phone-pair__qr" data-phone-qr aria-hidden="true">PHONE LINK</div>
+          <div class="phone-pair__title">▸ Phone paddle — scan to pair</div>
+          <canvas class="phone-pair__qr" data-phone-qr width="168" height="168" role="img" aria-label="QR code for the phone link" hidden></canvas>
+          <div class="phone-pair__qr phone-pair__qr--text" data-phone-qr-text aria-hidden="true">PHONE LINK</div>
           <div class="phone-pair__link" data-phone-link></div>
-          <div class="lobby__status" data-phone-status>Opening a local phone room…</div>
-          <button class="key" data-phone-copy><b>⧉</b>Copy phone link</button>
-          <div class="phone-pair__cv" data-phone-cv>Keep the marker board visible to this computer camera.</div>
-          <button class="key" data-phone-cancel><b>×</b>Cancel phone pairing</button>
+          <div class="lobby__status" data-phone-status role="status" aria-live="polite">Opening a phone room…</div>
+          <div class="phone-pair__actions">
+            <button class="key" data-phone-copy><b>⧉</b>Copy phone link</button>
+            <button class="key" data-phone-cancel><b>×</b>Cancel</button>
+          </div>
+          <div class="phone-pair__cv" data-phone-cv role="status" aria-live="polite">Keep the marker board visible to this computer camera.</div>
         </div>
         <div class="prompt blink">↑ ↓ SELECT · ENTER START</div>
       </div>
@@ -239,6 +255,7 @@ export class UI {
     this.lobbyPhone = el.querySelector('[data-lobby-phone]');
     this.phonePair = el.querySelector('[data-phone-pair]');
     this.phoneQr = el.querySelector('[data-phone-qr]');
+    this.phoneQrText = el.querySelector('[data-phone-qr-text]');
     this.phoneLink = el.querySelector('[data-phone-link]');
     this.phoneStatus = el.querySelector('[data-phone-status]');
     this.phoneCvStatus = el.querySelector('[data-phone-cv]');
@@ -395,6 +412,14 @@ export class UI {
       return 'Same-browser fallback: this build needs Supabase Realtime before another device can join.';
     }
     if (kind === 'webrtc') return 'Connected directly over WebRTC.';
+    // The direct link never opened — a strict network is in the way — and the
+    // fallback is carrying the match. Worth saying, because it is the one case
+    // where adding TURN would visibly sharpen the ball.
+    if (kind === 'webrtc-relay') {
+      return this.relayAvailable
+        ? 'Relayed through the server — a direct link could not be opened on this network.'
+        : 'Connected through the relay — playable, but a TURN server would make it direct.';
+    }
     if (kind === 'websocket') return 'Connected over this Wi-Fi.';
     if (kind === 'supabase') return 'Connected over the internet.';
     return '';
@@ -487,7 +512,7 @@ export class UI {
     if (kind === 'websocket') {
       return 'Share the link exactly as shown while both devices are on this Wi-Fi.';
     }
-    if (kind === 'webrtc' || kind === 'supabase') {
+    if (kind === 'webrtc' || kind === 'webrtc-relay' || kind === 'supabase') {
       return 'Share the link — your friend can open it from the deployed site on their own device.';
     }
     if (kind === 'local') {
@@ -775,20 +800,62 @@ export class UI {
     if (this.phonePair.hidden === false) return;
     this._phoneReadyStarted = false;
     this.phonePair.hidden = false;
-    this.phoneStatus.textContent = 'Opening a local phone room…';
+    this.phoneStatus.textContent = 'Opening a phone room…';
+    this.phoneStatus.dataset.tone = '';
     this.phoneCvStatus.textContent = 'Waiting for the desktop camera and phone connection.';
+    this.phoneCvStatus.dataset.tone = '';
     this.phoneLink.textContent = '';
-    this.phoneQr.textContent = 'PHONE LINK';
+    if (this.phoneQr) {
+      this.phoneQr.hidden = true;
+      const ctx = this.phoneQr.getContext?.('2d');
+      if (ctx) ctx.clearRect(0, 0, this.phoneQr.width, this.phoneQr.height);
+    }
+    if (this.phoneQrText) {
+      this.phoneQrText.hidden = false;
+      this.phoneQrText.textContent = 'GENERATING QR…';
+    }
     try {
       const result = await this.onPhonePair?.();
       if (!result?.link) throw new Error('Could not create the phone pairing link.');
       this.phoneLink.textContent = result.link;
-      this.phoneQr.textContent = 'COPY LINK BELOW';
-      this.phoneStatus.textContent = `Room ${result.code} · open the link on the phone.`;
+      this.phoneStatus.textContent = `Room ${result.code} · scan QR or open the link on your phone.`;
+      this.phoneStatus.dataset.tone = 'good';
+      await this._renderPhoneQr(result.link);
     } catch (error) {
       this.phoneStatus.textContent = error?.message || 'Phone pairing could not start.';
       this.phoneStatus.dataset.tone = 'bad';
+      if (this.phoneQrText) {
+        this.phoneQrText.hidden = false;
+        this.phoneQrText.textContent = 'QR UNAVAILABLE — USE LINK';
+      }
     }
+  }
+
+  async _renderPhoneQr(link) {
+    if (!this.phoneQr) return;
+    try {
+      const QRCode = (await import('qrcode')).default;
+      const canvas = this.phoneQr;
+      await QRCode.toCanvas(canvas, link, {
+        width: 168,
+        margin: 1,
+        color: { dark: '#0b0b0c', light: '#ffffff' },
+        errorCorrectionLevel: 'M',
+      });
+      canvas.hidden = false;
+      if (this.phoneQrText) this.phoneQrText.hidden = true;
+    } catch {
+      if (this.phoneQrText) {
+        this.phoneQrText.hidden = false;
+        this.phoneQrText.textContent = 'COPY LINK BELOW';
+      }
+    }
+  }
+
+  setPhoneStatus(text, tone = '') {
+    if (!this.phoneStatus) return;
+    this.phoneStatus.textContent = text;
+    this.phoneStatus.dataset.tone = tone;
   }
 
   async _copyPhoneLink() {
@@ -897,10 +964,14 @@ export class UI {
     const el = document.createElement('aside');
     el.id = 'coach-panel';
     el.hidden = true;
+    el.setAttribute('aria-label', 'Coaching');
+    // The status line and the feedback line change while you play, with no
+    // interaction of your own to trigger them — exactly what a live region is
+    // for. The score and metrics repaint far too often to announce.
     el.innerHTML = `
       <div class="coach-panel__head">
         <span>COACH</span>
-        <span data-coach-status>LOCAL</span>
+        <span data-coach-status role="status" aria-live="polite">LOCAL</span>
         <span class="coach-panel__controls">
           <button data-coach-audio aria-label="Toggle coaching narration"></button>
           <button data-coach-voice aria-label="Change narrator"></button>
@@ -909,7 +980,7 @@ export class UI {
       <div class="coach-panel__scenario" data-coach-scenario>Ready</div>
       <div class="coach-panel__score" data-coach-score>--%</div>
       <div class="coach-panel__metrics" data-coach-metrics></div>
-      <div class="coach-panel__feedback" data-coach-feedback>Complete a stroke to get feedback.</div>
+      <div class="coach-panel__feedback" data-coach-feedback role="status" aria-live="polite">Complete a stroke to get feedback.</div>
       <div class="coach-panel__summary" data-coach-summary hidden></div>
     `;
     document.body.appendChild(el);
@@ -944,8 +1015,11 @@ export class UI {
       this.coachAudio.setAttribute('aria-pressed', String(enabled));
     }
     if (this.coachVoice) {
-      this.coachVoice.textContent = mode === 'auto' ? 'AUTO' : `VOICE ${mode.toUpperCase()}`;
+      const label = mode === 'auto' ? 'AUTO' : `VOICE ${mode.toUpperCase()}`;
+      this.coachVoice.textContent = label;
       this.coachVoice.title = 'Cycle narrator: auto, narrator A, narrator B';
+      // The visible label is an abbreviation, so give the button the sentence.
+      this.coachVoice.setAttribute('aria-label', `Change narrator, currently ${label}`);
     }
   }
 
@@ -1053,6 +1127,12 @@ export class UI {
     const el = document.createElement('div');
     el.id = 'settings';
     el.hidden = true;
+    // Same contract as the start menu: a full-screen overlay that traps the
+    // player's attention is a dialog, and has to say so to be usable without
+    // sight of it.
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-label', 'Settings');
     el.innerHTML = `
       <div class="settings__title">Settings</div>
       <div class="settings__list" data-rows></div>
@@ -1258,11 +1338,12 @@ export class UI {
     const el = document.createElement('aside');
     el.id = 'tournament-hud';
     el.hidden = true;
+    el.setAttribute('aria-label', 'Tournament progress');
     el.innerHTML = `
       <div class=tournament__title>TOURNAMENT</div>
-      <div data-tournament-round></div>
-      <pre data-tournament-bracket></pre>
-      <div data-tournament-score></div>
+      <div data-tournament-round role="status" aria-live="polite"></div>
+      <pre data-tournament-bracket aria-label="Bracket"></pre>
+      <div data-tournament-score role="status" aria-live="polite"></div>
     `;
     document.body.appendChild(el);
     this.tournamentHud = el;
@@ -1333,7 +1414,7 @@ export class UI {
         <span class="versus__dash">—</span>
         <span class="versus__side" data-versus-them><b>0</b> Them</span>
       </div>
-      <div class="versus__state" data-versus-state>Waiting for opponent</div>
+      <div class="versus__state" data-versus-state role="status" aria-live="polite">Waiting for opponent</div>
     `;
     document.body.appendChild(el);
     this.versusHud = el;
@@ -1346,8 +1427,11 @@ export class UI {
     this.winEl = document.createElement('div');
     this.winEl.id = 'versus-win';
     this.winEl.hidden = true;
+    this.winEl.setAttribute('role', 'dialog');
+    this.winEl.setAttribute('aria-modal', 'true');
+    this.winEl.setAttribute('aria-label', 'Match result');
     this.winEl.innerHTML = `
-      <div class="win__result" data-win-result>You win</div>
+      <div class="win__result" data-win-result role="status" aria-live="polite">You win</div>
       <div class="win__score" data-win-score></div>
       <button class="key" data-win-exit><b>Esc</b>Back to menu</button>
     `;
@@ -1425,9 +1509,12 @@ export class UI {
     const el = document.createElement('div');
     el.id = 'campreview';
     el.hidden = true;
+    // A bare <canvas> is invisible to assistive tech, and this one is the only
+    // confirmation that the camera found the paddle.
     el.innerHTML = `
-      <canvas class="campreview__view" width="192" height="144"></canvas>
-      <div class="campreview__status" data-cam-status></div>
+      <canvas class="campreview__view" width="192" height="144" role="img"
+        aria-label="Camera preview of your paddle"></canvas>
+      <div class="campreview__status" data-cam-status role="status" aria-live="polite"></div>
     `;
     document.body.appendChild(el);
     this.camPreview = el;
@@ -1459,6 +1546,9 @@ export class UI {
     const el = document.createElement('div');
     el.id = 'scores';
     el.hidden = true;
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-label', 'Scores');
     el.innerHTML = `
       <div class="settings__title" data-scores-title>Scores</div>
       <div class="scores__name">
@@ -1523,6 +1613,11 @@ export class UI {
   _buildToast() {
     this.toastEl = document.createElement('div');
     this.toastEl.id = 'toast';
+    // Toasts are the running commentary — "armed", "connection lost", "scored
+    // 840" — and they are gone in 1.3 seconds. Without a live region they are
+    // invisible to anyone not watching that corner of the screen.
+    this.toastEl.setAttribute('role', 'status');
+    this.toastEl.setAttribute('aria-live', 'polite');
     document.body.appendChild(this.toastEl);
   }
 

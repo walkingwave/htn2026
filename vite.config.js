@@ -272,4 +272,21 @@ export default defineConfig({
     host: true, // expose on LAN so the headset can reach the dev server
     port: 5173,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Vendored libraries are versioned and change far less often than the
+        // game does. Left in one bundle, editing a line of UI invalidates the
+        // whole download for every returning player — including the ~450 kB
+        // of Three the browser just had. Split out, a deploy only re-downloads
+        // the application chunk.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('/three/')) return 'three';
+          if (id.includes('@supabase')) return 'supabase';
+          return undefined;
+        },
+      },
+    },
+  },
 });

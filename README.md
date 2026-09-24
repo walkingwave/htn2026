@@ -27,7 +27,7 @@ The dev server runs on **HTTPS** (self-signed cert via `@vitejs/plugin-basic-ssl
 
 ### Phone paddle (mobile branch)
 
-On the desktop start screen choose **A phone**. PaddleLab opens a short-lived room and shows a phone link you can copy. Open that link on the phone over the same Wi-Fi, tap **Enable motion controls**, tap **Calibrate neutral pose**, hold the marker board on the phone screen in front of the desktop camera, and finally tap **Confirm phone and start**.
+On the desktop start screen choose **A phone**. PaddleLab opens a short-lived room and shows a QR code plus a phone link. Scan the code or open the link — the phone does **not** need to be on the same Wi-Fi as the laptop, so a phone on cellular works. On the phone, tap **Enable motion controls**, tap **Calibrate neutral pose**, hold the marker board on the phone screen in front of the desktop camera, and finally tap **Confirm phone and start**.
 
 The phone is a hybrid controller:
 
@@ -39,7 +39,18 @@ The phone is a hybrid controller:
 - The desktop does not enter the arena until both the CV lock and the phone's explicit confirmation are received.
 - The phone page is `/` with a `?phone=<room-code>` link; it is not a native iOS app yet, so it works in Safari without App Store packaging.
 
-Use the **Network URL** printed by Vite for the QR link. `localhost` only works on the laptop itself, not on the phone.
+### How the phone link reaches the phone
+
+The pairing room opens two transports at once and keeps whichever answers first:
+
+| Pipe | Needs | Reaches |
+| --- | --- | --- |
+| LAN relay (dev server) | `npm run dev` | A phone on the same Wi-Fi |
+| Supabase Realtime | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | Any phone, on any network including cellular |
+
+Both stay live for the whole session, so switching Wi-Fi mid-drill does not drop the controller. On a local `npm run dev` with no Supabase keys the link is built from the Vite **Network URL** — `localhost` means nothing to the phone. With Supabase configured the link uses the page's own origin, which is why the deployed site's QR code works off-LAN.
+
+The desktop camera lock and the phone's explicit confirmation are still both required before the arena opens.
 
 ### On desktop
 
@@ -136,10 +147,22 @@ The room picks one of three, in this order:
 | Transport | When it is used | Reaches |
 | --- | --- | --- |
 | LAN relay | `npm run dev` (a WebSocket relay built into the dev server) | Anyone on the same Wi-Fi |
-| Supabase Realtime | A built app with `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` set | Anywhere |
+| Supabase Realtime + WebRTC | A built app with `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` set | Anywhere |
 | BroadcastChannel | Neither of the above | Two tabs on one machine |
 
 Copy `.env.example` to `.env.local` and fill it in for the Supabase path. Nothing else needs configuring — the LAN relay is on whenever the dev server is.
+
+With Supabase configured, the two browsers use Realtime to find each other and then talk directly over WebRTC. That direct path needs a usable network route, and a symmetric NAT — campus, hotel, and most cellular networks — does not offer one. Set a TURN relay to fix it:
+
+```bash
+VITE_TURN_URL=turn:your-turn-host:3478
+VITE_TURN_USERNAME=...
+VITE_TURN_CREDENTIAL=...
+```
+
+No TURN account is required to play: when the direct link cannot be established, the match falls back to relaying game packets through Supabase Realtime. It is playable and slightly later, and the lobby says so ("Connected through the relay"). A room that dies — relay restart, dropped Wi-Fi — is reopened automatically with backoff, keeping the score and the bracket slot.
+
+If the host tabs away, the match pauses for both players until the tab comes back, because the host owns the simulation.
 
 ## Scores
 
@@ -163,7 +186,7 @@ Even lighting, matte marker sheets, a white quiet border around each marker, and
 
 An advanced camera companion is also available during local development: open `?pose=CODE` on a phone connected to the same Wi-Fi as the host. It keeps camera frames local, runs the marker tracker, and sends only predicted pose packets over the Vite WebSocket relay. The supported, guided phone flow remains **A phone** in the input picker; that flow combines phone motion with the desktop camera lock.
 
-The motion-controller companion is intentionally local-only right now: a deployed Vercel URL does not provide a long-lived WebSocket relay. For players on different networks, use the deployed room link and Supabase Realtime for the match. The experimental `?pose=CODE` camera companion is not exposed by the main menu and should not be treated as the supported phone flow.
+The experimental `?pose=CODE` camera companion sends tracked pose over the dev server's WebSocket relay only, so it is a same-Wi-Fi tool; the supported phone flow above uses the hybrid transport instead and works across networks.
 
 ## The view on a computer
 
@@ -218,8 +241,16 @@ src/
   vrMenu.js       The same menu in world space, for inside the headset
   settings.js     Player settings, persisted to localStorage
   audio.js        Procedural WebAudio sound effects
+  phone.js        The phone controller page (`?phone=CODE`)
+  phone.css       That page's stylesheet
+  supabaseClient.js Lazy Supabase Realtime client (`VITE_SUPABASE_*`)
   net.js          WebSocket, Supabase Realtime and local-tab transports
+  net/phonePair.js       Phone pairing session: room, desktop CV, last pose
+  net/versusPackets.js   Paddle packet encode/decode and reconnect backoff
+  input/desktopKeys.js   Desktop movement keys and the bat's own shortcuts
+  webcamTuningPanel.js   The live Paddle Tuning sliders (T)
   phonePose.js    Advanced local camera companion and pose sender
+  vision/trackerState.js  Tracker state names, kept out of the tracker bundle
   tournament.js   Four-player online/local bracket state and transport
   versus.js       First-to-11, win-by-two match state
   xr.js           WebXR session management

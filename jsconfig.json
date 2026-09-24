@@ -1,0 +1,25 @@
+{
+  // Editor-only type inference for the JavaScript sources.
+  //
+  // Nothing builds with this file and no CI step typechecks it — it gives
+  // editors the project's module graph, DOM globals and library types, which
+  // is most of what a gradual TypeScript migration buys on day one. Turn on
+  // checking file by file with a `// @ts-check` comment once a file is clean;
+  // the shared wire formats (multiplayerProtocol, ballistics, net) are the
+  // ones worth doing first, because that is where a renamed field silently
+  // becomes undefined on the other side of a socket.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": false,
+    "strict": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*.js", "api/**/*.js", "tests/**/*.js", "vite.config.js"],
+  "exclude": ["node_modules", "dist", "public"]
+}
