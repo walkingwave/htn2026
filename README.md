@@ -218,7 +218,23 @@ The simulation is hand-rolled rather than a rigid-body engine — the only inter
 - **Swept collision** against the paddle and net. A drive covers several centimetres per step and the blade is 15 mm thick, so a position-only test would let fast balls pass straight through the paddle.
 - **Resting contacts** are detected and settled instead of bouncing, which otherwise re-triggers every step forever.
 
-The ball machine aims by simulating the shot with those same forces and iterating, rather than using a closed-form ballistic solve — with drag and Magnus in play, an analytic aim puts topspin straight into the net.
+The ball machine aims by simulating the shot with those same forces and iterating, rather than using a closed-form ballistic solve — with drag and Magnus in play, an analytic aim puts topspin straight into the net. One flight model lives in `src/ballistics.js` and the coach, the rally opponent and the machine all share it; a second copy is how a "solved" shot ends up landing somewhere else.
+
+## Running the tests
+
+```bash
+npm test          # node --test tests/*.test.js
+npm run build     # vite build
+```
+
+The unit tests cannot reach `main.js` — it touches the DOM, three and WebGL at module scope — and the build only checks syntax, so a mis-scoped variable there would pass both and throw on the first animation frame. `scripts/smoke.html` closes that gap: with `npm run dev` running, load it in a browser and it drives the app's `window.__probe` handle, stepping the game loop by hand and reporting what happened into the page. In headless Chrome:
+
+```bash
+chrome --headless=new --disable-gpu --ignore-certificate-errors \
+  --virtual-time-budget=18000 --dump-dom http://localhost:5173/scripts/smoke.html
+```
+
+The page prints a `SMOKE_RESULT` JSON line: whether the probe handle appeared, whether the loop ran without throwing, and where the machine's balls actually bounced against where it said it was aiming. It needs a real browser — it will not tell you anything useful from a build directory.
 
 ## Project structure
 
