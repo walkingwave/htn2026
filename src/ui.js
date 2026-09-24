@@ -1396,22 +1396,6 @@ export class UI {
         return `${round}\n${nameFor(match.player1)} ${match.score1} — ${match.score2} ${nameFor(match.player2)}${winner}`;
       })
       .join('\n\n');
-    return;
-
-    const current = snapshot.matches.find((match) => match.id === snapshot.currentMatchId);
-    this.tournamentRound.textContent = snapshot.finished
-      ? (current?.winner === 'You' ? 'CHAMPION' : 'TOURNAMENT COMPLETE')
-      : `ROUND ${(current?.round ?? 0) + 1} · FIRST TO ${snapshot.target}`;
-    this.tournamentScore.textContent = current
-      ? `${current.player1} ${current.score1} — ${current.score2} ${current.player2}`
-      : '';
-    this.tournamentBracket.textContent = snapshot.matches
-      .map((match) => {
-        const round = ['SEMIFINAL', 'FINAL', 'CHAMPIONSHIP'][match.round] ?? `ROUND ${match.round + 1}`;
-        const winner = match.winner ? `  ✓ ${match.winner}` : '';
-        return `${round}\n${match.player1} ${match.score1} — ${match.score2} ${match.player2}${winner}`;
-      })
-      .join('\n\n');
   }
 
   // --- Versus HUD -------------------------------------------------------

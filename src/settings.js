@@ -127,6 +127,11 @@ function load() {
     for (const [key, value] of Object.entries(raw)) {
       if (!(key in DEFAULTS)) continue;
       if (typeof value !== typeof DEFAULTS[key]) continue;
+      // A key backed by OPTIONS is an enum, not free text. A type check alone
+      // lets a hand-edited or outdated value through — "the menu shows a mode
+      // the game has no code for", and every branch keyed on it falls through.
+      const choices = OPTIONS[key];
+      if (choices && !choices.some((choice) => choice.value === value)) continue;
       if (typeof value === 'string' && value.length > 64) continue;
       if (typeof value === 'number' && !Number.isFinite(value)) continue;
       safe[key] = value;
