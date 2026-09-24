@@ -168,7 +168,9 @@ If the host tabs away, the match pauses for both players until the tab comes bac
 
 Press <kbd>L</kbd> on the start menu. One board per game, because Arcade, Coach and Versus ask completely different things of you and a single number across them would mean nothing. Set the name you want on the board at the top of that screen.
 
-A run is recorded when you quit to the menu, and only if you actually played one — walking in and straight back out does not put a zero on the board. Scores go to Tiger Cloud through `/api/leaderboard` when `TIGER_DATABASE_URL` is configured (table `leaderboard_entries`, columns `player_name`, `score`, `best_streak`, `category`), and to this browser's `localStorage` when it isn't. If the backend is unreachable mid-submit the run is kept locally rather than lost.
+A run is recorded when you quit to the menu, and only if you actually played one — walking in and straight back out does not put a zero on the board. Scores go to Tiger Cloud through `/api/leaderboard` when `TIGER_DATABASE_URL` is configured (table `leaderboard_entries`, columns `player_name`, `score`, `best_streak`, `category`, `verified`), and to this browser's `localStorage` when it isn't. If the backend is unreachable mid-submit the run is kept locally rather than lost.
+
+The browser never posts a score — it posts the run's raw statistics, and the server works out what the run was worth using the same formula (`src/leaderboardScore.js`). Statistics outside what a real session can produce are rejected rather than trimmed, and with `SCORE_PROOF_SECRET` set a submission must also carry a ten-minute token that the deployment issued, which is what the `verified` column records. This is a cost-raised defence, not proof: without accounts and a server-side simulation, someone who reads the page source can still describe a run that never happened.
 
 There is no seeded demo data: an empty board means nobody has played yet.
 
@@ -281,7 +283,7 @@ Baseten
   → OpenAI-compatible GLM-5.3-Fast inference for FlyBrain/post-match analysis; configured with `BASETEN_API_KEY` and `BASETEN_MODEL_ID`
 ```
 
-Tiger leaderboard and telemetry setup lives in `tiger/schema.sql` and `tiger/README.md`. Set `TIGER_DATABASE_URL` only in the Vercel/server environment; never expose it with a `VITE_` prefix. The browser calls `/api/leaderboard` and `/api/telemetry`, while Supabase remains the low-latency realtime transport. Baseten post-match analysis is exposed through `/api/coach/postmatch`; the existing Gemini route remains a fallback if Baseten is unavailable.
+Tiger leaderboard and telemetry setup lives in `tiger/schema.sql` and `tiger/README.md`. Set `TIGER_DATABASE_URL` only in the Vercel/server environment; never expose it with a `VITE_` prefix. Set `SCORE_PROOF_SECRET` to at least 16 random characters so leaderboard writes are checked; without it scores are still recorded, just as unverified. Set `APP_ORIGIN` to your deployed origin to pin the browser-callable endpoints (`/api/contact/invite` spends money per request, so it refuses cross-site calls). The browser calls `/api/leaderboard` and `/api/telemetry`, while Supabase remains the low-latency realtime transport. Baseten post-match analysis is exposed through `/api/coach/postmatch`; the existing Gemini route remains a fallback if Baseten is unavailable.
 
 ## Sponsor tracks
 

@@ -44,7 +44,7 @@ import { DESKTOP_KEYS, bindDesktopKeys } from './input/desktopKeys.js';
 import { createTuningPanel } from './webcamTuningPanel.js';
 import { createPhonePair } from './net/phonePair.js';
 import { VersusMatch } from './versus.js';
-import { Tournament, RESULT_STATUS } from './tournament.js';
+import { Tournament, RESULT_STATUS, TOURNAMENT_SIZE } from './tournament.js';
 import { createServeToss } from './serve.js';
 import { summarizeMatch, analyzeShot, narrate, recordProfileEvent, recordTelemetry, getProfileSummary } from './backendApi.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
@@ -2127,6 +2127,7 @@ function tournamentLobbyView() {
     code: tournamentLobby.code,
     link: tournamentLink,
     kind: tournamentLobby.kind,
+    capacity: tournamentLobby.capacity,
     players: tournamentLobby.players,
     player: tournamentLobby.player,
     isHost: tournamentLobby.isHost,
@@ -2260,7 +2261,11 @@ function joinTournamentLobby(code) {
 
 function startTournamentBracket() {
   if (!tournamentLobby?.isHost) throw new Error('Only the tournament host can start the bracket.');
-  if (tournamentLobby.players.length !== 4) throw new Error('A bracket needs four joined players.');
+  if (tournamentLobby.players.length !== TOURNAMENT_SIZE) {
+    throw new Error(
+      `A bracket needs ${TOURNAMENT_SIZE} joined players (${tournamentLobby.players.length} so far).`
+    );
+  }
   tournament.reset(tournamentLobby.players);
   tournamentStarted = true;
   tournamentRevision += 1;

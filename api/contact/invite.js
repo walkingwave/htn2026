@@ -3,11 +3,15 @@ import {
   handleError,
   providerError,
   readJson,
+  requireSameOrigin,
   requiredString,
 } from '../_lib/http.js';
 
 export default async function handler(req, res) {
   if (!allowPost(req, res)) return;
+  // This endpoint spends money to text an arbitrary number, so it only answers
+  // to the app itself. Checked before anything is read or sent.
+  if (!requireSameOrigin(req, res)) return;
   try {
     const body = readJson(req);
     const token = process.env.LINQ_INTEGRATION_TOKEN || process.env.LINQ_API_KEY;

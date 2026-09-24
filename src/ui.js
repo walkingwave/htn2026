@@ -549,9 +549,11 @@ export class UI {
     this._tournament = { ...(this._tournament ?? {}), ...update };
     this._tournamentStarted = Boolean(update.started ?? this._tournamentStarted);
     const players = this._tournament.players ?? [];
+    // The lobby states its own capacity rather than assuming a bracket size.
+    const capacity = this._tournament.capacity ?? 4;
     const watchers = this._tournament.spectatorCount ?? 0;
     this.lobbyRoster.hidden = false;
-    this.lobbyRoster.textContent = `Players (${players.length}/4): ${players
+    this.lobbyRoster.textContent = `Players (${players.length}/${capacity}): ${players
       .map((player) => player.name)
       .join(' · ') || 'Waiting for players'}${
       watchers ? ` · ${watchers} watching` : ''
@@ -568,10 +570,10 @@ export class UI {
       );
     } else if (!this._tournamentStarted) {
       const hostText = this._tournament.isHost
-        ? 'You are the host. Start the bracket when four players have joined.'
-        : 'Waiting for the host to start once four players have joined.';
+        ? `You are the host. Start the bracket when ${capacity} players have joined.`
+        : `Waiting for the host to start once ${capacity} players have joined.`;
       this._setLobbyStatus(
-        `Room ${this._tournament.code} — ${players.length}/4 joined. ${hostText} ${this._tournamentTransportNote()}`
+        `Room ${this._tournament.code} — ${players.length}/${capacity} joined. ${hostText} ${this._tournamentTransportNote()}`
       );
     }
   }
@@ -638,7 +640,7 @@ export class UI {
 
   async _startTournament() {
     if (!this._tournament?.isHost || this._tournamentStarted) return;
-    if (this._tournament.players?.length !== 4) {
+    if (this._tournament.players?.length !== (this._tournament.capacity ?? 4)) {
       this._setLobbyStatus('Wait for all four bracket players before starting.', 'bad');
       return;
     }

@@ -22,6 +22,16 @@ alter table public.leaderboard_entries
 create index if not exists leaderboard_entries_category_score_idx
   on public.leaderboard_entries (category, score desc, created_at asc);
 
+-- Scores are derived server-side from the posted run statistics, and a
+-- submission only counts as verified when it carried a valid score proof. The
+-- column records which it was: an instance without SCORE_PROOF_SECRET keeps
+-- working, it just records that its scores were not confirmed.
+alter table public.leaderboard_entries
+  add column if not exists verified boolean not null default false;
+
+create index if not exists leaderboard_entries_player_idx
+  on public.leaderboard_entries (player_name, category);
+
 create table if not exists public.coaching_events (
   recorded_at timestamptz not null default now(),
   id bigint generated always as identity,

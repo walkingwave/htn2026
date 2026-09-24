@@ -177,6 +177,92 @@ test('Linq invite route creates a chat from a phone number', async () => {
   assert.match(body.message.text, /flyball\.app/);
 });
 
+test('the invite route only answers requests from the app itself', async () => {
+  process.env.LINQ_INTEGRATION_TOKEN = 'test-linq-token';
+  process.env.LINQ_SEND_FROM = '+14165550000';
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    return jsonResponse({ data: {} });
+  };
+
+  const crossSite = mockRequest({ phoneNumber: '+14165551234', text: 'hi' });
+  crossSite.headers = { origin: 'https://evil.example', host: 'flyball.vercel.app' };
+  const blocked = mockResponse();
+  await inviteHandler(crossSite, blocked);
+
+  assert.equal(blocked.statusCode, 403);
+  assert.equal(called, false, 'a cross-site caller must not reach Linq');
+
+  // The same request from the deployment's own origin still works.
+  const sameSite = mockRequest({ phoneNumber: '+14165551234', text: 'hi' });
+  sameSite.headers = { origin: 'https://flyball.vercel.app', host: 'flyball.vercel.app' };
+  const allowed = mockResponse();
+  await inviteHandler(sameSite, allowed);
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(called, true);
+});
+
+test('the invite route obeys a pinned APP_ORIGIN when one is set', async () => {
+  process.env.APP_ORIGIN = 'https://flyball.vercel.app';
+  process.env.LINQ_INTEGRATION_TOKEN = 'test-linq-token';
+  globalThis.fetch = async () => jsonResponse({ data: { id: 1 } });
+
+  const request = mockRequest({ phoneNumber: '+14165551234', text: 'hi' });
+  // Same host, different scheme: still a different origin.
+  request.headers = { origin: 'http://flyball.vercel.app', host: 'flyball.vercel.app' };
+  const res = mockResponse();
+  await inviteHandler(request, res);
+  assert.equal(res.statusCode, 403);
+});
+
+test('the leaderboard derives its own score and refuses a forged run', async () => {
+  const forged = mockRequest({
+    player_name: 'Cheater',
+    category: 'arcade',
+    score: 1_000_000, // ignored entirely: the route never reads this
+    summary: { hits: 10, returns: 900_000, misses: 0, bestStreak: 5_000, accuracy: 100 },
+  });
+  const res = mockResponse();
+  await leaderboardHandler(forged, res);
+
+  // Rejected on plausibility before the database is ever touched.
+  assert.equal(res.statusCode, 400);
+  assert.match(res.payload.error, /plausible range/);
+});
+
+test('the leaderboard will not take a run that never happened', async () => {
+  const res = mockResponse();
+  await leaderboardHandler(
+    mockRequest({ player_name: 'Idle', category: 'arcade', summary: {} }),
+    res
+  );
+  assert.equal(res.statusCode, 400);
+  assert.match(res.payload.error, /did not score/);
+});
+
+test('a configured score proof is required before a score is written', async () => {
+  process.env.SCORE_PROOF_SECRET = 'a'.repeat(32);
+  const body = {
+    player_name: 'Ada',
+    category: 'versus',
+    summary: { pointsWon: 11, matchWon: true },
+  };
+
+  const unsigned = mockResponse();
+  await leaderboardHandler(mockRequest({ ...body, proof: 'made.up' }), unsigned);
+  assert.equal(unsigned.statusCode, 400);
+  assert.match(unsigned.payload.error, /could not be verified/);
+
+  // With the guard off, the same request gets past validation and on to the
+  // database, which is not configured in tests — so the failure is a database
+  // one, not a verification one.
+  delete process.env.SCORE_PROOF_SECRET;
+  const unconfigured = mockResponse();
+  await leaderboardHandler(mockRequest(body), unconfigured);
+  assert.notEqual(unconfigured.payload.error, 'This score could not be verified. Reload the page and try again.');
+});
+
 test('Linq invite route sends an idempotent multipart message', async () => {
   process.env.LINQ_INTEGRATION_TOKEN = 'test-linq-token';
   let request;

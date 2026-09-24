@@ -1279,6 +1279,9 @@ export function createTournamentRoom({ code, player, transport: requested = 'aut
   return {
     code,
     player: { ...localPlayer },
+    // How many entrants this lobby will seat. Surfaced so the UI can say what
+    // it is filling towards instead of hard-coding the bracket size.
+    capacity: TOURNAMENT_SIZE,
     get kind() {
       return useSupabase ? 'supabase' : useWebSocket ? 'websocket' : 'local';
     },

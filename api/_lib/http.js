@@ -43,6 +43,42 @@ export function allowPost(req, res) {
   return rateLimit(req, res, 'post-provider');
 }
 
+// A browser always sends Origin on a cross-site POST, so a mismatch is the
+// clearest available signal that this endpoint is being driven from somewhere
+// other than the app.
+//
+// This is not authentication and does not pretend to be. A non-browser client
+// simply omits the header and falls through to the rate limit. But it costs a
+// legitimate caller nothing to comply, and it stops a page on some other
+// domain from quietly using this deployment as a free SMS gateway.
+//
+// Set APP_ORIGIN (comma-separated) to pin the deployment. Without it the
+// request's own host is accepted, which still blocks cross-site posts.
+export function sameOrigin(req) {
+  const origin = String(req.headers?.origin ?? '').trim();
+  if (!origin) return true; // not a browser cross-site request
+
+  const pinned = String(process.env.APP_ORIGIN ?? '')
+    .split(',')
+    .map((value) => value.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+  if (pinned.length > 0) return pinned.includes(origin.replace(/\/+$/, ''));
+
+  const host = req.headers?.host;
+  if (!host) return false;
+  try {
+    return new URL(origin).host === String(host);
+  } catch {
+    return false;
+  }
+}
+
+export function requireSameOrigin(req, res) {
+  if (sameOrigin(req)) return true;
+  res.status(403).json({ error: 'This endpoint only accepts requests from the PaddleLab app.' });
+  return false;
+}
+
 export function readJson(req, maxBytes = 64 * 1024) {
   if (req.body && typeof req.body === 'object') {
     if (Buffer.byteLength(JSON.stringify(req.body), 'utf8') > maxBytes) {
