@@ -962,7 +962,11 @@ export class Coach {
 // Advice comes from the pattern across recent attempts, not the last one. A
 // single sloppy swing says nothing; the same weakness three times running is
 // a habit worth naming.
-function adviseFrom(history, scenario, expected) {
+//
+// Exported for tests: this is the coaching brain, and it is a pure function of
+// the recent history, so there is no reason to reach it only through a live
+// three.js scene.
+export function adviseFrom(history, scenario, expected) {
   if (history.length < 2) return 'Trace the ribbon from the ring';
 
   const recent = history.slice(-HISTORY);
@@ -1007,7 +1011,7 @@ function adviseFrom(history, scenario, expected) {
   }
 }
 
-function gradeNote(total) {
+export function gradeNote(total) {
   if (total >= 90) return 'Textbook';
   if (total >= 75) return 'Good shape';
   if (total >= 55) return 'Getting there';

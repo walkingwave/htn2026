@@ -30,9 +30,6 @@ export const PADDLE_SOURCE = {
   PHONE: 'phone',
 };
 
-const _pos = new THREE.Vector3();
-const _quat = new THREE.Quaternion();
-
 export class PaddleSourceRouter {
   constructor({ paddle, controllerGrip, handRig, externalRoot }) {
     this.paddle = paddle;
@@ -96,12 +93,4 @@ export class PaddleSourceRouter {
   get healthy() {
     return this.activeSource === this.mode;
   }
-}
-
-// Convenience for external feeds that arrive as plain numbers.
-export function poseFromArrays(positionArray, quaternionArray) {
-  _pos.fromArray(positionArray);
-  if (quaternionArray) _quat.fromArray(quaternionArray);
-  else _quat.identity();
-  return { position: _pos, quaternion: _quat };
 }

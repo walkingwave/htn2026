@@ -330,6 +330,11 @@ export class BallMachine {
 
 const SOLVER_ITERATIONS = 8;
 const NET_MARGIN = 0.055; // metres of air over the tape
+// How much of the remaining aiming error each solver pass corrects. Full
+// correction overshoots — the Magnus curve is curved, so a sidespin ball's
+// sideways error is not proportional to the aim change — while a small
+// fraction does not converge inside the iteration budget.
+const AIM_CORRECTION = 0.6;
 
 const _simPos = new THREE.Vector3();
 const _simVel = new THREE.Vector3();
@@ -339,7 +344,10 @@ const _cross = new THREE.Vector3();
 
 // Flies a trial shot and reports where it lands and how close it came to the
 // net tape. Mirrors the integration in PhysicsWorld.
-function simulateShot(origin, velocity, spin, targetY) {
+// Exported for tests: these two are a self-contained ballistics pair. Solving a
+// launch and then flying it is the only way to check that the machine really
+// aims where it says it does.
+export function simulateShot(origin, velocity, spin, targetY) {
   _simPos.copy(origin);
   _simVel.copy(velocity);
   _simSpin.copy(spin);
@@ -362,7 +370,11 @@ function simulateShot(origin, velocity, spin, targetY) {
     _simPos.addScaledVector(_simVel, h);
     _simSpin.multiplyScalar(Math.pow(BALL.SPIN_DECAY, h));
 
-    if (prevZ < 0 && _simPos.z >= 0) {
+    // The net sits at z = 0 and a serve crosses it from whichever side it was
+    // hit from. Testing for one direction only meant the machine's own shots
+    // — which travel from +z to -z — never registered a crossing at all, so
+    // `netClearance` stayed Infinity and the solver's net guard never fired.
+    if ((prevZ < 0) !== (_simPos.z < 0)) {
       const t = Math.abs(prevZ) / Math.max(Math.abs(prevZ - _simPos.z), 1e-6);
       const y = prevY + (_simPos.y - prevY) * t;
       netClearance = y - (TABLE.HEIGHT + NET.HEIGHT);
@@ -375,13 +387,23 @@ function simulateShot(origin, velocity, spin, targetY) {
   return { landed: false, x: _simPos.x, z: _simPos.z, netClearance };
 }
 
-function solveLaunch(origin, target, speed, spin) {
+export function solveLaunch(origin, target, speed, spin) {
   const dx = target.x - origin.x;
   const dz = target.z - origin.z;
   const dy = target.y - origin.y;
   const range = Math.hypot(dx, dz);
-  const ux = dx / range;
-  const uz = dz / range;
+  // Aiming at the muzzle leaves no direction to point in, and dividing by
+  // that would hand back a vector of NaNs that poisons everything downstream.
+  // The machine never does this in play — it always targets the far half — but
+  // the solver should degrade rather than produce nonsense.
+  if (range < 1e-6) return new THREE.Vector3();
+
+  // The point the launch is actually aimed at. It starts at the target and is
+  // nudged each pass, because scaling the speed along a fixed line cannot fix
+  // a shot that curves sideways: Magnus pushes a sidespin ball across the
+  // table, and it landed most of a metre wide of where it was pointed.
+  let aimX = dx;
+  let aimZ = dz;
 
   // Opening guess: plain ballistics, but with gravity bumped by the Magnus
   // term topspin contributes, so the first trial is already in the region.
@@ -393,7 +415,13 @@ function solveLaunch(origin, target, speed, spin) {
   const velocity = new THREE.Vector3();
 
   for (let i = 0; i < SOLVER_ITERATIONS; i++) {
-    velocity.set(ux * horizontalSpeed, vy, uz * horizontalSpeed);
+    const aimRange = Math.hypot(aimX, aimZ);
+    if (aimRange < 1e-6) break;
+    velocity.set(
+      (aimX / aimRange) * horizontalSpeed,
+      vy,
+      (aimZ / aimRange) * horizontalSpeed
+    );
     const shot = simulateShot(origin, velocity, spin, target.y);
 
     if (shot.netClearance < NET_MARGIN) {
@@ -402,15 +430,28 @@ function solveLaunch(origin, target, speed, spin) {
       continue;
     }
 
-    const flown = Math.hypot(shot.x - origin.x, shot.z - origin.z);
+    const ex = shot.x - origin.x;
+    const ez = shot.z - origin.z;
+    const flown = Math.hypot(ex, ez);
     if (!shot.landed || flown < 1e-3) break;
 
-    const ratio = range / flown;
-    if (Math.abs(ratio - 1) < 0.01) break;
-    horizontalSpeed *= THREE.MathUtils.clamp(ratio, 0.75, 1.35);
+    // How far the ball landed from where it was pointed, in the table plane.
+    const missX = target.x - shot.x;
+    const missZ = target.z - shot.z;
+    if (Math.hypot(missX, missZ) < 0.01) break;
+
+    aimX += missX * AIM_CORRECTION;
+    aimZ += missZ * AIM_CORRECTION;
+    horizontalSpeed *= THREE.MathUtils.clamp(range / flown, 0.75, 1.35);
   }
 
-  return velocity.set(ux * horizontalSpeed, vy, uz * horizontalSpeed);
+  const aimRange = Math.hypot(aimX, aimZ);
+  if (aimRange < 1e-6) return new THREE.Vector3();
+  return velocity.set(
+    (aimX / aimRange) * horizontalSpeed,
+    vy,
+    (aimZ / aimRange) * horizontalSpeed
+  );
 }
 
 
