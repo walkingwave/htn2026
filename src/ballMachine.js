@@ -336,56 +336,14 @@ const NET_MARGIN = 0.055; // metres of air over the tape
 // fraction does not converge inside the iteration budget.
 const AIM_CORRECTION = 0.6;
 
-const _simPos = new THREE.Vector3();
-const _simVel = new THREE.Vector3();
-const _simSpin = new THREE.Vector3();
-const _simAcc = new THREE.Vector3();
-const _cross = new THREE.Vector3();
-
 // Flies a trial shot and reports where it lands and how close it came to the
 // net tape. Mirrors the integration in PhysicsWorld.
-// Exported for tests: these two are a self-contained ballistics pair. Solving a
-// launch and then flying it is the only way to check that the machine really
-// aims where it says it does.
-export function simulateShot(origin, velocity, spin, targetY) {
-  _simPos.copy(origin);
-  _simVel.copy(velocity);
-  _simSpin.copy(spin);
-
-  const h = 1 / 240;
-  let netClearance = Infinity;
-
-  for (let i = 0; i < 240 * 3; i++) {
-    const prevY = _simPos.y;
-    const prevZ = _simPos.z;
-
-    const speed = _simVel.length();
-    _simAcc.set(0, PHYSICS.GRAVITY, 0);
-    if (speed > 1e-4) {
-      _simAcc.addScaledVector(_simVel, -PHYSICS.DRAG * speed);
-      _cross.copy(_simSpin).cross(_simVel).multiplyScalar(PHYSICS.MAGNUS);
-      _simAcc.add(_cross);
-    }
-    _simVel.addScaledVector(_simAcc, h);
-    _simPos.addScaledVector(_simVel, h);
-    _simSpin.multiplyScalar(Math.pow(BALL.SPIN_DECAY, h));
-
-    // The net sits at z = 0 and a serve crosses it from whichever side it was
-    // hit from. Testing for one direction only meant the machine's own shots
-    // — which travel from +z to -z — never registered a crossing at all, so
-    // `netClearance` stayed Infinity and the solver's net guard never fired.
-    if ((prevZ < 0) !== (_simPos.z < 0)) {
-      const t = Math.abs(prevZ) / Math.max(Math.abs(prevZ - _simPos.z), 1e-6);
-      const y = prevY + (_simPos.y - prevY) * t;
-      netClearance = y - (TABLE.HEIGHT + NET.HEIGHT);
-    }
-
-    if (_simVel.y < 0 && _simPos.y <= targetY) {
-      return { landed: true, x: _simPos.x, z: _simPos.z, netClearance };
-    }
-  }
-  return { landed: false, x: _simPos.x, z: _simPos.z, netClearance };
-}
+// The flight model is shared with the coach and the rally opponent through
+// ballistics.js. A second copy here is how a "solved" shot ends up landing
+// somewhere else: this one detected the net crossing in one direction only,
+// which happened to be right for the machine and wrong for everything else.
+import { flyShot as simulateShot } from './ballistics.js';
+export { simulateShot };
 
 export function solveLaunch(origin, target, speed, spin) {
   const dx = target.x - origin.x;
@@ -422,7 +380,7 @@ export function solveLaunch(origin, target, speed, spin) {
       vy,
       (aimZ / aimRange) * horizontalSpeed
     );
-    const shot = simulateShot(origin, velocity, spin, target.y);
+    const shot = simulateShot(origin, velocity, target.y, spin);
 
     if (shot.netClearance < NET_MARGIN) {
       // Too flat — lift the launch until it clears the tape.

@@ -755,43 +755,10 @@ export function solveReturn(origin, target, speed, spin) {
   return velocity.set(ux * horizontal, vy, uz * horizontal);
 }
 
-const _fp = new THREE.Vector3();
-const _fv = new THREE.Vector3();
-const _fa = new THREE.Vector3();
-const _fs = new THREE.Vector3();
-const _fcross = new THREE.Vector3();
-
-export function flyShot(origin, velocity, targetY, spin) {
-  _fp.copy(origin);
-  _fv.copy(velocity);
-  _fs.set(0, 0, 0);
-  if (spin) _fs.copy(spin);
-  const h = 1 / 240;
-  let netClearance = Infinity;
-
-  for (let i = 0; i < 240 * 3; i++) {
-    const prevZ = _fp.z;
-    const prevY = _fp.y;
-    const speed = _fv.length();
-    _fa.set(0, PHYSICS.GRAVITY, 0);
-    if (speed > 1e-4) {
-      _fa.addScaledVector(_fv, -PHYSICS.DRAG * speed);
-      if (_fs.lengthSq() > 1e-6) {
-        _fcross.copy(_fs).cross(_fv).multiplyScalar(PHYSICS.MAGNUS);
-        _fa.add(_fcross);
-      }
-    }
-    _fv.addScaledVector(_fa, h);
-    _fp.addScaledVector(_fv, h);
-    _fs.multiplyScalar(Math.pow(BALL.SPIN_DECAY, h));
-
-    if (prevZ < 0 && _fp.z >= 0) {
-      const t = Math.abs(prevZ) / Math.max(Math.abs(prevZ - _fp.z), 1e-6);
-      netClearance = prevY + (_fp.y - prevY) * t - (TABLE.HEIGHT + NET.HEIGHT);
-    }
-    if (_fv.y < 0 && _fp.y <= targetY) {
-      return { landed: true, x: _fp.x, z: _fp.z, netClearance };
-    }
-  }
-  return { landed: false, x: _fp.x, z: _fp.z, netClearance };
-}
+// The flight model is shared, not copied. ballistics.js is the one copy the
+// coach and the launcher already use, and keeping a second implementation here
+// is how the two drift: this one only detected a net crossing in the direction
+// the opponent returns, and the other only in the direction the machine
+// serves. One is always wrong for somebody.
+import { flyShot } from './ballistics.js';
+export { flyShot };

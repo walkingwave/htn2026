@@ -29,7 +29,7 @@ test('a solved launch lands near its target and clears the net', () => {
   for (const { label, spin, speed } of cases) {
     const target = aimAt(0.3, FAR_Z);
     const velocity = solveLaunch(MUZZLE, target, speed, spin);
-    const shot = simulateShot(MUZZLE, velocity, spin, TABLE.HEIGHT);
+    const shot = simulateShot(MUZZLE, velocity, target.y, spin);
 
     assert.equal(shot.landed, true, `${label} reaches the table`);
     assert.ok(
@@ -49,7 +49,7 @@ test('the solver aims across the table, not just down the middle', () => {
   for (const x of [-0.7, 0, 0.7]) {
     for (const z of [NEAR_Z, FAR_Z]) {
       const target = aimAt(x, z);
-      const shot = simulateShot(MUZZLE, solveLaunch(MUZZLE, target, 4.8, spin), spin, target.y);
+      const shot = simulateShot(MUZZLE, solveLaunch(MUZZLE, target, 4.8, spin), target.y, spin);
       assert.equal(shot.landed, true, `(${x}, ${z}) reaches the table`);
       assert.ok(shot.netClearance > 0, `(${x}, ${z}) clears the net`);
       assert.ok(
@@ -68,7 +68,7 @@ test('a slower machine still gets the ball over, just with more lift', () => {
 
   assert.ok(slow.y > fast.y, 'a slower ball is launched higher to reach the same place');
   for (const [label, velocity] of [['fast', fast], ['slow', slow]]) {
-    const shot = simulateShot(MUZZLE, velocity, spin, TABLE.HEIGHT);
+    const shot = simulateShot(MUZZLE, velocity, target.y, spin);
     assert.equal(shot.landed, true, `${label} reaches the table`);
     assert.ok(shot.netClearance > 0, `${label} clears the net`);
   }
@@ -91,7 +91,7 @@ test('a target level with the muzzle does not produce NaN', () => {
 test('sidespin is corrected, not just scaled', () => {
   const target = aimAt(0.3, FAR_Z);
   const spin = new THREE.Vector3(0, 170, 0);
-  const shot = simulateShot(MUZZLE, solveLaunch(MUZZLE, target, 4.6, spin), spin, target.y);
+  const shot = simulateShot(MUZZLE, solveLaunch(MUZZLE, target, 4.6, spin), target.y, spin);
   const miss = Math.hypot(shot.x - target.x, shot.z - target.z);
   assert.ok(miss < 0.05, `sidespin lands within 5 cm (missed by ${miss.toFixed(3)} m)`);
 });
@@ -103,8 +103,8 @@ test('a shot flat enough to hit the net is reported as such', () => {
   const smash = simulateShot(
     MUZZLE,
     new THREE.Vector3(0, 0, 14),
-    new THREE.Vector3(),
-    TABLE.HEIGHT
+    TABLE.HEIGHT,
+    new THREE.Vector3()
   );
   assert.ok(
     Number.isFinite(smash.netClearance),
@@ -120,8 +120,8 @@ test('a lofted shot clears the net by a real margin', () => {
   const lofted = simulateShot(
     MUZZLE,
     new THREE.Vector3(0, 3, 9),
-    new THREE.Vector3(),
-    TABLE.HEIGHT
+    TABLE.HEIGHT,
+    new THREE.Vector3()
   );
   assert.ok(lofted.netClearance > NET.HEIGHT, 'well over the tape');
 });
