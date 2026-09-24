@@ -44,7 +44,7 @@ import { DESKTOP_KEYS, bindDesktopKeys } from './input/desktopKeys.js';
 import { createTuningPanel } from './webcamTuningPanel.js';
 import { createPhonePair } from './net/phonePair.js';
 import { VersusMatch } from './versus.js';
-import { Tournament } from './tournament.js';
+import { Tournament, RESULT_STATUS } from './tournament.js';
 import { createServeToss } from './serve.js';
 import { summarizeMatch, analyzeShot, narrate, recordProfileEvent, recordTelemetry, getProfileSummary } from './backendApi.js';
 import { PLAY_AREA, TABLE, COLORS, BALL } from './constants.js';
@@ -400,6 +400,7 @@ const ui = new UI({
   onTournamentJoin: (code) => joinTournamentLobby(code),
   onTournamentStart: () => startTournamentBracket(),
   onTournamentLeave: () => leaveTournament(),
+  onTournamentDispute: () => overrideTournamentDispute(),
   onTournamentLaunch: (assignment) => enterTournamentMatch(assignment),
   onPhonePair: () => phonePair.open(),
   // What the run was worth, read at the moment you quit. Versus is scored on
@@ -1601,6 +1602,13 @@ let tournamentRevision = 0;
 let tournamentConfig = null; // { code, transport, relay, player }
 let tournamentReconnectTimer = null;
 let tournamentReconnectAttempts = 0;
+// A finished match is only worth anything once both players have said how it
+// ended. These track the agreement in flight and the grace timer that stops a
+// dead opponent from stalling the bracket forever.
+const TOURNAMENT_RESULT_GRACE_MS = 20_000;
+let tournamentResultTimer = null;
+let tournamentReportedMatchId = null;
+let tournamentDisputedMatch = null;
 let versusBall = null; // the rally ball (host authoritative)
 let versusServeTimer = 0; // countdown before the host's next serve
 let netSendAccum = 0; // throttle for outbound state
@@ -1911,8 +1919,12 @@ function applyHostState(state) {
   }
 
   if (match.winner) {
-    if (tournamentMatch) ui.showTournamentWaiting('Match complete — updating the bracket…');
-    else ui.showVersusWin(match.winner === 'guest', match.snapshot());
+    if (tournamentMatch) {
+      reportTournamentOutcomeFromGuest();
+      ui.showTournamentWaiting('Match complete — confirming the result…');
+    } else {
+      ui.showVersusWin(match.winner === 'guest', match.snapshot());
+    }
   }
 }
 
@@ -2119,6 +2131,9 @@ function tournamentLobbyView() {
     player: tournamentLobby.player,
     isHost: tournamentLobby.isHost,
     admitted: tournamentLobby.admitted,
+    spectating: tournamentLobby.spectating,
+    spectatorCount: tournamentLobby.spectatorCount,
+    dispute: tournamentDisputedMatch !== null,
     started: tournamentStarted,
   };
 }
@@ -2149,10 +2164,11 @@ async function connectTournamentLobby(code, transport = 'auto', relay = null, { 
 
   try {
     await lobby.connect();
-    if (!lobby.admitted) throw new Error('This tournament room is already full.');
     const origin = relay ? window.location.origin : lobby.lanUrls?.[0] || window.location.origin;
     tournamentLink = tournamentLinkFor(code, origin, relay);
     updateTournamentLobbyUi();
+    // Everyone on the lobby asks for the bracket, spectators included — that
+    // request is the entire cost of watching a tournament.
     lobby.send('state-request', { playerId: lobby.player.id });
     return tournamentLobbyView();
   } catch (error) {
@@ -2221,7 +2237,6 @@ function scheduleTournamentReconnect() {
       tournamentLobby = next;
       bindTournamentLobby(next);
       await next.connect();
-      if (!next.admitted) throw new Error('Tournament room is full.');
       cancelTournamentReconnect();
       updateTournamentLobbyUi();
       ui.toast('Reconnected to the bracket');
@@ -2249,6 +2264,9 @@ function startTournamentBracket() {
   tournament.reset(tournamentLobby.players);
   tournamentStarted = true;
   tournamentRevision += 1;
+  tournamentDisputedMatch = null;
+  tournamentReportedMatchId = null;
+  cancelTournamentResultGrace();
   broadcastTournamentState();
 }
 
@@ -2308,6 +2326,9 @@ async function enterTournamentMatch(assignment) {
   // host/guest assignment in case both players arrive at the exact same time.
   const requestedRole = next.player1.id === tournamentLobby.player.id ? 'host' : 'guest';
   tournamentMatch = { ...next, playersByRole: null };
+  // Each match gets one witness report from the guest; entering the next one
+  // has to make the next one eligible.
+  tournamentReportedMatchId = null;
   const activeRoom = await enterVersus(requestedRole, next.code);
   if (!tournamentLobby || tournamentMatch?.id !== next.id || activeRoom !== room) return false;
 
@@ -2322,7 +2343,21 @@ async function enterTournamentMatch(assignment) {
 }
 
 function reconcileTournamentBracket() {
-  if (!tournamentLobby?.admitted || !tournamentStarted) return;
+  if (!tournamentLobby || !tournamentStarted) return;
+  // A spectator watches the same broadcast bracket and never enters a match.
+  // Falling through would put them in the "waiting for your bracket result"
+  // branch, which is a message about a match they are not playing in.
+  if (!tournamentLobby.admitted) {
+    // This runs after updateTournamentLobbyUi, so the message has to stand on
+    // its own — it is what replaces the lobby status once the bracket starts.
+    if (tournament.finished) {
+      const champion = tournament.playerById(tournament.championId)?.name ?? 'TBD';
+      ui.showTournamentWaiting(`Tournament complete — ${champion} wins.`);
+    } else {
+      ui.showTournamentWaiting(`Spectating room ${tournamentLobby.code}.`);
+    }
+    return;
+  }
   const localId = tournamentLobby.player.id;
   const next = tournament.matchFor(localId);
   const currentResult = tournamentMatch && tournament.getMatch(tournamentMatch.id);
@@ -2367,6 +2402,44 @@ function reconcileTournamentBracket() {
   }
 }
 
+// Turns the local match scoreboard into a bracket-shaped result report. The
+// match room's host/guest roles have nothing to do with the bracket's
+// player1/player2 order, so the mapping has to be made explicit.
+function tournamentOutcome(winnerRole) {
+  const context = tournamentMatch;
+  if (!context?.playersByRole || !winnerRole || !tournamentLobby) return null;
+  const playerOneIsHost = context.playersByRole.host === context.player1.id;
+  return {
+    matchId: context.id,
+    winnerId: context.playersByRole[winnerRole],
+    score1: playerOneIsHost ? match.scoreHost : match.scoreGuest,
+    score2: playerOneIsHost ? match.scoreGuest : match.scoreHost,
+    reporterId: tournamentLobby.player.id,
+  };
+}
+
+function cancelTournamentResultGrace() {
+  if (tournamentResultTimer) clearTimeout(tournamentResultTimer);
+  tournamentResultTimer = null;
+}
+
+// A browser that dies mid-match can never send the second report, so the
+// coordinator applies a lone claim once the grace period expires rather than
+// stalling the bracket. The result is marked unconfirmed and the coordinator is
+// told: one witness is not the same as two, and the players should know which
+// kind they are looking at.
+function armTournamentResultGrace(matchId) {
+  cancelTournamentResultGrace();
+  tournamentResultTimer = setTimeout(() => {
+    tournamentResultTimer = null;
+    if (!tournamentLobby?.isHost || !tournamentStarted) return;
+    if (!tournament.resolveUnopposedResult(matchId)) return;
+    tournamentRevision += 1;
+    broadcastTournamentState();
+    ui.showTournamentWaiting('Result applied — the other player never confirmed it.');
+  }, TOURNAMENT_RESULT_GRACE_MS);
+}
+
 function acceptTournamentResult(report) {
   if (!tournamentLobby?.isHost || !tournamentStarted || !report) return false;
   const bracketMatch = tournament.getMatch(report.matchId);
@@ -2375,10 +2448,48 @@ function acceptTournamentResult(report) {
     report.reporterId !== bracketMatch.player1?.id &&
     report.reporterId !== bracketMatch.player2?.id
   ) return false;
-  if (!tournament.recordMatchResult(report)) return false;
+
+  const outcome = tournament.recordResultReport(report);
+  if (outcome.status === RESULT_STATUS.PENDING) {
+    armTournamentResultGrace(report.matchId);
+    return true;
+  }
+  cancelTournamentResultGrace();
+  if (outcome.status === RESULT_STATUS.DISPUTED) {
+    tournamentDisputedMatch = report.matchId;
+    ui.showTournamentWaiting(
+      'The two players reported different results. Open the menu and use "Use my result" to continue.'
+    );
+    updateTournamentLobbyUi();
+    return true;
+  }
+  if (outcome.status === RESULT_STATUS.AGREED) {
+    tournamentDisputedMatch = null;
+    tournamentRevision += 1;
+    broadcastTournamentState();
+    return true;
+  }
+  return false;
+}
+
+// The tie-break has to exist: two players who will not agree would otherwise
+// deadlock the bracket. The coordinator picks with their own view of the match,
+// which is only meaningful if they were one of the two playing.
+function overrideTournamentDispute() {
+  if (!tournamentDisputedMatch || !tournamentLobby?.isHost) return;
+  const bracketMatch = tournament.getMatch(tournamentDisputedMatch);
+  const mine = [bracketMatch?.player1?.id, bracketMatch?.player2?.id]
+    .includes(tournamentLobby.player.id);
+  const applied = tournament.resolveDisputedResult(
+    tournamentDisputedMatch,
+    mine ? tournamentLobby.player.id : null
+  );
+  if (!applied) return;
+  tournamentDisputedMatch = null;
+  cancelTournamentResultGrace();
+  updateTournamentLobbyUi();
   tournamentRevision += 1;
   broadcastTournamentState();
-  return true;
 }
 
 function submitTournamentResult(report) {
@@ -2388,30 +2499,36 @@ function submitTournamentResult(report) {
 }
 
 function completeTournamentMatch(winnerRole) {
-  const context = tournamentMatch;
-  if (!context?.playersByRole || !tournamentLobby) return;
-  const winnerId = context.playersByRole[winnerRole];
-  const playerOneIsHost = context.playersByRole.host === context.player1.id;
-  const score1 = playerOneIsHost ? match.scoreHost : match.scoreGuest;
-  const score2 = playerOneIsHost ? match.scoreGuest : match.scoreHost;
-  submitTournamentResult({
-    matchId: context.id,
-    winnerId,
-    score1,
-    score2,
-    reporterId: tournamentLobby.player.id,
-  });
+  const outcome = tournamentOutcome(winnerRole);
+  if (outcome) submitTournamentResult(outcome);
+}
+
+// The guest is not blind. It applied every state broadcast the host made during
+// the match, so its own scoreboard is a record of what the host already said in
+// public. Sending it lets the coordinator catch a host that reports something
+// different at the end than it broadcast on the way there. Sent once — later
+// state packets would otherwise re-report every frame.
+function reportTournamentOutcomeFromGuest() {
+  if (!tournamentMatch || !tournamentLobby?.admitted) return;
+  if (tournamentReportedMatchId === tournamentMatch.id) return;
+  const outcome = tournamentOutcome(match.winner);
+  if (!outcome) return;
+  tournamentReportedMatchId = tournamentMatch.id;
+  submitTournamentResult(outcome);
 }
 
 function leaveTournament() {
   closeTournamentMatchRoom();
   tournamentConfig = null;
   cancelTournamentReconnect();
+  cancelTournamentResultGrace();
   tournamentLobby?.close();
   tournamentLobby = null;
   tournamentStarted = false;
   tournamentMatch = null;
   tournamentTransition = false;
+  tournamentReportedMatchId = null;
+  tournamentDisputedMatch = null;
   tournamentLink = '';
   tournamentRevision = 0;
   tournament.localPlayerId = null;

@@ -1,5 +1,6 @@
 import { loadSupabase, supabaseConfigured } from './supabaseClient.js';
 import { encodeMessage, isValidRoomCode, MULTIPLAYER_PROTOCOL } from './multiplayerProtocol.js';
+import { TOURNAMENT_SIZE } from './tournament.js';
 
 // Networking for online versus. Three interchangeable transports sit behind
 // one interface so the game code never cares how bytes move:
@@ -993,6 +994,18 @@ function sortTournamentPlayers(players) {
   );
 }
 
+// The first four peers to arrive by join time own the bracket; everyone who
+// turns up after them watches. Ordering is by join time rather than arrival at
+// this call so a browser that reconnects rejoins the side it was already on
+// instead of being demoted to a spectator by its own reconnect.
+export function selectTournamentRoster(players) {
+  const sorted = sortTournamentPlayers(players);
+  return {
+    entrants: sorted.slice(0, TOURNAMENT_SIZE),
+    spectators: sorted.slice(TOURNAMENT_SIZE),
+  };
+}
+
 class TournamentTransportBase {
   constructor(code, player) {
     this.code = code;
@@ -1247,11 +1260,19 @@ export function createTournamentRoom({ code, player, transport: requested = 'aut
       : new BroadcastTournamentTransport(code, localPlayer);
 
   const rosterSubscribers = new Set();
-  const admitted = (players) => players.slice(0, 4);
+  const rosterFor = (players) => selectTournamentRoster(players);
   const notify = (players) => {
-    const accepted = admitted(players);
-    const member = accepted.some((entrant) => entrant.id === localPlayer.id);
-    rosterSubscribers.forEach((cb) => cb(accepted, { total: players.length, admitted: member }));
+    const { entrants, spectators } = rosterFor(players);
+    const member = entrants.some((entrant) => entrant.id === localPlayer.id);
+    const watching = spectators.some((entrant) => entrant.id === localPlayer.id);
+    rosterSubscribers.forEach((cb) =>
+      cb(entrants, {
+        total: players.length,
+        admitted: member,
+        spectating: watching,
+        spectatorCount: spectators.length,
+      })
+    );
   };
   transport.onRoster(notify);
 
@@ -1262,13 +1283,24 @@ export function createTournamentRoom({ code, player, transport: requested = 'aut
       return useSupabase ? 'supabase' : useWebSocket ? 'websocket' : 'local';
     },
     get players() {
-      return admitted(transport.players);
+      return rosterFor(transport.players).entrants;
+    },
+    get spectators() {
+      return rosterFor(transport.players).spectators;
+    },
+    get spectatorCount() {
+      return this.spectators.length;
     },
     get totalPlayers() {
       return transport.players.length;
     },
     get admitted() {
-      return admitted(transport.players).some((entrant) => entrant.id === localPlayer.id);
+      return this.players.some((entrant) => entrant.id === localPlayer.id);
+    },
+    // A late joiner is not an error and is not a fifth entrant: they watch the
+    // same broadcast bracket everyone else is on and never enter a match.
+    get spectating() {
+      return !this.admitted && this.spectators.some((entrant) => entrant.id === localPlayer.id);
     },
     get isHost() {
       return this.admitted && this.players[0]?.id === localPlayer.id;

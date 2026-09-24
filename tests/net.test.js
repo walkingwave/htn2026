@@ -10,6 +10,7 @@ import {
   makeTournamentPlayerId,
   relayConfigured,
   roomFromUrl,
+  selectTournamentRoster,
   roomLinkFor,
   tournamentFromUrl,
   tournamentLinkFor,
@@ -129,4 +130,45 @@ test('tournament entrants are identifiable and bounded', () => {
   assert.equal(typeof id, 'string');
   assert.ok(id.length > 0);
   assert.notEqual(id, makeTournamentPlayerId());
+});
+
+test('the first four to join own the bracket and everyone later watches', () => {
+  const lobby = [
+    { id: 'ada', name: 'Ada', joinedAt: 300 },
+    { id: 'blake', name: 'Blake', joinedAt: 100 },
+    { id: 'casey', name: 'Casey', joinedAt: 200 },
+    { id: 'dev', name: 'Dev', joinedAt: 400 },
+    { id: 'eve', name: 'Eve', joinedAt: 500 },
+    { id: 'frank', name: 'Frank', joinedAt: 600 },
+  ];
+
+  const { entrants, spectators } = selectTournamentRoster(lobby);
+  // Seeding is by join time, not by the order the list happened to arrive in,
+  // so a reconnecting player lands back on the side they were already on.
+  assert.deepEqual(entrants.map((player) => player.id), ['blake', 'casey', 'ada', 'dev']);
+  assert.deepEqual(spectators.map((player) => player.id), ['eve', 'frank']);
+});
+
+test('a roster of exactly four leaves nobody watching', () => {
+  const { entrants, spectators } = selectTournamentRoster([
+    { id: 'a', joinedAt: 1 },
+    { id: 'b', joinedAt: 2 },
+    { id: 'c', joinedAt: 3 },
+    { id: 'd', joinedAt: 4 },
+  ]);
+  assert.equal(entrants.length, 4);
+  assert.deepEqual(spectators, []);
+});
+
+test('malformed and duplicate lobby entries are dropped before seeding', () => {
+  const { entrants, spectators } = selectTournamentRoster([
+    { id: 'a', joinedAt: 1 },
+    { id: 'a', joinedAt: 2 },
+    { name: 'no id', joinedAt: 3 },
+    { id: 'b', joinedAt: 4 },
+    { id: 'c', joinedAt: 5 },
+    { id: 'd', joinedAt: 6 },
+  ]);
+  assert.deepEqual(entrants.map((player) => player.id), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(spectators, []);
 });

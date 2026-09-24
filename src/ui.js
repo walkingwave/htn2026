@@ -42,6 +42,7 @@ export class UI {
     onTournamentJoin,
     onTournamentStart,
     onTournamentLeave,
+    onTournamentDispute,
     onTournamentLaunch,
     onPhonePair,
     onRunSummary,
@@ -66,6 +67,7 @@ export class UI {
       onTournamentJoin,
       onTournamentStart,
       onTournamentLeave,
+    onTournamentDispute,
       onTournamentLaunch,
       onPhonePair,
       onRunSummary,
@@ -186,6 +188,7 @@ export class UI {
             <button class="key" data-lobby-start hidden><b>▸</b>Start bracket</button>
           </div>
           <div class="lobby__status" data-lobby-status role="status" aria-live="polite"></div>
+          <button class="key" data-lobby-dispute hidden><b>▸</b>Use my result</button>
           <div class="lobby__roster" data-lobby-roster role="status" aria-live="polite" hidden></div>
           <div class="lobby__share" data-lobby-share hidden>
             <span class="lobby__link" data-lobby-link></span>
@@ -243,6 +246,8 @@ export class UI {
     this.lobby = el.querySelector('[data-lobby]');
     this.lobbyCode = el.querySelector('[data-lobby-code]');
     this.lobbyStatus = el.querySelector('[data-lobby-status]');
+    this.lobbyDispute = el.querySelector('[data-lobby-dispute]');
+    this.lobbyDispute.onclick = () => this.onTournamentDispute?.();
     this.lobbyRoster = el.querySelector('[data-lobby-roster]');
     this.lobbyShare = el.querySelector('[data-lobby-share]');
     this.lobbyLink = el.querySelector('[data-lobby-link]');
@@ -544,15 +549,23 @@ export class UI {
     this._tournament = { ...(this._tournament ?? {}), ...update };
     this._tournamentStarted = Boolean(update.started ?? this._tournamentStarted);
     const players = this._tournament.players ?? [];
+    const watchers = this._tournament.spectatorCount ?? 0;
     this.lobbyRoster.hidden = false;
     this.lobbyRoster.textContent = `Players (${players.length}/4): ${players
       .map((player) => player.name)
-      .join(' · ') || 'Waiting for players'}`;
+      .join(' · ') || 'Waiting for players'}${
+      watchers ? ` · ${watchers} watching` : ''
+    }`;
     this._syncTournamentStartButton();
+    this.lobbyDispute.hidden = !this._tournament.dispute;
 
     if (this.settings.get('game') !== 'tournament') return;
-    if (this._tournament.admitted === false) {
-      this._setLobbyStatus('This tournament room is full. Ask the host for a new room code.', 'bad');
+    if (this._tournament.spectating) {
+      // A late joiner watches rather than being turned away: the bracket is on
+      // the same broadcast channel the players are already on.
+      this._setLobbyStatus(
+        `Room ${this._tournament.code} — the bracket is full, so you are watching. Scores update here as matches finish.`
+      );
     } else if (!this._tournamentStarted) {
       const hostText = this._tournament.isHost
         ? 'You are the host. Start the bracket when four players have joined.'
